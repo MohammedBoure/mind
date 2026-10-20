@@ -10,7 +10,7 @@ from textual.widgets import Static
 
 
 class HeaderBar(Widget):
-    """Zellij-inspired top bar displaying branding, session, mode, and MCP health."""
+    """Clean top bar displaying branding, session name, agent telemetry, and MCP status."""
 
     DEFAULT_CSS = """
     HeaderBar {
@@ -42,43 +42,28 @@ class HeaderBar(Widget):
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-bar"):
             # Brand logo pill
-            yield Static("🧠 mind", id="brand-pill")
+            yield Static("🧠 [bold #7aa2f7]mind[/]", id="brand-pill")
 
             # Active session pill
-            yield Static(f"📂 {self.session_name}", id="session-pill")
-
-            # Interactive mode badge (Vim modal state)
-            yield Static(self._build_mode_badge(), id="mode-badge")
+            yield Static(f"📂 [dim]{self.session_name}[/]", id="session-pill")
 
             # Center spacer
             yield Static("", id="header-spacer")
 
+            # Active worker telemetry
+            yield Static(f"⚡ [bold #e0af68]{self.worker_count}[/] [dim]active workers[/]", id="worker-count-pill")
+
             # MCP Health status indicator
-            yield Static(f"● MCP {self.mcp_port}", id="mcp-indicator")
-
-            # Active worker count
-            yield Static(f"⚡ {self.worker_count} Workers", id="worker-count-pill")
-
-    def _build_mode_badge(self) -> str:
-        """Construct the mode indicator badge."""
-        if self.mode in ("PTY_INTERACT", "PTY"):
-            return "[bold #1a1b26 on #7aa2f7] ⌨ PTY INTERACT (Press Esc for Normal) [/]"
-        return "[bold #1a1b26 on #e0af68] 🔍 NORMAL MODE (Press 'i' to type in agy) [/]"
+            yield Static(f"⚡ [bold #9ece6a]MCP[/] [dim]:{self.mcp_port}[/]", id="mcp-indicator")
 
     def watch_session_name(self, value: str) -> None:
         try:
-            self.query_one("#session-pill", Static).update(f"📂 {value}")
-        except Exception:
-            pass
-
-    def watch_mode(self, value: str) -> None:
-        try:
-            self.query_one("#mode-badge", Static).update(self._build_mode_badge())
+            self.query_one("#session-pill", Static).update(f"📂 [dim]{value}[/]")
         except Exception:
             pass
 
     def watch_worker_count(self, value: int) -> None:
         try:
-            self.query_one("#worker-count-pill", Static).update(f"⚡ {value} Workers")
+            self.query_one("#worker-count-pill", Static).update(f"⚡ [bold #e0af68]{value}[/] [dim]active workers[/]")
         except Exception:
             pass

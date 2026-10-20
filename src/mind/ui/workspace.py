@@ -438,13 +438,11 @@ class WorkspaceScreen(Screen):
             except Exception:
                 pass
 
-            # Update WorkerTerminalTab header
+            # Update WorkerTerminalTab header dynamically
             tab_widget = self._worker_tabs.get(str(worker_id))
             if tab_widget:
                 try:
-                    tab_widget.query_one(".terminal-header", Static).update(
-                        f"[bold #7aa2f7]● {new_name}[/] [dim]({new_config.get('cli_mode', 'auto')})[/]"
-                    )
+                    tab_widget.update_header_info()
                 except Exception:
                     pass
 

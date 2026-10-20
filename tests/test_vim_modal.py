@@ -109,21 +109,21 @@ def test_terminal_screen_widget_ctrl_e_opens_config() -> None:
 
 
 def test_header_and_bottom_bar_mode_indicators() -> None:
-    """HeaderBar and BottomBar status indicators must match the required wording and state."""
+    """HeaderBar is clean without redundant mode badges; BottomBar is single source of truth for mode indicator."""
     header = HeaderBar(session_name="test-session", worker_count=2, mode="NORMAL")
     bottom = BottomBar(worker_count=2, mode="NORMAL")
 
-    # In NORMAL mode
-    assert "NORMAL MODE" in header._build_mode_badge()
-    assert "Press 'i' to type in agy" in header._build_mode_badge()
+    # HeaderBar maintains clean telemetry without redundant mode badges
+    assert header.session_name == "test-session"
+    assert header.worker_count == 2
+    assert header.mcp_port == 8765
+
+    # BottomBar is the single source of truth for mode indicator
     assert "NORMAL MODE" in bottom._build_mode_indicator()
     assert "Press 'i' to type in agy" in bottom._build_mode_indicator()
 
     # In PTY_INTERACT mode
-    header.mode = "PTY_INTERACT"
     bottom.mode = "PTY_INTERACT"
-    assert "PTY INTERACT" in header._build_mode_badge()
-    assert "Press Esc for Normal" in header._build_mode_badge()
     assert "PTY INTERACT" in bottom._build_mode_indicator()
     assert "Press Esc for Normal" in bottom._build_mode_indicator()
 
@@ -363,6 +363,74 @@ def test_agent_config_modal_save_and_restart() -> None:
 
     # Virtual buffer must be reset/cleared
     assert not any(line.strip() for line in restarted.buffer.get_visible_lines())
+
+
+def test_dynamic_agent_discovery() -> None:
+    """discover_system_agents discovers host-installed agents (agy1, agy2, etc.)."""
+    from mind.core.agent_discovery import discover_system_agents, get_agent_preset_config
+
+    agents = discover_system_agents()
+    assert isinstance(agents, list)
+    assert len(agents) >= 2
+    assert "agy1" in agents
+    assert "agy2" in agents
+
+    preset = get_agent_preset_config("agy1")
+    assert preset["alias"] == "agy1"
+    assert "--agent agy1" in preset["extra_flags"]
+
+
+def test_worker_tab_title_formatting_and_unicode() -> None:
+    """WorkerTabBar formats clean tab labels without text clipping, supporting full Unicode."""
+    from mind.ui.terminal_tab import WorkerTabBar
+
+    # Default name
+    t1 = WorkerTabBar._format_tab_title("1", "Worker-1", is_active=True)
+    assert "[1] agy1 (Worker-1)" in t1
+
+    # Custom alias
+    t2 = WorkerTabBar._format_tab_title("2", "agy2", is_active=False)
+    assert "[2] agy2 (Worker-2)" in t2
+
+    # Unicode / non-ASCII name
+    t3 = WorkerTabBar._format_tab_title("3", "مطور", is_active=False)
+    assert "[3] مطور · Worker-3" in t3
+
+
+def test_worker_terminal_header_instance_and_warning() -> None:
+    """WorkerTerminalTab header explicitly renders active instance identifier and CLI warning badges."""
+    from mind.core.terminal_manager import WorkerSession
+    from mind.ui.terminal_tab import WorkerTerminalTab
+
+    session = WorkerSession(
+        worker_id="1",
+        name="agy1",
+        assigned_agent="agy1",
+        model="gemini-3.8-flash-high",
+        task="System tasks",
+    )
+    tab = WorkerTerminalTab(worker_session=session)
+
+    header_text = tab._build_header_text()
+    assert "● Worker-1" in header_text
+    assert "Instance:" in header_text
+    assert "agy1" in header_text
+
+    # Feed a runtime warning into the worker process output
+    session._on_process_output("Warning: --effort fallback to high\r\n")
+    assert len(session.runtime_warnings) > 0
+    header_with_warning = tab._build_header_text()
+    assert "Warning: --effort fallback" in header_with_warning
+
+
+def test_agent_config_modal_discovered_agents() -> None:
+    """AgentConfigModal populates discovered system agents and pre-fills --agent flag."""
+    from mind.ui.agent_config_modal import AgentConfigModal
+
+    modal = AgentConfigModal(default_target="1")
+    assert len(modal._discovered_agents) >= 2
+    assert "agy1" in modal._discovered_agents
+
 
 
 

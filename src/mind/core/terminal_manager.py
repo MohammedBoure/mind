@@ -39,6 +39,7 @@ class AgentProfile:
     cli_mode: str = "auto"
     reasoning_effort: str = "high"
     extra_flags: str = ""
+    assigned_agent: str = ""
     principles: list[str] = field(
         default_factory=lambda: [
             "Execute tasks assigned by the primary coordinator.",
@@ -66,6 +67,7 @@ class WorkerSession:
         reasoning_effort: str = "high",
         extra_flags: str = "",
         instructions: str = "",
+        assigned_agent: str = "",
         columns: int = 80,
         lines: int = 24,
     ) -> None:
@@ -78,8 +80,10 @@ class WorkerSession:
         self.cli_mode = cli_mode
         self.reasoning_effort = reasoning_effort
         self.extra_flags = extra_flags
+        self.assigned_agent = assigned_agent or (name if name and name.startswith("agy") else "")
         self.instructions = instructions or "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
         self.created_at = datetime.now()
+        self.runtime_warnings: list[str] = []
 
         # Parse and store custom CLI startup arguments
         self.custom_cli_args: list[str] = []
@@ -106,6 +110,7 @@ class WorkerSession:
             cli_mode=self.cli_mode,
             reasoning_effort=self.reasoning_effort,
             extra_flags=self.extra_flags,
+            assigned_agent=self.assigned_agent,
             instructions=self.instructions,
         )
 
@@ -134,6 +139,20 @@ class WorkerSession:
     def _on_process_output(self, chunk: str) -> None:
         """Receive output chunk from PTY process and update buffer/listeners."""
         self.buffer.feed(chunk)
+
+        # Detect runtime warnings from stderr/stdout (e.g. --effort fallback, unknown agent)
+        chunk_lower = chunk.lower()
+        if "warning" in chunk_lower or "unknown agent" in chunk_lower or "fallback" in chunk_lower:
+            import re
+            for line in chunk.splitlines():
+                l_lower = line.lower()
+                if "warning" in l_lower or "fallback" in l_lower or "unknown agent" in l_lower:
+                    clean_line = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line).strip()
+                    if clean_line and clean_line not in self.runtime_warnings:
+                        self.runtime_warnings.append(clean_line[:80])
+                        if len(self.runtime_warnings) > 5:
+                            self.runtime_warnings.pop(0)
+
         with self._lock:
             listeners = list(self._output_listeners)
         for listener in listeners:
@@ -201,6 +220,9 @@ class WorkerSession:
             if "instructions" in new_config:
                 self.instructions = new_config["instructions"]
                 self.profile.instructions = new_config["instructions"]
+            if "assigned_agent" in new_config:
+                self.assigned_agent = new_config["assigned_agent"]
+                self.profile.assigned_agent = new_config["assigned_agent"]
             if "task" in new_config and new_config["task"]:
                 self.task = new_config["task"]
 
@@ -210,6 +232,7 @@ class WorkerSession:
         # 2. Reset virtual terminal screen buffer
         self.buffer.clear()
         self.unread_notifications = 0
+        self.runtime_warnings.clear()
 
         # 3. Respawn with updated command or flags
         target_command = command if command is not None else self.custom_command
@@ -222,17 +245,31 @@ class WorkerSession:
                 return command.split()
             return list(command)
 
-        # 1. Search for `agy` or `agy.exe` on PATH
+        # 1. Check if assigned_agent has an explicit executable launcher (e.g. agy1.cmd)
+        agent_launcher = None
+        if self.assigned_agent:
+            agent_launcher = shutil.which(self.assigned_agent) or shutil.which(f"{self.assigned_agent}.cmd")
+            if not agent_launcher and sys.platform == "win32":
+                local_cmd = os.path.expandvars(rf"%LOCALAPPDATA%\agy\bin\{self.assigned_agent}.cmd")
+                if os.path.exists(local_cmd):
+                    agent_launcher = local_cmd
+
+        # 2. Search for standard `agy` or `agy.exe` on PATH
         agy_path = shutil.which("agy") or shutil.which("agy.exe")
 
-        # 2. Check standard Windows LocalAppData directory
+        # 3. Check standard Windows LocalAppData directory
         if not agy_path and sys.platform == "win32":
             local_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
             if os.path.exists(local_agy):
                 agy_path = local_agy
 
-        if agy_path:
-            cmd = [agy_path]
+        target_bin = agent_launcher or agy_path
+
+        if target_bin:
+            cmd = [target_bin]
+            # If invoking standard agy and an assigned agent was selected, pass --agent
+            if not agent_launcher and self.assigned_agent:
+                cmd.extend(["--agent", self.assigned_agent])
             if self.cli_mode:
                 cmd.extend(["--mode", self.cli_mode])
             if self.model and self.model != "default":
@@ -324,6 +361,8 @@ class WorkerSession:
             "extra_flags": self.extra_flags,
             "custom_cli_args": self.custom_cli_args,
             "behavioral_flags": self.custom_cli_args,
+            "assigned_agent": self.assigned_agent,
+            "runtime_warnings": list(self.runtime_warnings),
             "task": self.task,
             "state": self.state.value,
             "pid": self.pid,
@@ -403,6 +442,7 @@ class TerminalManager:
         reasoning_effort: str = "high",
         extra_flags: str = "",
         instructions: str = "",
+        assigned_agent: str = "",
         command: str | list[str] | None = None,
         cwd: str | None = None,
         columns: int = 80,
@@ -425,6 +465,7 @@ class TerminalManager:
                 reasoning_effort=reasoning_effort,
                 extra_flags=extra_flags,
                 instructions=instructions,
+                assigned_agent=assigned_agent,
                 columns=columns,
                 lines=lines,
             )
@@ -500,6 +541,11 @@ class TerminalManager:
             session = self._workers.pop(str(worker_id), None)
         if session:
             session.terminate()
+
+    def discover_system_agents(self) -> list[str]:
+        """Discover all available agy agents registered on the host system."""
+        from mind.core.agent_discovery import discover_system_agents
+        return discover_system_agents()
 
     def stop_all(self) -> None:
         """Terminate all worker processes."""

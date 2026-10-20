@@ -296,7 +296,7 @@ class WorkerTerminalTab(Widget):
         self.set_interval(1.0, self._refresh_header)
 
     def _build_header_text(self) -> str:
-        """Construct the styled header bar text."""
+        """Construct the styled header bar text with instance identity and runtime warnings."""
         state = self.worker_session.state
         if state == WorkerProcessState.RUNNING:
             state_str = "[bold #9ece6a]● RUNNING[/]"
@@ -308,16 +308,36 @@ class WorkerTerminalTab(Widget):
             state_str = "[bold #f7768e]❌ TERMINATED[/]"
 
         pid_info = f"PID: {self.worker_session.pid}" if self.worker_session.pid else "PID: -"
-        badge = ""
+        instance_name = self.worker_session.assigned_agent or self.worker_session.name or f"agy{self.worker_session.worker_id}"
+
+        # Directive badge
+        directive_badge = ""
         if self.worker_session.unread_notifications > 0:
-            badge = f"  [bold #1a1b26 on #e0af68] 🔔 {self.worker_session.unread_notifications} NEW DIRECTIVE [/]"
+            directive_badge = f" [bold #1a1b26 on #e0af68] 🔔 {self.worker_session.unread_notifications} DIRECTIVE [/]"
+
+        # Runtime Warning badge (e.g. --effort fallback, model unsupported, etc.)
+        warning_badge = ""
+        if self.worker_session.runtime_warnings:
+            latest_warn = self.worker_session.runtime_warnings[-1]
+            if "--effort" in latest_warn:
+                warn_label = "--effort fallback"
+            elif "unknown agent" in latest_warn:
+                warn_label = "unknown agent"
+            else:
+                warn_label = latest_warn[:24]
+            warning_badge = f" [bold #1a1b26 on #f7768e] ⚠ Warning: {warn_label} [/]"
 
         return (
-            f" [bold #7aa2f7]{self.worker_session.name}[/] "
+            f" [bold #7aa2f7]● Worker-{self.worker_session.worker_id}[/] "
+            f"[dim]Instance:[/] [bold #bb9af7]{instance_name}[/] "
             f"[dim]({self.worker_session.model} · {pid_info})[/] "
-            f"{state_str}{badge} "
+            f"{state_str}{directive_badge}{warning_badge} "
             f"[italic #7982a9]— {self.worker_session.task}[/]"
         )
+
+    def update_header_info(self) -> None:
+        """Force immediate re-render of tab header and notifications."""
+        self._refresh_header()
 
     def _refresh_header(self) -> None:
         """Periodically update header text."""
@@ -411,11 +431,26 @@ class WorkerTabBar(Widget):
         self.active_worker_id = str(active_worker_id)
         self.tab_items = list(workers)
 
+    @staticmethod
+    def _format_tab_title(worker_id: str, name: str, is_active: bool) -> str:
+        """Format clean, unclipped tab title supporting Unicode and non-ASCII names."""
+        clean_name = str(name).strip()
+        if clean_name in (f"Worker-{worker_id}", f"Worker {worker_id}", ""):
+            title = f"[{worker_id}] agy{worker_id} (Worker-{worker_id})"
+        elif clean_name.startswith("agy"):
+            title = f"[{worker_id}] {clean_name} (Worker-{worker_id})"
+        else:
+            title = f"[{worker_id}] {clean_name} · Worker-{worker_id}"
+
+        if is_active:
+            return f"[bold #1a1b26 on #7aa2f7] {title} [/]"
+        return f"[bold #7aa2f7 on #1f2335] {title} [/]"
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="worker-tab-strip"):
             for worker_id, name in self.tab_items:
                 is_active = (str(worker_id) == str(self.active_worker_id))
-                label = f"[bold #1a1b26 on #7aa2f7] {worker_id}: {name} (agy) [/]" if is_active else f"[bold #7aa2f7 on #1f2335] {worker_id}: {name} (agy) [/]"
+                label = self._format_tab_title(str(worker_id), name, is_active)
                 yield WorkerTabPill(
                     worker_id=str(worker_id),
                     label=label,
@@ -435,10 +470,9 @@ class WorkerTabBar(Widget):
                 if is_active:
                     pill.remove_class("-active")
                     pill.add_class("-active")
-                    pill.update(f"[bold #1a1b26 on #7aa2f7] {w_id}: {name} (agy) [/]")
                 else:
                     pill.remove_class("-active")
-                    pill.update(f"[bold #7aa2f7 on #1f2335] {w_id}: {name} (agy) [/]")
+                pill.update(self._format_tab_title(str(w_id), name, is_active))
             except Exception:
                 pass
 
@@ -451,7 +485,7 @@ class WorkerTabBar(Widget):
             strip.remove_children()
             for worker_id, name in self.tab_items:
                 is_active = (str(worker_id) == str(self.active_worker_id))
-                label = f"[bold #1a1b26 on #7aa2f7] {worker_id}: {name} (agy) [/]" if is_active else f"[bold #7aa2f7 on #1f2335] {worker_id}: {name} (agy) [/]"
+                label = self._format_tab_title(str(worker_id), name, is_active)
                 strip.mount(
                     WorkerTabPill(
                         worker_id=str(worker_id),

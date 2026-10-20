@@ -1,11 +1,13 @@
-"""Interactive in-app Agent Configuration Modal.
+"""Interactive in-app Agent Configuration & Dynamic System Agent Discovery Modal.
 
 Allows inspecting, configuring, and tuning CLI flags, models, reasoning effort,
-and directives for individual worker agents directly from the TUI without editing files.
+and directives for individual worker agents directly from the TUI, with dynamic
+system agent discovery (agy1, agy2, agy3, etc.) on the host machine.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 from textual import events
 from textual.app import ComposeResult
@@ -13,6 +15,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
+from mind.core.agent_discovery import discover_system_agents, get_agent_preset_config
 from mind.core.terminal_manager import TerminalManager
 
 
@@ -72,37 +75,48 @@ class AgentConfigModal(ModalScreen[None]):
         self._default_target = default_target
         self._on_save_callback = on_save_callback
         self._terminal_manager = TerminalManager.get_instance()
+        self._discovered_agents = discover_system_agents()
 
     def compose(self) -> ComposeResult:
         workers = self._terminal_manager.list_workers()
         target_options: list[tuple[str, str]] = []
         for w in workers:
-            alias_display = w.name if w.name and w.name != f"Worker-{w.worker_id}" else f"agy{w.worker_id}"
-            target_options.append((f"⚡ Worker-{w.worker_id} ({alias_display})", str(w.worker_id)))
+            agent_tag = w.assigned_agent or w.name
+            target_options.append((f"⚡ Tab {w.worker_id}: {agent_tag} (Worker-{w.worker_id})", str(w.worker_id)))
 
         if not target_options:
             target_options = [
-                ("⚡ Worker-1 (agy1)", "1"),
-                ("⚡ Worker-2 (agy2)", "2"),
+                ("⚡ Tab 1: agy1 (Worker-1)", "1"),
+                ("⚡ Tab 2: agy2 (Worker-2)", "2"),
             ]
 
         default_val = self._default_target or target_options[0][1]
-        # Ensure default_val exists in target_options
         valid_keys = {val for _, val in target_options}
         if default_val not in valid_keys:
             default_val = target_options[0][1]
 
+        # Discovered system agent options
+        system_agent_options: list[tuple[str, str]] = []
+        for agent_name in self._discovered_agents:
+            system_agent_options.append((f"🤖 {agent_name} (Installed System Agent)", agent_name))
+
+        if not system_agent_options:
+            system_agent_options = [
+                ("🤖 agy1 (Installed System Agent)", "agy1"),
+                ("🤖 agy2 (Installed System Agent)", "agy2"),
+            ]
+
         with Vertical(id="agent-config-dialog"):
-            yield Static("⚙ [bold #bb9af7]Agent Configuration & CLI Tuning[/]", id="config-title")
+            yield Static("⚙ [bold #bb9af7]Agent Configuration & Dynamic Discovery[/]", id="config-title")
             yield Static(
-                "[dim]Tune CLI flags, model, reasoning effort, and directives per worker agent.[/]",
+                f"[dim]Discovered {len(self._discovered_agents)} system agents on host. Tune CLI flags & directives.[/]",
                 id="config-subtitle",
             )
 
             with VerticalScroll(id="config-scroll-body"):
-                # 1. Target Worker
+                # 1. Target Worker Tab
                 with Vertical(classes="modal-field"):
-                    yield Label("Target Worker Agent:", classes="modal-label")
+                    yield Label("Target Worker Tab:", classes="modal-label")
                     yield Select(
                         options=target_options,
                         value=default_val,
@@ -110,15 +124,25 @@ class AgentConfigModal(ModalScreen[None]):
                         allow_blank=False,
                     )
 
-                # 2. Agent Name / Alias
+                # 2. Target Discovered System Agent
                 with Vertical(classes="modal-field"):
-                    yield Label("Agent Alias / Name:", classes="modal-label")
+                    yield Label("System Agent / Profile (--agent):", classes="modal-label")
+                    yield Select(
+                        options=system_agent_options,
+                        value=system_agent_options[0][1],
+                        id="system-agent-select",
+                        allow_blank=False,
+                    )
+
+                # 3. Agent Name / Alias
+                with Vertical(classes="modal-field"):
+                    yield Label("Agent Alias / Display Name:", classes="modal-label")
                     yield Input(
-                        placeholder="e.g. agy 1 or Worker-1",
+                        placeholder="e.g. agy1 or Worker-1",
                         id="worker-alias-input",
                     )
 
-                # 3. Execution Mode
+                # 4. Execution Mode
                 with Vertical(classes="modal-field"):
                     yield Label("Agent Execution Mode (--mode):", classes="modal-label")
                     yield Select(
@@ -128,7 +152,7 @@ class AgentConfigModal(ModalScreen[None]):
                         allow_blank=False,
                     )
 
-                # 4. Model Preset & Custom Model Name
+                # 5. Model Preset & Custom Model Name
                 with Vertical(classes="modal-field"):
                     yield Label("Model Selection (--model):", classes="modal-label")
                     yield Select(
@@ -142,7 +166,7 @@ class AgentConfigModal(ModalScreen[None]):
                         id="model-name-input",
                     )
 
-                # 5. Reasoning Effort
+                # 6. Reasoning Effort
                 with Vertical(classes="modal-field"):
                     yield Label("Reasoning Effort (--effort):", classes="modal-label")
                     yield Select(
@@ -152,7 +176,7 @@ class AgentConfigModal(ModalScreen[None]):
                         allow_blank=False,
                     )
 
-                # 6. Extra Flags
+                # 7. Extra Flags
                 with Vertical(classes="modal-field"):
                     yield Label("Extra CLI Flags (e.g. --dangerously-skip-permissions --sandbox):", classes="modal-label")
                     yield Input(
@@ -160,7 +184,7 @@ class AgentConfigModal(ModalScreen[None]):
                         id="extra-flags-input",
                     )
 
-                # 7. Role & Behavioral Directive
+                # 8. Role & Behavioral Directive
                 with Vertical(classes="modal-field"):
                     yield Label("Role & Behavioral Directive Prompt:", classes="modal-label")
                     yield DirectiveTextArea(
@@ -182,16 +206,38 @@ class AgentConfigModal(ModalScreen[None]):
         self.query_one("#worker-alias-input", Input).focus()
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Dynamically load worker configuration when target selector changes, or sync model input."""
+        """Dynamically load worker configuration or react to agent selection."""
         if event.select.id == "target-worker-select":
             if event.value is not None:
                 self._load_worker_data(str(event.value))
+        elif event.select.id == "system-agent-select":
+            if event.value is not None:
+                self._apply_discovered_agent(str(event.value))
         elif event.select.id == "model-preset-select":
             if event.value and event.value != "custom":
                 try:
                     self.query_one("#model-name-input", Input).value = str(event.value)
                 except Exception:
                     pass
+
+    def _apply_discovered_agent(self, agent_name: str) -> None:
+        """When an agent is selected from discovered list, pre-fill its alias and configuration."""
+        alias_input = self.query_one("#worker-alias-input", Input)
+        flags_input = self.query_one("#extra-flags-input", Input)
+        inst_area = self.query_one("#instructions-area", DirectiveTextArea)
+
+        alias_input.value = agent_name
+
+        # Update extra flags to include --agent <agent_name> cleanly
+        current_flags = flags_input.value.strip()
+        # Remove any existing --agent flag
+        clean_flags = re.sub(r"--agent\s+[^\s]+", "", current_flags).strip()
+        new_flags = f"--agent {agent_name} {clean_flags}".strip() if clean_flags else f"--agent {agent_name}"
+        flags_input.value = new_flags
+
+        # Pre-fill default directives if empty or default
+        if not inst_area.text.strip() or "Act as an autonomous" in inst_area.text:
+            inst_area.load_text(f"Act as autonomous system worker agent '{agent_name}'. Listen for directives and execute terminal tasks.")
 
     def _load_worker_data(self, worker_id: str) -> None:
         """Populate form fields with current values from the worker session."""
@@ -202,6 +248,12 @@ class AgentConfigModal(ModalScreen[None]):
         try:
             alias_input = self.query_one("#worker-alias-input", Input)
             alias_input.value = worker.name
+
+            # Match discovered system agent if assigned
+            sys_select = self.query_one("#system-agent-select", Select)
+            assigned = worker.assigned_agent or (worker.name if worker.name in self._discovered_agents else "")
+            if assigned and assigned in self._discovered_agents:
+                sys_select.value = assigned
 
             mode_select = self.query_one("#cli-mode-select", Select)
             if worker.cli_mode in ("auto", "accept-edits", "plan"):
@@ -250,6 +302,7 @@ class AgentConfigModal(ModalScreen[None]):
     def _save_configuration(self, restart: bool) -> None:
         """Persist configuration updates to worker session and optionally restart PTY process."""
         target_select = self.query_one("#target-worker-select", Select)
+        sys_select = self.query_one("#system-agent-select", Select)
         alias_input = self.query_one("#worker-alias-input", Input)
         mode_select = self.query_one("#cli-mode-select", Select)
         model_input = self.query_one("#model-name-input", Input)
@@ -258,15 +311,21 @@ class AgentConfigModal(ModalScreen[None]):
         inst_area = self.query_one("#instructions-area", DirectiveTextArea)
 
         target_id = str(target_select.value) if target_select.value else "1"
-        alias = alias_input.value.strip()
+        selected_system_agent = str(sys_select.value) if sys_select.value else ""
+        alias = alias_input.value.strip() or selected_system_agent
         cli_mode = str(mode_select.value) if mode_select.value else "auto"
         model = model_input.value.strip() or "gemini-3.8-flash-high"
         effort = str(effort_select.value) if effort_select.value else "high"
         extra_flags = flags_input.value.strip()
         instructions = inst_area.text.strip()
 
+        # Ensure --agent <selected_agent> is cleanly reflected in extra_flags if selected
+        if selected_system_agent and f"--agent {selected_system_agent}" not in extra_flags:
+            extra_flags = f"--agent {selected_system_agent} {extra_flags}".strip()
+
         new_config = {
             "name": alias,
+            "assigned_agent": selected_system_agent,
             "cli_mode": cli_mode,
             "model": model,
             "reasoning_effort": effort,
@@ -281,16 +340,18 @@ class AgentConfigModal(ModalScreen[None]):
             return
 
         if restart:
-            self._terminal_manager.restart_worker(target_id, new_config=new_config)
-            self._safe_notify(f"⚡ Worker '{alias or target_id}' restarted with updated CLI flags!", severity="warning")
+            self._terminal_manager.restart_worker(target_id, new_args=new_config)
+            self._safe_notify(f"⚡ Worker '{alias or target_id}' restarted with agent '{selected_system_agent}'!", severity="warning")
         else:
             if alias:
                 worker.name = alias
+            worker.assigned_agent = selected_system_agent
             worker.cli_mode = cli_mode
             worker.model = model
             worker.reasoning_effort = effort
             worker.extra_flags = extra_flags
             worker.instructions = instructions
+            worker.profile.assigned_agent = selected_system_agent
             worker.profile.cli_mode = cli_mode
             worker.profile.model = model
             worker.profile.reasoning_effort = effort

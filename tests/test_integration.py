@@ -123,10 +123,8 @@ def test_ui_imports() -> None:
     header = HeaderBar(session_name="test-session", worker_count=2)
     assert header.session_name == "test-session"
     assert header.worker_count == 2
-    assert "NORMAL MODE" in header._build_mode_badge()
-    header.mode = "PTY_INTERACT"
-    assert "PTY INTERACT" in header._build_mode_badge()
-    print("  ✓ HeaderBar reactive mode and status pills verified.")
+    assert header.mcp_port == 8765
+    print("  ✓ HeaderBar clean telemetry and status pills verified.")
 
     # Test BottomBar & ActionPills
     bottom = BottomBar(worker_count=2)
