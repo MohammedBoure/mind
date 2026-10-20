@@ -174,6 +174,15 @@ class WorkerSession:
         """Transition process to waiting_input and notify listeners when terminal settles."""
         if not self.is_alive:
             return
+        time_since_output = time.time() - self._last_output_time
+        if time_since_output < 1.1:
+            remaining = max(0.2, 1.2 - time_since_output)
+            with self._lock:
+                self._idle_check_timer = threading.Timer(remaining, self._check_idle_state)
+                self._idle_check_timer.daemon = True
+                self._idle_check_timer.start()
+            return
+
         if self.state == WorkerProcessState.RUNNING:
             self.state = WorkerProcessState.WAITING_INPUT
             with self._lock:
@@ -190,12 +199,12 @@ class WorkerSession:
         self._last_output_time = time.time()
         self.state = WorkerProcessState.RUNNING
 
-        # Schedule debounced check for terminal idle state
-        if self._idle_check_timer:
-            self._idle_check_timer.cancel()
-        self._idle_check_timer = threading.Timer(1.2, self._check_idle_state)
-        self._idle_check_timer.daemon = True
-        self._idle_check_timer.start()
+        # Debounced check for terminal idle state without thread churn
+        with self._lock:
+            if self._idle_check_timer is None or not self._idle_check_timer.is_alive():
+                self._idle_check_timer = threading.Timer(1.2, self._check_idle_state)
+                self._idle_check_timer.daemon = True
+                self._idle_check_timer.start()
 
         # Detect runtime warnings from stderr/stdout (e.g. --effort fallback, unknown agent)
         chunk_lower = chunk.lower()
@@ -410,7 +419,11 @@ class WorkerSession:
     ) -> str:
         """Send SIGINT/Ctrl+C to halt current execution, wait for prompt, and inject message."""
         if not self.process or not self.process.is_alive():
-            return f"Error: Worker {self.worker_id} process is not running."
+            if self.process is None:
+                self.start()
+                time.sleep(0.3)
+            else:
+                return f"Error: Worker {self.worker_id} process is not running."
 
         # 1. Send interrupt signal
         self.process.send_interrupt()

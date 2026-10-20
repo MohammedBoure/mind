@@ -187,13 +187,15 @@ class WorkspaceScreen(Screen):
                     with ContentSwitcher(id="worker-switcher", initial=f"worker-view-{initial_worker_id}"):
                         for agent in self._agents[1:]:
                             worker_id = str(agent.id)
+                            # Start only the active worker at boot; others spawn lazily upon activation
+                            is_initial = (worker_id == initial_worker_id)
                             session = self._terminal_manager.create_worker(
                                 worker_id=worker_id,
                                 name=agent.name,
                                 model=agent.model,
                                 task=agent.task,
                                 assigned_agent=f"agy{int(worker_id) + 1}" if worker_id.isdigit() else "",
-                                autostart=True,
+                                autostart=is_initial,
                             )
                             tab_widget = WorkerTerminalTab(
                                 worker_session=session,
@@ -621,12 +623,17 @@ class WorkspaceScreen(Screen):
         self.action_switch_worker(prev_id)
 
     def action_switch_worker(self, worker_id: str) -> None:
-        """Switch active worker tab and focus its terminal."""
+        """Switch active worker tab and focus its terminal (spawning PTY lazily if not started)."""
         worker_id_str = str(worker_id)
         if worker_id_str not in self._worker_tabs:
             return
 
         self._active_worker_id = worker_id_str
+
+        # 0. Lazy spawn: ensure worker process starts when its tab is first activated
+        target_session = self._terminal_manager.get_worker(worker_id_str)
+        if target_session and not target_session.is_alive and target_session.process is None:
+            target_session.start()
 
         # 1. Switch visible viewport via ContentSwitcher
         try:
@@ -642,11 +649,12 @@ class WorkspaceScreen(Screen):
         except Exception:
             pass
 
-        # 3. Focus active terminal screen widget
+        # 3. Focus active terminal screen widget and trigger immediate refresh
         tab_widget = self._worker_tabs.get(worker_id_str)
         if tab_widget and tab_widget.screen_widget:
             try:
                 tab_widget.screen_widget.focus()
+                tab_widget.screen_widget.refresh()
             except Exception:
                 pass
 

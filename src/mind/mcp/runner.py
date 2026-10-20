@@ -91,13 +91,14 @@ _runner_lock = threading.Lock()
 def start_background_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8765,
+    wait_for_ready: bool = False,
 ) -> MCPServerRunner:
     """Start or retrieve the global background MCP server runner."""
     global _global_runner
     with _runner_lock:
         if _global_runner is None or not _global_runner.is_running:
             _global_runner = MCPServerRunner(host=host, port=port)
-            _global_runner.start()
+            _global_runner.start(wait_for_ready=wait_for_ready)
         return _global_runner
 
 

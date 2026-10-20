@@ -39,6 +39,29 @@ _PYTE_COLOR_MAP: dict[str, str] = {
     "brightwhite": "bright_white",
 }
 
+_STYLE_CACHE: dict[tuple, Style] = {}
+_DEFAULT_STYLE_KEY = (None, None, False, False, False, False)
+
+
+def _get_cached_style(key: tuple) -> Style | None:
+    """Retrieve or build a cached Rich Style instance to avoid object allocation in hot loop."""
+    if key == _DEFAULT_STYLE_KEY:
+        return None
+    style = _STYLE_CACHE.get(key)
+    if style is None:
+        fg, bg, bold, italics, underline, reverse = key
+        style = Style(
+            color=fg,
+            bgcolor=bg,
+            bold=bold,
+            italic=italics,
+            underline=underline,
+            reverse=reverse,
+        )
+        if len(_STYLE_CACHE) < 512:
+            _STYLE_CACHE[key] = style
+    return style
+
 
 def _resolve_color(color_val: str | int | None) -> str | None:
     """Resolve a pyte color value into a valid Rich color identifier."""
@@ -82,6 +105,12 @@ class TerminalBuffer:
         self._stream = pyte.Stream(self._screen)
         self._recent_logs: collections.deque[str] = collections.deque(maxlen=history_size)
         self._version: int = 0
+        self._has_content: bool = False
+
+    @property
+    def has_content(self) -> bool:
+        """Fast check if buffer has received any visible display output."""
+        return self._has_content
 
     @property
     def columns(self) -> int:
@@ -113,6 +142,8 @@ class TerminalBuffer:
             self._stream.feed(text)
             self._recent_logs.append(text)
             self._version += 1
+            if not self._has_content and text.strip():
+                self._has_content = True
 
     def resize(self, columns: int, lines: int) -> None:
         """Resize the virtual terminal screen dimensions."""
@@ -132,6 +163,7 @@ class TerminalBuffer:
             self._screen.reset()
             self._recent_logs.clear()
             self._version += 1
+            self._has_content = False
 
     def get_visible_lines(self) -> list[str]:
         """Return visible screen rows as clean text strings (trailing spaces trimmed)."""
@@ -167,7 +199,11 @@ class TerminalBuffer:
             return "\n".join(all_lines)
 
     def get_rich_text(self, show_cursor: bool = True) -> Text:
-        """Render the 2D screen buffer into a Rich Text object with full ANSI styles."""
+        """Render the 2D screen buffer into a Rich Text object with full ANSI styles.
+
+        Optimized with run-length character batching and Style caching to maximize FPS
+        and eliminate CPU bottleneck during live output streaming.
+        """
         with self._lock:
             rich_text = Text()
             cursor_y = self._screen.cursor.y
@@ -185,6 +221,9 @@ class TerminalBuffer:
                 else:
                     max_x = 1 if (show_cursor and y == cursor_y) else 0
 
+                run_chars: list[str] = []
+                current_key: tuple | None = None
+
                 for x in range(max_x):
                     char_obj = row[x]
                     data = char_obj.data or " "
@@ -200,15 +239,17 @@ class TerminalBuffer:
                     if show_cursor and y == cursor_y and x == cursor_x:
                         reverse = not reverse
 
-                    style = Style(
-                        color=fg,
-                        bgcolor=bg,
-                        bold=bold,
-                        italic=italics,
-                        underline=underline,
-                        reverse=reverse,
-                    )
-                    rich_text.append(data, style=style)
+                    style_key = (fg, bg, bold, italics, underline, reverse)
+                    if style_key != current_key:
+                        if run_chars:
+                            rich_text.append("".join(run_chars), style=_get_cached_style(current_key))
+                            run_chars = []
+                        current_key = style_key
+
+                    run_chars.append(data)
+
+                if run_chars:
+                    rich_text.append("".join(run_chars), style=_get_cached_style(current_key))
 
                 if y < self._lines - 1:
                     rich_text.append("\n")

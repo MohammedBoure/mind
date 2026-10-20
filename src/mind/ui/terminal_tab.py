@@ -229,12 +229,22 @@ class TerminalScreenWidget(Widget):
         """Return True if currently in direct PTY input (Insert) mode."""
         return self.mode in ("PTY_INTERACT", "PTY")
 
+    @property
+    def is_pane_visible(self) -> bool:
+        """Return True if this widget and its parent tab are visible on screen."""
+        if not self.display or not self.visible:
+            return False
+        if self.parent is not None and not self.parent.display:
+            return False
+        return True
+
     def render(self) -> Text:
         """Render virtual screen buffer or placeholder banner if still initializing."""
-        visible_lines = self.worker_session.buffer.get_visible_lines()
-        has_content = any(line.strip() for line in visible_lines)
+        if self.worker_session.buffer.has_content:
+            return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
 
-        if has_content:
+        visible_lines = self.worker_session.buffer.get_visible_lines()
+        if any(line.strip() for line in visible_lines):
             return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
 
         return self._render_placeholder_banner()
@@ -291,8 +301,18 @@ class TerminalScreenWidget(Widget):
         return t
 
     def on_mount(self) -> None:
-        """Set up a high-frequency polling timer for smooth screen updates."""
-        self.set_interval(0.04, self._check_for_updates)
+        """Register output listener and a lightweight fallback timer."""
+        self.worker_session.add_output_listener(self._on_worker_output)
+        self.set_interval(0.1, self._check_for_updates)
+
+    def _on_worker_output(self, chunk: str) -> None:
+        """Receive output notifications and trigger render only when visible."""
+        if not self.is_pane_visible:
+            return
+        try:
+            self.app.call_from_thread(self._check_for_updates)
+        except Exception:
+            pass
 
     def on_focus(self) -> None:
         self.post_message(self.TerminalFocusChanged(is_focused=True))
@@ -304,7 +324,9 @@ class TerminalScreenWidget(Widget):
         self.refresh()
 
     def _check_for_updates(self) -> None:
-        """Trigger a re-render if new output arrived in the buffer."""
+        """Trigger a re-render if new output arrived in the buffer and widget is visible."""
+        if not self.is_pane_visible:
+            return
         current_version = self.worker_session.buffer.version
         if current_version != self._last_rendered_version:
             self._last_rendered_version = current_version
@@ -517,7 +539,7 @@ class WorkerTerminalTab(Widget):
     def on_mount(self) -> None:
         """Register notification listener with worker session."""
         self.worker_session.add_notification_listener(self._on_notification)
-        self.set_interval(1.0, self._refresh_header)
+        self.set_interval(3.0, self._refresh_header)
 
     def _build_header_text(self) -> str:
         """Construct the styled header bar text with instance identity and runtime warnings."""
@@ -588,7 +610,9 @@ class WorkerTerminalTab(Widget):
         self._refresh_header()
 
     def _refresh_header(self) -> None:
-        """Periodically update header text."""
+        """Periodically update header text only if visible."""
+        if not self.display or not self.visible:
+            return
         try:
             widget = self.query_one(f"#header-text-{self.worker_session.worker_id}", Static)
             widget.update(self._build_header_text())

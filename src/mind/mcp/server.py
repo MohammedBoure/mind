@@ -109,7 +109,11 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             return f"Error: Worker '{actual_id}' not found."
 
         if not worker.is_alive:
-            return f"Error: Worker '{actual_id}' process is not alive."
+            if worker.process is None:
+                worker.start()
+                time.sleep(0.3)
+            else:
+                return f"Error: Worker '{actual_id}' process is not alive."
 
         worker.write(text, press_enter=press_enter)
         return f"Input sent to worker '{actual_id}' ({len(text)} chars, enter={press_enter})."
