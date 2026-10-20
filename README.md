@@ -89,6 +89,7 @@ mind register-mcp
 
 ```
 aze/
+├── docs/                       # Technical architecture & specification documents
 ├── pyproject.toml              # Build config, scripts (`mind`), dependencies
 ├── README.md                   # Project overview & documentation
 └── src/mind/
@@ -98,6 +99,7 @@ aze/
     │   └── main.py             # Click CLI (`mind`, `new`, `mcp`, `register-mcp`)
     ├── core/
     │   ├── pty_process.py      # Cross-platform PTY spawner (winpty/Unix) with zombie safety
+    │   ├── credentials.py      # Cross-process credential & slot isolation management
     │   ├── terminal_buffer.py  # pyte 2D virtual screen, ring buffer & Rich renderer
     │   └── terminal_manager.py # WorkerSession & TerminalManager orchestrator
     ├── mcp/
@@ -111,18 +113,6 @@ aze/
         ├── workspace.py        # Multiplexer workspace screen with split panes
         ├── terminal_tab.py     # Interactive PTY terminal widget with toast alerts
         ├── header_bar.py       # Top session status bar and agent tabs
-        ├── bottom_bar.py       # Bottom keybinds helper bar
-        ├── interrupt_banner.py # Visual alert banner for inter-agent messages
-        ├── session_picker.py   # Session picker screen
-        ├── new_session_modal.py# Session creation dialog
-        └── help_modal.py       # Shortcuts overlay
-```
-
----
-
-## License
-
-MIT
         ├── bottom_bar.py       # Bottom keybinds helper bar
         ├── interrupt_banner.py # Visual alert banner for inter-agent messages
         ├── session_picker.py   # Session picker screen
