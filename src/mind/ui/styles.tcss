@@ -483,10 +483,50 @@ AgentConfigModal {
 
 #config-scroll-body Select {
     width: 100%;
+    background: #1f2335;
+    color: #c0caf5;
+    border: round #3b4261;
+}
+
+#config-scroll-body Select:focus {
+    border: round #7aa2f7;
+}
+
+#config-scroll-body SelectCurrent {
+    background: #1f2335;
+    color: #c0caf5;
+    border: none;
+}
+
+#config-scroll-body SelectOverlay {
+    background: #24283b;
+    color: #c0caf5;
+    border: round #7aa2f7;
+}
+
+#config-scroll-body SelectOverlay > .option-list--option {
+    background: #24283b;
+    color: #c0caf5;
+    padding: 0 1;
+}
+
+#config-scroll-body SelectOverlay > .option-list--option.-highlighted {
+    background: #7aa2f7;
+    color: #1a1b26;
+    text-style: bold;
 }
 
 #config-scroll-body Input {
     width: 100%;
+    background: #1f2335;
+    color: #c0caf5;
+    border: round #3b4261;
+}
+
+#config-scroll-body Input:focus {
+    background: #24283b;
+    color: #ffffff;
+    border: round #7aa2f7;
 }
 
 #instructions-area {
