@@ -1,6 +1,6 @@
 # `tests/` — Test Suite
 
-This directory contains automated integration and unit test suites for `mind` (`micro`).
+This directory contains automated integration and unit test suites for `mind`.
 
 ## Files
 

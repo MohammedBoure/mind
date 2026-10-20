@@ -6,11 +6,11 @@ import asyncio
 import sys
 import time
 
-from micro.core.pty_process import spawn_pty
-from micro.core.terminal_buffer import TerminalBuffer
-from micro.core.terminal_manager import TerminalManager, WorkerProcessState
-from micro.mcp.runner import MCPServerRunner
-from micro.mcp.server import create_mcp_server
+from mind.core.pty_process import spawn_pty
+from mind.core.terminal_buffer import TerminalBuffer
+from mind.core.terminal_manager import TerminalManager, WorkerProcessState
+from mind.mcp.runner import MCPServerRunner
+from mind.mcp.server import create_mcp_server
 
 
 def test_terminal_buffer() -> None:
@@ -96,9 +96,9 @@ def test_mcp_sse_runner() -> None:
 
 def test_ui_imports() -> None:
     print("[5/5] Testing Textual UI widget imports & instantiation...")
-    from micro.app import MicroApp
-    from micro.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
-    from micro.ui.workspace import WorkspaceScreen
+    from mind.app import MindApp
+    from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
+    from mind.ui.workspace import WorkspaceScreen
 
     mgr = TerminalManager.get_instance()
     worker = mgr.get_worker("test-1")

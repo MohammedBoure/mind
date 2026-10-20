@@ -1,6 +1,6 @@
 # `scripts/` — Automated QA & Integration Scripts
 
-This directory contains standalone testing, benchmarking, and verification scripts for the `mind` (`micro`) system.
+This directory contains standalone testing, benchmarking, and verification scripts for the `mind` system.
 
 ## Files
 

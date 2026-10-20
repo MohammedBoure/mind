@@ -37,8 +37,6 @@ uv pip install -e .
 ```bash
 # Launch the session picker
 mind
-# or
-micro
 
 # Directly create and enter a new session
 mind new my_task
@@ -91,13 +89,13 @@ mind register-mcp
 
 ```
 aze/
-├── pyproject.toml              # Build config, scripts (`mind`, `micro`), dependencies
+├── pyproject.toml              # Build config, scripts (`mind`), dependencies
 ├── README.md                   # Project overview & documentation
-└── src/micro/
+└── src/mind/
     ├── app.py                  # Root Textual App & screen lifecycle
     ├── events.py               # Custom Textual messages
     ├── cli/
-    │   └── main.py             # Click CLI (`mind`, `micro`, `new`, `mcp`, `register-mcp`)
+    │   └── main.py             # Click CLI (`mind`, `new`, `mcp`, `register-mcp`)
     ├── core/
     │   ├── pty_process.py      # Cross-platform PTY spawner (winpty/Unix) with zombie safety
     │   ├── terminal_buffer.py  # pyte 2D virtual screen, ring buffer & Rich renderer
@@ -113,6 +111,18 @@ aze/
         ├── workspace.py        # Multiplexer workspace screen with split panes
         ├── terminal_tab.py     # Interactive PTY terminal widget with toast alerts
         ├── header_bar.py       # Top session status bar and agent tabs
+        ├── bottom_bar.py       # Bottom keybinds helper bar
+        ├── interrupt_banner.py # Visual alert banner for inter-agent messages
+        ├── session_picker.py   # Session picker screen
+        ├── new_session_modal.py# Session creation dialog
+        └── help_modal.py       # Shortcuts overlay
+```
+
+---
+
+## License
+
+MIT
         ├── bottom_bar.py       # Bottom keybinds helper bar
         ├── interrupt_banner.py # Visual alert banner for inter-agent messages
         ├── session_picker.py   # Session picker screen

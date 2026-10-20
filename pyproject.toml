@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mind-micro"
+name = "mind"
 version = "0.1.0"
 description = "AI Multi-Agent Orchestration TUI - Terminal User Interface for the 'mind' system"
 readme = "README.md"
@@ -20,11 +20,10 @@ dependencies = [
 ]
 
 [project.scripts]
-mind = "micro.cli.main:main"
-micro = "micro.cli.main:main"
+mind = "mind.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/micro"]
+packages = ["src/mind"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/micro"]
+include = ["src/mind"]

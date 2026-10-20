@@ -1,4 +1,4 @@
-"""End-to-End QA Integration Test Runner for mind (micro).
+"""End-to-End QA Integration Test Runner for mind.
 
 Acts as an automated MCP client connecting over SSE to the background
 mind-mcp server to verify:
@@ -21,8 +21,8 @@ from typing import Any
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 
-from micro.core.terminal_manager import TerminalManager, WorkerProcessState, WorkerSession
-from micro.mcp.runner import MCPServerRunner
+from mind.core.terminal_manager import TerminalManager, WorkerProcessState, WorkerSession
+from mind.mcp.runner import MCPServerRunner
 
 # Configure clean logging output
 logging.basicConfig(
