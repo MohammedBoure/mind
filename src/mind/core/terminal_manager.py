@@ -12,12 +12,19 @@ from datetime import datetime
 from enum import Enum
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import threading
 import time
 from typing import Any, Callable
 
+from mind.core.credentials import (
+    CrossProcessCredentialLock,
+    get_slot_token_path,
+    restore_slot_credential,
+    setup_slot_env,
+)
 from mind.core.pty_process import BasePtyProcess, spawn_pty
 from mind.core.terminal_buffer import TerminalBuffer
 
@@ -80,6 +87,19 @@ class WorkerSession:
         self.cli_mode = cli_mode
         self.reasoning_effort = reasoning_effort
         self.extra_flags = extra_flags
+        # Determine default assigned_agent if not provided
+        if not assigned_agent:
+            if str(worker_id).isdigit():
+                assigned_agent = f"agy{worker_id}"
+            elif str(worker_id).lower() in ("coordinator", "primary") or role == "coordinator":
+                assigned_agent = "agy1"
+            elif name and name.lower().startswith("agy"):
+                assigned_agent = name.lower()
+            elif name and "worker-" in name.lower():
+                m = re.search(r"\d+", name)
+                if m:
+                    assigned_agent = f"agy{m.group()}"
+
         self.assigned_agent = assigned_agent or (name if name and name.startswith("agy") else "")
         self.instructions = instructions or "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
         self.created_at = datetime.now()
@@ -161,19 +181,44 @@ class WorkerSession:
             except Exception:
                 pass
 
+    def get_slot_id(self) -> int | None:
+        """Derive slot number (1..20) for this session to isolate credentials."""
+        target = self.assigned_agent or self.name or str(self.worker_id)
+        if "coordinator" in target.lower() or str(self.worker_id).lower() in ("coordinator", "primary"):
+            if self.assigned_agent:
+                m = re.search(r"\d+", self.assigned_agent)
+                if m:
+                    return int(m.group())
+            return 1
+        m = re.search(r"\d+", target)
+        if m:
+            return int(m.group())
+        return None
+
     def start(
         self,
         command: str | list[str] | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
     ) -> None:
-        """Launch the worker agent process inside a cross-platform PTY."""
+        """Launch the worker agent process inside a cross-platform PTY with slot isolation."""
         if self.process and self.process.is_alive():
             return
 
         self.custom_command = command
         self.last_cwd = cwd or self.last_cwd or os.getcwd()
-        self.last_env = env if env is not None else self.last_env
+
+        # Set up isolated environment variables and verify token persistence
+        slot = self.get_slot_id()
+        base = env if env is not None else (self.last_env or os.environ)
+        worker_env = dict(base)
+        if slot:
+            worker_env = setup_slot_env(slot, base_env=worker_env)
+            if sys.platform == "win32":
+                # Ensure existing saved token in ~/.gemini/tokens/ is restored without OAuth prompt
+                restore_slot_credential(slot)
+
+        self.last_env = worker_env
 
         resolved_command = self._resolve_command(command)
         self.process = spawn_pty(
@@ -247,10 +292,16 @@ class WorkerSession:
 
         # 1. Check if assigned_agent has an explicit executable launcher (e.g. agy1.cmd)
         agent_launcher = None
-        if self.assigned_agent:
-            agent_launcher = shutil.which(self.assigned_agent) or shutil.which(f"{self.assigned_agent}.cmd")
+        target_agent = self.assigned_agent
+        if not target_agent:
+            slot = self.get_slot_id()
+            if slot:
+                target_agent = f"agy{slot}"
+
+        if target_agent:
+            agent_launcher = shutil.which(target_agent) or shutil.which(f"{target_agent}.cmd")
             if not agent_launcher and sys.platform == "win32":
-                local_cmd = os.path.expandvars(rf"%LOCALAPPDATA%\agy\bin\{self.assigned_agent}.cmd")
+                local_cmd = os.path.expandvars(rf"%LOCALAPPDATA%\agy\bin\{target_agent}.cmd")
                 if os.path.exists(local_cmd):
                     agent_launcher = local_cmd
 
@@ -463,6 +514,19 @@ class TerminalManager:
         with self._lock:
             if worker_id in self._workers:
                 return self._workers[worker_id]
+
+            # Automatically deduce assigned_agent slot if not provided
+            if not assigned_agent:
+                if str(worker_id).isdigit():
+                    assigned_agent = f"agy{worker_id}"
+                elif str(worker_id).lower() in ("coordinator", "primary") or role == "coordinator":
+                    assigned_agent = "agy1"
+                elif name and name.lower().startswith("agy"):
+                    assigned_agent = name.lower()
+                elif name and "worker-" in name.lower():
+                    m = re.search(r"\d+", name)
+                    if m:
+                        assigned_agent = f"agy{m.group()}"
 
             session = WorkerSession(
                 worker_id=worker_id,

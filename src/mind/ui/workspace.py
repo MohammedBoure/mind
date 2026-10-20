@@ -190,6 +190,7 @@ class WorkspaceScreen(Screen):
                                 name=agent.name,
                                 model=agent.model,
                                 task=agent.task,
+                                assigned_agent=f"agy{worker_id}" if worker_id.isdigit() else "",
                                 autostart=True,
                             )
                             tab_widget = WorkerTerminalTab(
@@ -734,6 +735,7 @@ class WorkspaceScreen(Screen):
             name=new_agent.name,
             model=new_agent.model,
             task=new_agent.task,
+            assigned_agent=f"agy{new_id}" if new_id.isdigit() else "",
             autostart=True,
         )
         tab_widget = WorkerTerminalTab(

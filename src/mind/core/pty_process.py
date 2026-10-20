@@ -77,7 +77,13 @@ class WindowsPtyProcess(BasePtyProcess):
             cmdline = parts[1] if len(parts) > 1 else ""
 
         resolved_app = shutil.which(appname) or appname
-        self._pty.spawn(resolved_app, cmdline=cmdline or None, cwd=cwd, env=env)
+        winpty_env: str | None = None
+        if env is not None:
+            if isinstance(env, dict):
+                winpty_env = "\0".join(f"{k}={v}" for k, v in env.items()) + "\0"
+            else:
+                winpty_env = str(env)
+        self._pty.spawn(resolved_app, cmdline=cmdline or None, cwd=cwd, env=winpty_env)
         self._pid = self._pty.pid
         self._stopped = False
 
