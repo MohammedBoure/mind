@@ -53,25 +53,52 @@ def test_terminal_screen_widget_pty_mode_writes_characters() -> None:
 
 
 def test_terminal_screen_widget_escape_leaves_pty_mode() -> None:
-    """In PTY_INTERACT mode, Escape emits ModeChangeRequested('NORMAL') without writing to stdin."""
+    """In PTY_INTERACT mode, double Escape (Esc Esc) emits ModeChangeRequested('NORMAL'),
+    while single bare Escape passes through to child PTY, and Ctrl+B immediately escapes.
+    """
     session = _create_mock_worker_session()
     widget = TerminalScreenWidget(worker_session=session, mode="PTY_INTERACT")
 
     posted_messages = []
     widget.post_message = lambda msg: posted_messages.append(msg)
 
-    event = Key("escape", character="")
-    widget.on_key(event)
+    # 1. Single Escape: does NOT leave PTY mode immediately (buffered for passthrough)
+    event1 = Key("escape", character="")
+    widget.on_key(event1)
+    assert len(posted_messages) == 0
+    assert widget._pending_esc is True
+    assert event1._stop_propagation
 
-    # Must NOT write escape to worker process
-    session.write.assert_not_called()
-    assert event._stop_propagation
-    assert event._no_default_action
+    # Timeout fires without 2nd escape -> writes bare '\x1b' directly to child PTY
+    widget._on_esc_timeout()
+    session.write.assert_called_once_with("\x1b")
+    assert widget._pending_esc is False
 
-    # Must post ModeChangeRequested message with target 'NORMAL'
+    # 2. Double Escape (Esc Esc): leaves PTY mode
+    session.write.reset_mock()
+    event_esc1 = Key("escape", character="")
+    widget.on_key(event_esc1)
+    assert len(posted_messages) == 0
+
+    event_esc2 = Key("escape", character="")
+    widget.on_key(event_esc2)
     assert len(posted_messages) == 1
     assert isinstance(posted_messages[0], TerminalScreenWidget.ModeChangeRequested)
     assert posted_messages[0].target_mode == "NORMAL"
+    session.write.assert_not_called()
+
+    # 3. Dedicated Leader Key (Ctrl+B): leaves PTY mode immediately
+    posted_messages.clear()
+    event_ctrl_b = Key("ctrl+b", character="")
+    widget.on_key(event_ctrl_b)
+    assert len(posted_messages) == 1
+    assert posted_messages[0].target_mode == "NORMAL"
+
+    # 4. Raw Ctrl+C: writes \x03 for process SIGINT interruption, NOT intercepted by copy
+    session.write.reset_mock()
+    event_ctrl_c = Key("ctrl+c", character="")
+    widget.on_key(event_ctrl_c)
+    session.write.assert_called_once_with("\x03")
 
 
 def test_terminal_screen_widget_ctrl_m_opens_directive() -> None:
@@ -125,7 +152,7 @@ def test_header_and_bottom_bar_mode_indicators() -> None:
     # In PTY_INTERACT mode
     bottom.mode = "PTY_INTERACT"
     assert "PTY INTERACT" in bottom._build_mode_indicator()
-    assert "Press Esc for Normal" in bottom._build_mode_indicator()
+    assert "Press Esc Esc or Ctrl+B for Outer Normal" in bottom._build_mode_indicator()
 
 
 def test_workspace_screen_vim_key_dispatch() -> None:
@@ -145,6 +172,13 @@ def test_workspace_screen_vim_key_dispatch() -> None:
     ws.action_show_help = MagicMock()
     ws.action_quit = MagicMock()
     ws.action_switch_worker = MagicMock()
+    ws.action_copy_to_clipboard = MagicMock()
+
+    # 'y' -> yank to clipboard in NORMAL mode
+    event_y = Key("y", character="y")
+    ws.on_key(event_y)
+    ws.action_copy_to_clipboard.assert_called_once()
+    assert event_y._stop_propagation
 
     # 'i' -> enter PTY
     event_i = Key("i", character="i")
@@ -526,6 +560,101 @@ async def test_tab_focus_switching_between_coordinator_and_worker() -> None:
         ws.action_focus_next()
         await pilot.pause()
         assert ws.focused == coord_screen
+
+
+def test_clipboard_copy_helper() -> None:
+    """copy_to_clipboard and get_clipboard_text work safely with system clipboard."""
+    from mind.ui.clipboard import copy_to_clipboard, get_clipboard_text
+
+    test_content = "mind clipboard integration test string"
+    success = copy_to_clipboard(test_content)
+    assert success is True
+
+    pasted = get_clipboard_text()
+    assert test_content in pasted
+
+
+def test_terminal_screen_mouse_selection_and_right_click_copy() -> None:
+    """TerminalScreenWidget supports mouse drag selection, right-click copy, and auto-copy on mouse up."""
+    from textual.events import MouseDown, MouseMove, MouseUp
+    from mind.core.terminal_manager import WorkerSession
+    from mind.ui.terminal_tab import TerminalScreenWidget
+
+    session = _create_mock_worker_session()
+    # Populate buffer with known lines
+    session.buffer.feed("Hello World from Terminal\r\nLine 2 text here\r\n")
+
+    widget = TerminalScreenWidget(worker_session=session, mode="NORMAL")
+
+    # 1. Simulate mouse down at (0, 0)
+    down_event = MouseDown(widget, 0, 0, 0, 0, button=1, shift=False, meta=False, ctrl=False)
+    widget.on_mouse_down(down_event)
+    assert widget._is_dragging is True
+    assert widget._select_start == (0, 0)
+
+    # 2. Simulate mouse drag to (11, 0) -> "Hello World"
+    move_event = MouseMove(widget, 11, 0, 11, 0, button=1, shift=False, meta=False, ctrl=False)
+    widget.on_mouse_move(move_event)
+    assert widget.has_selection is True
+    assert "Hello World" in widget.get_selected_text()
+
+    # 3. Simulate mouse up with left click -> auto copies to clipboard
+    up_event = MouseUp(widget, 11, 0, 11, 0, button=1, shift=False, meta=False, ctrl=False)
+    widget.on_mouse_up(up_event)
+    assert widget._is_dragging is False
+
+    # 4. Right-click with active selection copies selected text and clears selection
+    right_down = MouseDown(widget, 5, 0, 5, 0, button=3, shift=False, meta=False, ctrl=False)
+    widget.on_mouse_down(right_down)
+    assert widget.has_selection is False
+
+    # 5. Right-click without selection copies visible buffer lines
+    copied = widget.copy_selection_or_buffer()
+    assert "Hello World" in copied
+
+
+def test_agent_log_pane_clipboard_copy() -> None:
+    """AgentLogPane copies color-formatted plain logs to system clipboard on right-click or y."""
+    from datetime import datetime
+    from textual.events import MouseUp
+    from mind.state.models import AgentInfo, AgentRole, AgentStatus, LogEntry
+    from mind.ui.agent_pane import AgentLogPane
+
+    agent = AgentInfo(id=1, name="Worker-1", role=AgentRole.WORKER, status=AgentStatus.RUNNING, model="m", task="t")
+    logs = [
+        LogEntry(timestamp=datetime.now(), source="Worker-1", content="Task execution step 1", entry_type="info"),
+        LogEntry(timestamp=datetime.now(), source="Worker-1", content="Evaluating file diff", entry_type="thought"),
+    ]
+
+    pane = AgentLogPane(agent=agent, logs=logs)
+    copied = pane.copy_content()
+    assert "Task execution step 1" in copied
+    assert "Evaluating file diff" in copied
+
+    # Mouse up with button 3 (right click) triggers copy_content
+    right_up = MouseUp(pane, 10, 5, 10, 5, button=3, shift=False, meta=False, ctrl=False)
+    pane.on_mouse_up(right_up)
+    assert right_up._stop_propagation
+
+
+def test_pty_interact_preserves_ctrl_c_and_allows_ctrl_shift_c_copy() -> None:
+    """In PTY_INTERACT mode, raw Ctrl+C sends SIGINT (\x03) while Ctrl+Shift+C explicitly copies to clipboard."""
+    session = _create_mock_worker_session()
+    session.buffer.feed("Running long command output\r\n")
+    widget = TerminalScreenWidget(worker_session=session, mode="PTY_INTERACT")
+
+    # Ctrl+C must send \x03 to process
+    event_ctrl_c = Key("ctrl+c", character="")
+    widget.on_key(event_ctrl_c)
+    session.write.assert_called_once_with("\x03")
+
+    # Ctrl+Shift+C must call copy_selection_or_buffer and NOT write to worker stdin
+    session.write.reset_mock()
+    event_copy = Key("ctrl+shift+c", character="")
+    widget.on_key(event_copy)
+    session.write.assert_not_called()
+    assert event_copy._stop_propagation
+
 
 
 

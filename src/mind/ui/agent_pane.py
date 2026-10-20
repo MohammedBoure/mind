@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
 
 from mind.state.models import AgentInfo, AgentStatus, LogEntry
+from mind.ui.clipboard import copy_to_clipboard
 
 
 # Style classes per log entry type
@@ -94,6 +96,53 @@ class AgentLogPane(Widget):
                 f"[dim italic]— {self._agent.task}[/]"
             )
             title_bars.first().update(title)
+
+    def _get_safe_app(self) -> Any:
+        try:
+            return self.app
+        except Exception:
+            return None
+
+    def copy_selection_or_buffer(self) -> str:
+        """Copy all formatted log lines to system clipboard."""
+        return self.copy_content()
+
+    def copy_content(self) -> str:
+        """Format and copy all logs in this pane to system clipboard."""
+        if not self._logs:
+            self._safe_notify("Log pane is empty", severity="warning")
+            return ""
+
+        plain_lines = []
+        for e in self._logs:
+            ts = e.timestamp.strftime("%H:%M:%S")
+            plain_lines.append(f"[{ts}] [{e.entry_type.upper()}] {e.content}")
+
+        text = "\n".join(plain_lines)
+        copy_to_clipboard(text, app=self._get_safe_app())
+        self._safe_notify(f"📋 Copied {len(self._logs)} log lines to clipboard", timeout=1.5)
+        return text
+
+    def _safe_notify(self, message: str, severity: str = "information", timeout: float = 1.5) -> None:
+        try:
+            self.notify(message, severity=severity, timeout=timeout)
+        except Exception:
+            pass
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        """Right-click copies log lines to OS clipboard."""
+        if event.button == 3:
+            self.copy_content()
+            event.stop()
+            event.prevent_default()
+
+    def on_key(self, event: events.Key) -> None:
+        """Copy logs on Ctrl+Shift+C or 'y'."""
+        key = event.key.lower()
+        if key in ("ctrl+shift+c", "ctrl+shift+insert", "y"):
+            self.copy_content()
+            event.stop()
+            event.prevent_default()
 
 
 def _format_log_entry(entry: LogEntry) -> str:

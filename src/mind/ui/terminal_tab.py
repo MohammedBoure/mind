@@ -9,6 +9,7 @@ Implements Vim-like modal input (NORMAL vs PTY_INTERACT).
 from __future__ import annotations
 
 import sys
+import time
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -19,6 +20,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from mind.core.terminal_manager import WorkerProcessState, WorkerSession
+from mind.ui.clipboard import copy_to_clipboard
 
 
 # ANSI escape sequences for key combinations
@@ -105,8 +107,108 @@ class TerminalScreenWidget(Widget):
         self.worker_session = worker_session
         self.mode = mode
         self._last_rendered_version = -1
+        self._pending_esc: bool = False
+        self._last_esc_time: float = 0.0
+        self._esc_timer = None
+        self._is_dragging: bool = False
+        self._select_start: tuple[int, int] | None = None
+        self._select_end: tuple[int, int] | None = None
         self.add_class("terminal-screen")
         self._sync_mode_classes()
+
+    @property
+    def has_selection(self) -> bool:
+        """Return True if a non-empty text region is currently highlighted."""
+        if not self._select_start or not self._select_end:
+            return False
+        return self._select_start != self._select_end
+
+    def clear_selection(self) -> None:
+        """Clear active text selection."""
+        self._select_start = None
+        self._select_end = None
+        self._is_dragging = False
+        self.refresh()
+
+    def get_selected_text(self) -> str:
+        """Extract text within the active selection coordinates."""
+        if not self.has_selection or not self._select_start or not self._select_end:
+            return ""
+        lines = self.worker_session.buffer.get_visible_lines()
+        if not lines:
+            return ""
+
+        sx, sy = self._select_start
+        ex, ey = self._select_end
+
+        if (sy, sx) > (ey, ex):
+            y1, x1, y2, x2 = ey, ex, sy, sx
+        else:
+            y1, x1, y2, x2 = sy, sx, ey, ex
+
+        y1 = max(0, min(y1, len(lines) - 1))
+        y2 = max(0, min(y2, len(lines) - 1))
+
+        if y1 == y2:
+            line = lines[y1]
+            return line[min(x1, x2):max(x1, x2)].rstrip()
+
+        extracted: list[str] = []
+        first_line = lines[y1]
+        extracted.append(first_line[min(x1, len(first_line)):].rstrip())
+        for y in range(y1 + 1, y2):
+            extracted.append(lines[y].rstrip())
+        last_line = lines[y2]
+        extracted.append(last_line[:min(x2, len(last_line))].rstrip())
+
+        return "\n".join(extracted).strip()
+
+    def _get_safe_app(self) -> Any:
+        try:
+            return self.app
+        except Exception:
+            return None
+
+    def copy_selection_or_buffer(self) -> str:
+        """Copy active selection or recent visible terminal buffer lines to OS clipboard."""
+        text = self.get_selected_text()
+        if text:
+            desc = f"selection ({len(text)} chars)"
+        else:
+            text = self.worker_session.get_screen(lines=50).strip()
+            desc = f"terminal buffer ({len(text)} chars)"
+
+        if text:
+            copy_to_clipboard(text, app=self._get_safe_app())
+            self._safe_notify(f"📋 Copied {desc} to clipboard", timeout=1.5)
+        else:
+            self._safe_notify("Buffer is empty", severity="warning", timeout=1.0)
+        return text
+
+    def _safe_notify(self, message: str, severity: str = "information", timeout: float = 1.5) -> None:
+        try:
+            self.notify(message, severity=severity, timeout=timeout)
+        except Exception:
+            pass
+
+    def _flush_pending_esc(self, send: bool = True) -> None:
+        """Clear pending escape timer and optionally forward bare Escape to child PTY."""
+        if self._esc_timer is not None:
+            try:
+                self._esc_timer.stop()
+            except Exception:
+                pass
+            self._esc_timer = None
+        if self._pending_esc:
+            self._pending_esc = False
+            if send:
+                self.worker_session.write("\x1b")
+
+    def _on_esc_timeout(self) -> None:
+        """Timer elapsed without a 2nd Escape: pass bare Escape directly to child PTY."""
+        if self._pending_esc:
+            self._pending_esc = False
+            self.worker_session.write("\x1b")
 
     def _sync_mode_classes(self) -> None:
         """Update CSS classes corresponding to the current modal state."""
@@ -172,7 +274,7 @@ class TerminalScreenWidget(Widget):
         t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
 
         if self.is_pty_mode:
-            focus_hint = "[ ⌨ PTY INTERACT (Press Esc for Normal) ]"
+            focus_hint = "[ ⌨ PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) ]"
             focus_style = "bold #7aa2f7"
         else:
             focus_hint = "[ 🔍 NORMAL MODE (Press 'i' to type in agy) ]"
@@ -197,6 +299,7 @@ class TerminalScreenWidget(Widget):
         self.refresh()
 
     def on_blur(self) -> None:
+        self._flush_pending_esc(send=True)
         self.post_message(self.TerminalFocusChanged(is_focused=False))
         self.refresh()
 
@@ -215,50 +318,124 @@ class TerminalScreenWidget(Widget):
         if self.worker_session.process:
             self.worker_session.process.resize(columns=cols, lines=rows)
 
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """Handle mouse click and begin drag selection."""
+        if event.button == 1:
+            self._is_dragging = True
+            self._select_start = (event.x, event.y)
+            self._select_end = (event.x, event.y)
+        elif event.button == 3:
+            # Right-click: Copy active selection or entire screen buffer to OS clipboard
+            if self.has_selection:
+                selected = self.get_selected_text()
+                if selected:
+                    copy_to_clipboard(selected, app=self._get_safe_app())
+                    self._safe_notify(f"📋 Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
+                self.clear_selection()
+            else:
+                self.copy_selection_or_buffer()
+            event.stop()
+            event.prevent_default()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        """Update selection boundary during mouse drag."""
+        if self._is_dragging:
+            self._select_end = (event.x, event.y)
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        """Finalize mouse selection and automatically synchronize to clipboard."""
+        if event.button == 1 and self._is_dragging:
+            self._is_dragging = False
+            self._select_end = (event.x, event.y)
+            if self.has_selection:
+                text = self.get_selected_text()
+                if text:
+                    copy_to_clipboard(text, app=self._get_safe_app())
+                    self._safe_notify(f"📋 Copied selection to clipboard ({len(text)} chars)", timeout=1.5)
+
     def on_key(self, event: events.Key) -> None:
         """Handle keystrokes based on current modal state.
 
-        In NORMAL mode: Does not consume keys, allowing them to bubble up to
-        WorkspaceScreen for single-key command processing.
+        In NORMAL mode: Does not consume keys, allowing single-key navigation commands
+        to bubble up to WorkspaceScreen.
 
-        In PTY_INTERACT mode: Raw keystrokes are written directly to worker stdin,
-        except Escape (returns to NORMAL mode) and Ctrl+M (opens injection modal).
+        In PTY_INTERACT mode:
+        - Dedicated leader keys (Ctrl+B, F12, Ctrl+]) and double Escape (Esc Esc within 350ms)
+          switch back to mind's outer NORMAL mode.
+        - Bare single Escape and all standard keystrokes/arrows pass directly to the child PTY,
+          preserving antigravity's internal Vim modal editor and line navigation without interception.
+        - Ctrl+Shift+C explicitly copies active selection or screen buffer to OS clipboard.
+        - Ctrl+M and Ctrl+E trigger directive and config modals.
         """
-        # If in NORMAL mode, do NOT consume: allow bubbling to WorkspaceScreen.on_key()
+        key_name = event.key.lower()
+
+        # 0. Global Clipboard Copy shortcut: Ctrl+Shift+C works in both modes
+        if key_name in ("ctrl+shift+c", "ctrl+shift+insert"):
+            self.copy_selection_or_buffer()
+            event.stop()
+            event.prevent_default()
+            return
+
+        # In NORMAL mode: do not consume keys; allow bubbling to WorkspaceScreen.on_key()
         if not self.is_pty_mode:
             return
 
-        key_name = event.key.lower()
-
-        # 1. Escape: Immediately leave Insert/PTY Mode and return to NORMAL mode
-        if key_name in ("escape", "caps_lock"):
+        # 1. Leader / Prefix keys for instant escape to outer NORMAL mode (0ms delay)
+        if key_name in ("ctrl+b", "f12", "ctrl+right_square_bracket", "ctrl+]"):
+            self._flush_pending_esc(send=False)
             event.stop()
             event.prevent_default()
             self.post_message(self.ModeChangeRequested("NORMAL"))
             return
 
-        # 2. Ctrl+M: Open Directive Injection Modal directly
+        # 2. Escape handling: Double Escape (Esc Esc within 350ms) escapes to outer NORMAL mode;
+        #    Single Escape passes bare '\x1b' directly to the child PTY (antigravity vim prompt).
+        if key_name in ("escape", "caps_lock"):
+            event.stop()
+            event.prevent_default()
+            now = time.time()
+            if self._pending_esc and (now - self._last_esc_time <= 0.35):
+                # Second Escape in quick succession -> Esc Esc detected!
+                self._flush_pending_esc(send=False)
+                self.post_message(self.ModeChangeRequested("NORMAL"))
+                return
+
+            # First Escape: flush any prior pending escape, then buffer this one
+            self._flush_pending_esc(send=True)
+            self._pending_esc = True
+            self._last_esc_time = now
+            try:
+                self._esc_timer = self.set_timer(0.35, self._on_esc_timeout)
+            except Exception:
+                pass
+            return
+
+        # Any other key arriving flushes the pending Escape first to child PTY
+        if self._pending_esc:
+            self._flush_pending_esc(send=True)
+
+        # 3. Ctrl+M: Open Directive Injection Modal directly
         if key_name == "ctrl+m":
             event.stop()
             event.prevent_default()
             self.post_message(self.OpenDirectiveRequested())
             return
 
-        # 3. Ctrl+E: Open Agent Configuration Modal directly
+        # 4. Ctrl+E: Open Agent Configuration Modal directly
         if key_name == "ctrl+e":
             event.stop()
             event.prevent_default()
             self.post_message(self.OpenConfigRequested())
             return
 
-        # 4. Special key mappings
+        # 5. Special key mappings (arrows, enter, backspace, tab, etc.)
         if key_name in _SPECIAL_KEYS:
             self.worker_session.write(_SPECIAL_KEYS[key_name])
             event.stop()
             event.prevent_default()
             return
 
-        # 4. Regular characters
+        # 6. Regular characters
         if event.character:
             self.worker_session.write(event.character)
             event.stop()

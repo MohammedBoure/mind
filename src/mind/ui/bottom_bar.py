@@ -65,6 +65,7 @@ class BottomBar(Widget):
                     yield ActionPill("i/Enter", "Type in agy", "enter_pty", id="pill-insert")
                     yield ActionPill("1..9", "Jump", "show_help", id="pill-jump")
                     yield ActionPill("h/l", "Prev/Next", "next_worker", id="pill-cycle")
+                    yield ActionPill("y", "Copy", "copy_to_clipboard", id="pill-copy-yank")
                     yield ActionPill("m", "Inject", "open_directive_modal", id="pill-inject")
                     yield ActionPill("e", "Config", "open_agent_config_modal", id="pill-config")
                     yield ActionPill("c", "New Tab", "new_tab", id="pill-new")
@@ -75,7 +76,8 @@ class BottomBar(Widget):
 
                 # PTY / Insert Mode Actions
                 with Horizontal(id="bottom-pty-actions"):
-                    yield ActionPill("Esc", "Normal Mode", "enter_normal", id="pill-esc")
+                    yield ActionPill("Esc Esc / Ctrl+B", "Outer Normal", "enter_normal", id="pill-esc")
+                    yield ActionPill("Ctrl+Shift+C", "Copy", "copy_to_clipboard", id="pill-copy-pty")
                     yield ActionPill("Ctrl+M", "Inject", "open_directive_modal", id="pill-pty-inject")
                     yield ActionPill("Ctrl+E", "Config", "open_agent_config_modal", id="pill-pty-config")
                     yield ActionPill("Ctrl+C", "Interrupt", "interrupt_active", id="pill-interrupt")
@@ -87,7 +89,7 @@ class BottomBar(Widget):
 
     def _build_mode_indicator(self) -> str:
         if self.mode in ("PTY_INTERACT", "PTY"):
-            return "[bold #1a1b26 on #7aa2f7] ⌨ PTY INTERACT (Press Esc for Normal) [/]"
+            return "[bold #1a1b26 on #7aa2f7] ⌨ PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) [/]"
         return "[bold #1a1b26 on #e0af68] 🔍 NORMAL MODE (Press 'i' to type in agy) [/]"
 
     def watch_mode(self, value: str) -> None:

@@ -13,9 +13,16 @@ _HELP_TEXT = """\
 [bold #e0af68]NORMAL Mode[/]       Vim Command mode (single-key shortcuts, no modifiers needed)
 [bold #7aa2f7]PTY Mode[/]          Insert mode (raw keystrokes stream directly to agy.exe stdin)
 
-[bold underline #bb9af7]Mode Switching[/]
+[bold underline #bb9af7]Mode Switching & Leader Controls[/]
 [bold #7aa2f7]i / Enter / a[/]   Enter PTY Insert mode from NORMAL mode
-[bold #e0af68]Escape[/]            Leave PTY Insert mode and return to NORMAL mode
+[bold #e0af68]Esc Esc / Ctrl+B[/]  Return to NORMAL mode from PTY (bare Esc passes to agy vim prompt)
+[bold #7aa2f7]F12 / Ctrl+][/]     Dedicated leader keys to return to NORMAL mode
+
+[bold underline #bb9af7]Clipboard & Copying[/]
+[bold #7aa2f7]y[/]                Yank / copy focused pane selection or terminal buffer (NORMAL mode)
+[bold #7aa2f7]Ctrl+Shift+C[/]     Copy selection or terminal buffer to OS clipboard (Any mode)
+[bold #7aa2f7]Mouse Select[/]     Highlight text with left click to auto-copy to OS clipboard
+[bold #7aa2f7]Right-Click[/]      Copy selection or visible screen lines directly to clipboard
 
 [bold underline #bb9af7]NORMAL Mode Navigation & Tab Controls (Single-Key)[/]
 [bold #7aa2f7]1..9[/]             Jump directly to Worker tab N

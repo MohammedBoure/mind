@@ -14,6 +14,7 @@ import os
 import random
 import shutil
 import sys
+import time
 from typing import Any
 
 from textual import events, on
@@ -62,7 +63,10 @@ class WorkspaceScreen(Screen):
         ("question_mark", "show_help", "Help"),
         ("i", "enter_pty", "Enter PTY"),
         ("enter", "enter_pty", "Enter PTY"),
-        ("escape", "enter_normal", "Normal Mode"),
+        ("ctrl+b", "enter_normal", "Normal Mode"),
+        ("f12", "enter_normal", "Normal Mode"),
+        ("ctrl+shift+c", "copy_to_clipboard", "Copy"),
+        ("y", "copy_to_clipboard", "Yank / Copy"),
         ("ctrl+m", "open_directive_modal", "Inject Directive"),
         ("e", "open_agent_config_modal", "Configure Agent"),
         ("ctrl+e", "open_agent_config_modal", "Configure Agent"),
@@ -250,13 +254,13 @@ class WorkspaceScreen(Screen):
         """Switch to PTY_INTERACT (Insert) mode and focus active terminal."""
         self.mode = "PTY_INTERACT"
         self._auto_focus_terminal()
-        self._safe_notify("⌨ PTY Mode Active (Press Esc for Normal)", timeout=1.5)
+        self._safe_notify("⌨ PTY Mode Active (Press Esc Esc or Ctrl+B for Outer Normal)", timeout=1.5)
 
     def action_enter_normal(self) -> None:
         """Switch to NORMAL (Vim Command) mode."""
         self.mode = "NORMAL"
         self._auto_focus_terminal()
-        self._safe_notify("🔍 Normal Mode Active (Press 'i' to type)", timeout=1.5)
+        self._safe_notify("🔍 Normal Mode Active (Press 'i' to type in agy)", timeout=1.5)
 
     @on(TerminalScreenWidget.ModeChangeRequested)
     def on_mode_change_requested(self, event: TerminalScreenWidget.ModeChangeRequested) -> None:
@@ -315,17 +319,46 @@ class WorkspaceScreen(Screen):
 
     def on_key(self, event: events.Key) -> None:
         """Intercept single-key commands in NORMAL mode and prevent leaking to subprocess."""
-        # If in PTY_INTERACT mode, only Escape leaves Insert mode
+        # 0. Global Clipboard Copy: Ctrl+Shift+C in both modes
+        key = event.key.lower()
+        char = event.character or ""
+
+        if key in ("ctrl+shift+c", "ctrl+shift+insert"):
+            self.action_copy_to_clipboard()
+            event.stop()
+            event.prevent_default()
+            return
+
+        # If in PTY_INTERACT mode, only the dedicated Leader/Passthrough sequence leaves Insert mode
         if self.mode in ("PTY_INTERACT", "PTY"):
-            if event.key.lower() in ("escape", "caps_lock"):
+            if key in ("ctrl+b", "f12", "ctrl+right_square_bracket", "ctrl+]"):
                 self.action_enter_normal()
                 event.stop()
                 event.prevent_default()
+                return
+
+            if key in ("escape", "caps_lock"):
+                now = time.time()
+                last_esc = getattr(self, "_last_outer_esc_time", 0.0)
+                if last_esc and (now - last_esc <= 0.35):
+                    self._last_outer_esc_time = 0.0
+                    self.action_enter_normal()
+                else:
+                    self._last_outer_esc_time = now
+                event.stop()
+                event.prevent_default()
+                return
+
+            # In PTY_INTERACT mode, do NOT intercept single navigation keys
             return
 
         # ── NORMAL MODE COMMAND INTERCEPTION ──
-        key = event.key.lower()
-        char = event.character or ""
+        # Clipboard Yank: 'y' in NORMAL mode
+        if key == "y" or char == "y":
+            self.action_copy_to_clipboard()
+            event.stop()
+            event.prevent_default()
+            return
 
         # 1. '1'..'9': Jump directly to Worker tab N
         if (key in "123456789" or char in "123456789") and len(key) == 1:
@@ -433,6 +466,31 @@ class WorkspaceScreen(Screen):
             pass
 
     # ── Workspace Actions ──────────────────────────────────────────
+
+    def action_copy_to_clipboard(self) -> None:
+        """Copy active selection or recent buffer of currently focused pane to system clipboard."""
+        focused = self.focused
+        if focused and hasattr(focused, "copy_selection_or_buffer"):
+            text = focused.copy_selection_or_buffer()
+            if text:
+                return
+
+        # Fallback to focused pane widget
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        active_worker_tab = self._worker_tabs.get(str(self._active_worker_id))
+
+        target_widget = None
+        if coord_tab and (self.focused == coord_tab.screen_widget):
+            target_widget = coord_tab.screen_widget
+        elif active_worker_tab and active_worker_tab.screen_widget:
+            target_widget = active_worker_tab.screen_widget
+        elif coord_tab and coord_tab.screen_widget:
+            target_widget = coord_tab.screen_widget
+
+        if target_widget and hasattr(target_widget, "copy_selection_or_buffer"):
+            target_widget.copy_selection_or_buffer()
+        else:
+            self._safe_notify("Nothing to copy to clipboard", severity="warning")
 
     def action_quit(self) -> None:
         """Exit the application and stop background processes."""
