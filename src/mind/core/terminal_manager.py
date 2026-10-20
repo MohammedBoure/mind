@@ -81,6 +81,15 @@ class WorkerSession:
         self.instructions = instructions or "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
         self.created_at = datetime.now()
 
+        # Parse and store custom CLI startup arguments
+        self.custom_cli_args: list[str] = []
+        if self.extra_flags:
+            import shlex
+            try:
+                self.custom_cli_args = shlex.split(self.extra_flags)
+            except Exception:
+                self.custom_cli_args = self.extra_flags.split()
+
         self.buffer = TerminalBuffer(columns=columns, lines=lines)
         self.process: BasePtyProcess | None = None
         self.state = WorkerProcessState.PAUSED
@@ -182,6 +191,13 @@ class WorkerSession:
             if "extra_flags" in new_config:
                 self.extra_flags = new_config["extra_flags"]
                 self.profile.extra_flags = new_config["extra_flags"]
+                import shlex
+                try:
+                    self.custom_cli_args = shlex.split(self.extra_flags) if self.extra_flags else []
+                except Exception:
+                    self.custom_cli_args = self.extra_flags.split() if self.extra_flags else []
+            if "custom_cli_args" in new_config and new_config["custom_cli_args"]:
+                self.custom_cli_args = list(new_config["custom_cli_args"])
             if "instructions" in new_config:
                 self.instructions = new_config["instructions"]
                 self.profile.instructions = new_config["instructions"]
@@ -306,6 +322,8 @@ class WorkerSession:
             "cli_mode": self.cli_mode,
             "reasoning_effort": self.reasoning_effort,
             "extra_flags": self.extra_flags,
+            "custom_cli_args": self.custom_cli_args,
+            "behavioral_flags": self.custom_cli_args,
             "task": self.task,
             "state": self.state.value,
             "pid": self.pid,
@@ -421,14 +439,36 @@ class TerminalManager:
     def restart_worker(
         self,
         worker_id: str,
-        new_config: dict[str, Any] | None = None,
+        new_args: dict[str, Any] | list[str] | str | None = None,
         command: str | list[str] | None = None,
+        **kwargs: Any,
     ) -> WorkerSession | None:
-        """Find and restart an active worker session with optional new configuration."""
+        """Find and cleanly restart an active worker session with updated configuration or CLI arguments.
+        
+        Args:
+            worker_id: The ID of the worker to restart.
+            new_args: Configuration dict, list of CLI args, or extra flags string.
+            command: Explicit replacement command line (optional).
+            **kwargs: Extra configuration keys (e.g. model, cli_mode, reasoning_effort).
+        """
         worker = self.get_worker(worker_id)
         if not worker:
             return None
-        worker.restart(new_config=new_config, command=command)
+
+        cfg: dict[str, Any] = {}
+        cmd: str | list[str] | None = command
+
+        if isinstance(new_args, dict):
+            cfg.update(new_args)
+        elif isinstance(new_args, (list, tuple)):
+            cmd = list(new_args)
+        elif isinstance(new_args, str):
+            cfg["extra_flags"] = new_args
+
+        if kwargs:
+            cfg.update(kwargs)
+
+        worker.restart(new_config=cfg or None, command=cmd)
         return worker
 
     def get_worker(self, worker_id: str) -> WorkerSession | None:

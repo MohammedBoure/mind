@@ -7,12 +7,27 @@ and directives for individual worker agents directly from the TUI without editin
 from __future__ import annotations
 
 from typing import Any, Callable
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from mind.core.terminal_manager import TerminalManager
+
+
+class DirectiveTextArea(TextArea):
+    """Multi-line text area supporting smooth Tab / Shift+Tab keyboard focus traversal."""
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "tab":
+            self.screen.focus_next()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "shift+tab":
+            self.screen.focus_previous()
+            event.stop()
+            event.prevent_default()
 
 
 _CLI_MODES = [
@@ -62,12 +77,13 @@ class AgentConfigModal(ModalScreen[None]):
         workers = self._terminal_manager.list_workers()
         target_options: list[tuple[str, str]] = []
         for w in workers:
-            target_options.append((f"⚡ {w.name} (Worker {w.worker_id})", str(w.worker_id)))
+            alias_display = w.name if w.name and w.name != f"Worker-{w.worker_id}" else f"agy{w.worker_id}"
+            target_options.append((f"⚡ Worker-{w.worker_id} ({alias_display})", str(w.worker_id)))
 
         if not target_options:
             target_options = [
-                ("⚡ Worker-1 (agy 1)", "1"),
-                ("⚡ Worker-2 (agy 2)", "2"),
+                ("⚡ Worker-1 (agy1)", "1"),
+                ("⚡ Worker-2 (agy2)", "2"),
             ]
 
         default_val = self._default_target or target_options[0][1]
@@ -147,9 +163,9 @@ class AgentConfigModal(ModalScreen[None]):
                 # 7. Role & Behavioral Directive
                 with Vertical(classes="modal-field"):
                     yield Label("Role & Behavioral Directive Prompt:", classes="modal-label")
-                    yield Input(
-                        placeholder="Specific instructions or principles assigned to this worker",
-                        id="instructions-input",
+                    yield DirectiveTextArea(
+                        text="",
+                        id="instructions-area",
                     )
 
             # Action Buttons
@@ -213,8 +229,8 @@ class AgentConfigModal(ModalScreen[None]):
             flags_input = self.query_one("#extra-flags-input", Input)
             flags_input.value = worker.extra_flags or ""
 
-            inst_input = self.query_one("#instructions-input", Input)
-            inst_input.value = worker.instructions or worker.profile.instructions or ""
+            inst_area = self.query_one("#instructions-area", DirectiveTextArea)
+            inst_area.load_text(worker.instructions or worker.profile.instructions or "")
         except Exception:
             pass
 
@@ -239,7 +255,7 @@ class AgentConfigModal(ModalScreen[None]):
         model_input = self.query_one("#model-name-input", Input)
         effort_select = self.query_one("#reasoning-effort-select", Select)
         flags_input = self.query_one("#extra-flags-input", Input)
-        inst_input = self.query_one("#instructions-input", Input)
+        inst_area = self.query_one("#instructions-area", DirectiveTextArea)
 
         target_id = str(target_select.value) if target_select.value else "1"
         alias = alias_input.value.strip()
@@ -247,7 +263,7 @@ class AgentConfigModal(ModalScreen[None]):
         model = model_input.value.strip() or "gemini-3.8-flash-high"
         effort = str(effort_select.value) if effort_select.value else "high"
         extra_flags = flags_input.value.strip()
-        instructions = inst_input.value.strip()
+        instructions = inst_area.text.strip()
 
         new_config = {
             "name": alias,

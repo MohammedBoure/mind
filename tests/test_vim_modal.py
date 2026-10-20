@@ -341,17 +341,26 @@ def test_agent_config_modal_save_and_restart() -> None:
         "cli_mode": "plan",
         "model": "claude-opus-4-6-thinking",
         "reasoning_effort": "max",
-        "extra_flags": "--sandbox",
+        "extra_flags": "--sandbox --project test-proj",
         "instructions": "Plan all system architectures carefully",
     }
 
-    restarted = mgr.restart_worker("worker-restart-test", new_config=new_cfg)
+    # Test restart_worker with new_args as 2nd positional argument
+    restarted = mgr.restart_worker("worker-restart-test", new_cfg)
     assert restarted is not None
     assert restarted.name == "Worker-PostRestart"
     assert restarted.cli_mode == "plan"
     assert restarted.model == "claude-opus-4-6-thinking"
     assert restarted.reasoning_effort == "max"
-    assert restarted.extra_flags == "--sandbox"
+    assert restarted.extra_flags == "--sandbox --project test-proj"
+    assert "--sandbox" in restarted.custom_cli_args
+    assert "--project" in restarted.custom_cli_args
+    assert "test-proj" in restarted.custom_cli_args
+
+    profile = restarted.get_profile_dict()
+    assert profile["custom_cli_args"] == ["--sandbox", "--project", "test-proj"]
+    assert profile["behavioral_flags"] == ["--sandbox", "--project", "test-proj"]
+
     # Virtual buffer must be reset/cleared
     assert not any(line.strip() for line in restarted.buffer.get_visible_lines())
 

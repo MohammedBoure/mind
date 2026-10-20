@@ -474,6 +474,19 @@ AgentConfigModal {
     margin-bottom: 1;
 }
 
+#instructions-area {
+    height: 4;
+    min-height: 3;
+    max-height: 6;
+    border: round #3b4261;
+    background: #1f2335;
+    color: #c0caf5;
+}
+
+#instructions-area:focus {
+    border: round #7aa2f7;
+}
+
 #config-buttons {
     margin-top: 1;
     align: center middle;
