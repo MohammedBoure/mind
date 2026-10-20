@@ -186,3 +186,20 @@ def test_workspace_screen_vim_key_dispatch() -> None:
     ws.on_key(event_q)
     ws.action_quit.assert_called_once()
     assert event_q._stop_propagation
+
+
+def test_action_new_tab_execution() -> None:
+    """action_new_tab creates an agent with AgentStatus.RUNNING and does not raise AttributeError."""
+    from mind.state.mock_data import get_mock_agents
+
+    ws = WorkspaceScreen(session_name="test-session", agent_count=2)
+    ws._agents = get_mock_agents(2)
+    initial_count = len(ws._agents)
+
+    # Calling action_new_tab directly
+    ws.action_new_tab()
+    assert len(ws._agents) == initial_count + 1
+    new_agent = ws._agents[-1]
+    assert new_agent.name == f"Worker-{new_agent.id}"
+    assert new_agent.status.value == "running"
+

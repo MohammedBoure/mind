@@ -24,7 +24,7 @@ from mind.state.mock_data import (
     get_mock_log_stream,
     get_random_interrupt_message,
 )
-from mind.state.models import AgentInfo, AgentStatus, InterAgentMessage, LogEntry, MessagePriority
+from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, LogEntry, MessagePriority
 from mind.ui.agent_pane import AgentLogPane
 from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_modal import DirectiveModal
@@ -501,11 +501,13 @@ class WorkspaceScreen(Screen):
 
     def action_new_tab(self) -> None:
         """Add a new worker agent tab dynamically ('c' in NORMAL mode)."""
-        new_id = str(len(self._agents))
+        existing_ids = {a.id for a in self._agents}
+        next_id_int = max(existing_ids, default=0) + 1
+        new_id = str(next_id_int)
         new_agent = AgentInfo(
-            id=int(new_id),
+            id=next_id_int,
             name=f"Worker-{new_id}",
-            role="worker",
+            role=AgentRole.WORKER,
             status=AgentStatus.RUNNING,
             model="gpt-4o-mini",
             task="General tasks",

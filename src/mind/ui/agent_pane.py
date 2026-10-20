@@ -26,6 +26,7 @@ _STATUS_ICONS: dict[AgentStatus, str] = {
     AgentStatus.IDLE: "[dim]⏸ IDLE[/]",
     AgentStatus.THINKING: "[bold #a78bfa]🧠 THINKING[/]",
     AgentStatus.EXECUTING: "[bold #38bdf8]⚡ EXECUTING[/]",
+    AgentStatus.RUNNING: "[bold #9ece6a]● RUNNING[/]",
     AgentStatus.WAITING: "[bold #fbbf24]⏳ WAITING[/]",
     AgentStatus.ERROR: "[bold #f87171]❌ ERROR[/]",
 }

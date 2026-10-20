@@ -21,6 +21,7 @@ class AgentStatus(Enum):
     EXECUTING = "executing"
     WAITING = "waiting"
     ERROR = "error"
+    RUNNING = "running"
 
 
 class MessagePriority(Enum):
