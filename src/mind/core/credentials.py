@@ -196,9 +196,17 @@ def restore_slot_credential(slot: int) -> bool:
         logger.warning("Token file for slot agy%d does not exist at %s", slot, token_file)
         return False
     try:
-        token_bytes = token_file.read_bytes().strip()
-        if not token_bytes:
+        raw_bytes = token_file.read_bytes().strip()
+        if not raw_bytes:
             return False
+        # Strip UTF-8 BOM if present so Go's json.Unmarshal never fails
+        had_bom = raw_bytes.startswith(b"\xef\xbb\xbf")
+        token_bytes = raw_bytes[3:].strip() if had_bom else raw_bytes
+        if had_bom:
+            try:
+                token_file.write_bytes(token_bytes)
+            except Exception:
+                pass
         with CrossProcessCredentialLock():
             success = write_credential(token_bytes)
             # Brief settling window
@@ -209,24 +217,45 @@ def restore_slot_credential(slot: int) -> bool:
         return False
 
 
+def sync_slot_credential_from_system(slot: int) -> bool:
+    """Sync refreshed token from Windows Credential Manager back to the slot token file."""
+    if sys.platform != "win32":
+        return False
+    current_blob = read_credential()
+    if not current_blob:
+        return False
+    clean_blob = current_blob.lstrip(b"\xef\xbb\xbf").strip()
+    if not clean_blob:
+        return False
+    token_file = get_slot_token_path(slot)
+    try:
+        existing = (
+            token_file.read_bytes().lstrip(b"\xef\xbb\xbf").strip()
+            if token_file.exists()
+            else b""
+        )
+        if clean_blob != existing:
+            token_file.write_bytes(clean_blob)
+            logger.info("Successfully updated token file for slot agy%d from keyring", slot)
+            return True
+    except Exception as e:
+        logger.warning("Could not sync refreshed credential to agy%d: %s", slot, e)
+    return False
+
+
 def setup_slot_env(slot: int, base_env: dict[str, str] | None = None) -> dict[str, str]:
-    """Build isolated environment variables and runtime directories for an agy slot."""
+    """Build isolated environment variables for an agy slot.
+    
+    Avoids overriding ANTIGRAVITY_GEMINI_DIR or ANTIGRAVITY_APP_DATA_DIR to maintain
+    seamless global authentication and prevent 'not logged in' OAuth prompts.
+    """
     env = dict(os.environ if base_env is None else base_env)
     env["AGY_SLOT"] = str(slot)
 
     token_file = get_slot_token_path(slot)
     env["AGY_TOKEN_FILE"] = str(token_file)
 
-    instance_dir = Path.home() / ".gemini" / "instances" / f"agy{slot}"
-    gemini_dir = instance_dir / ".gemini"
-    app_data_dir = gemini_dir / "antigravity-cli"
-
-    try:
-        app_data_dir.mkdir(parents=True, exist_ok=True)
-        (instance_dir / ".ssh").mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-    env["ANTIGRAVITY_GEMINI_DIR"] = str(gemini_dir)
-    env["ANTIGRAVITY_APP_DATA_DIR"] = str(app_data_dir)
+    # Clean any directory overrides that prevent agy from reading global config and Windows credentials
+    env.pop("ANTIGRAVITY_GEMINI_DIR", None)
+    env.pop("ANTIGRAVITY_APP_DATA_DIR", None)
     return env

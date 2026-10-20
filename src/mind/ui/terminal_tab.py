@@ -20,7 +20,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from mind.core.terminal_manager import WorkerProcessState, WorkerSession
-from mind.ui.clipboard import copy_to_clipboard
+from mind.ui.clipboard import copy_to_clipboard, get_clipboard_text
 
 
 # ANSI escape sequences for key combinations
@@ -380,6 +380,32 @@ class TerminalScreenWidget(Widget):
         if not self.is_pty_mode:
             return
 
+        # 0.1 Explicit Clipboard Paste: Ctrl+V or Shift+Insert
+        if key_name in ("ctrl+v", "shift+insert"):
+            event.stop()
+            event.prevent_default()
+            clip_text = get_clipboard_text()
+            if clip_text:
+                # Strip rogue extended scancodes (\xe0 / à) from keyboard buffer
+                clean_text = clip_text.lstrip("\xe0")
+                self.worker_session.write(clean_text)
+            return
+
+        # 0.2 Filter standalone modifier, lock, and dead keys to avoid leaked scancodes / rogue 'à'
+        _MODIFIER_KEYS = {
+            "shift", "left_shift", "right_shift",
+            "ctrl", "left_ctrl", "right_ctrl",
+            "alt", "left_alt", "right_alt", "alt_graph",
+            "meta", "left_meta", "right_meta",
+            "caps_lock", "num_lock", "scroll_lock",
+            "insert", "menu", "print_screen",
+            "pause", "pause_break",
+        }
+        if key_name in _MODIFIER_KEYS:
+            event.stop()
+            event.prevent_default()
+            return
+
         # 1. Leader / Prefix keys for instant escape to outer NORMAL mode (0ms delay)
         if key_name in ("ctrl+b", "f12", "ctrl+right_square_bracket", "ctrl+]"):
             self._flush_pending_esc(send=False)
@@ -435,8 +461,19 @@ class TerminalScreenWidget(Widget):
             event.prevent_default()
             return
 
-        # 6. Regular characters
-        if event.character:
+        # 6. Filter out null characters and accidental rogue 'à' from modifier/navigation keys
+        if event.character == "\x00":
+            event.stop()
+            event.prevent_default()
+            return
+
+        if event.character == "à" and key_name not in ("à", "0"):
+            event.stop()
+            event.prevent_default()
+            return
+
+        # 7. Regular characters
+        if event.character and len(event.character) == 1:
             self.worker_session.write(event.character)
             event.stop()
             event.prevent_default()

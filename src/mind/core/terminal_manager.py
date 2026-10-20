@@ -24,6 +24,7 @@ from mind.core.credentials import (
     get_slot_token_path,
     restore_slot_credential,
     setup_slot_env,
+    sync_slot_credential_from_system,
 )
 from mind.core.pty_process import BasePtyProcess, spawn_pty
 from mind.core.terminal_buffer import TerminalBuffer
@@ -214,21 +215,36 @@ class WorkerSession:
         worker_env = dict(base)
         if slot:
             worker_env = setup_slot_env(slot, base_env=worker_env)
-            if sys.platform == "win32":
-                # Ensure existing saved token in ~/.gemini/tokens/ is restored without OAuth prompt
-                restore_slot_credential(slot)
 
         self.last_env = worker_env
-
         resolved_command = self._resolve_command(command)
-        self.process = spawn_pty(
-            command=resolved_command,
-            cwd=self.last_cwd,
-            env=self.last_env,
-            columns=self.buffer.columns,
-            lines=self.buffer.lines,
-            on_output=self._on_process_output,
-        )
+
+        if slot and sys.platform == "win32":
+            with CrossProcessCredentialLock():
+                # 1. Restore the slot's token into Windows Credential Manager
+                restore_slot_credential(slot)
+                # 2. Spawn the PTY process under the lock
+                self.process = spawn_pty(
+                    command=resolved_command,
+                    cwd=self.last_cwd,
+                    env=self.last_env,
+                    columns=self.buffer.columns,
+                    lines=self.buffer.lines,
+                    on_output=self._on_process_output,
+                )
+                # 3. Hold lock for 800ms so agy.exe boots and loads credentials before next slot
+                time.sleep(0.8)
+                # 4. Sync any newly refreshed token back to slot storage
+                sync_slot_credential_from_system(slot)
+        else:
+            self.process = spawn_pty(
+                command=resolved_command,
+                cwd=self.last_cwd,
+                env=self.last_env,
+                columns=self.buffer.columns,
+                lines=self.buffer.lines,
+                on_output=self._on_process_output,
+            )
         self.state = WorkerProcessState.RUNNING
 
     def restart(
@@ -290,7 +306,15 @@ class WorkerSession:
                 return command.split()
             return list(command)
 
-        # 1. Check if assigned_agent has an explicit executable launcher (e.g. agy1.cmd)
+        # 1. Search for standard `agy` or `agy.exe` on PATH or LocalAppData
+        # Running agy directly avoids nested cmd/python wrapper delays and lock contention
+        agy_path = shutil.which("agy") or shutil.which("agy.exe")
+        if not agy_path and sys.platform == "win32":
+            local_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
+            if os.path.exists(local_agy):
+                agy_path = local_agy
+
+        # 2. Check if assigned_agent has an explicit executable launcher (e.g. agy1.cmd) fallback
         agent_launcher = None
         target_agent = self.assigned_agent
         if not target_agent:
@@ -298,28 +322,19 @@ class WorkerSession:
             if slot:
                 target_agent = f"agy{slot}"
 
-        if target_agent:
+        if target_agent and not agy_path:
             agent_launcher = shutil.which(target_agent) or shutil.which(f"{target_agent}.cmd")
             if not agent_launcher and sys.platform == "win32":
                 local_cmd = os.path.expandvars(rf"%LOCALAPPDATA%\agy\bin\{target_agent}.cmd")
                 if os.path.exists(local_cmd):
                     agent_launcher = local_cmd
 
-        # 2. Search for standard `agy` or `agy.exe` on PATH
-        agy_path = shutil.which("agy") or shutil.which("agy.exe")
-
-        # 3. Check standard Windows LocalAppData directory
-        if not agy_path and sys.platform == "win32":
-            local_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
-            if os.path.exists(local_agy):
-                agy_path = local_agy
-
-        target_bin = agent_launcher or agy_path
+        target_bin = agy_path or agent_launcher
 
         if target_bin:
             cmd = [target_bin]
-            # If invoking standard agy and an assigned agent was selected, pass --agent
-            if not agent_launcher and self.assigned_agent:
+            # If invoking standard agy and a custom agent was selected (not a slot like agy1), pass --agent
+            if agy_path and self.assigned_agent and not re.match(r"^agy\d+$", self.assigned_agent, re.IGNORECASE):
                 cmd.extend(["--agent", self.assigned_agent])
             if self.cli_mode:
                 cmd.extend(["--mode", self.cli_mode])

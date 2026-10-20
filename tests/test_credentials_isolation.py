@@ -7,6 +7,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from textual import events
 
 from mind.core.credentials import (
     CrossProcessCredentialLock,
@@ -16,6 +17,7 @@ from mind.core.credentials import (
     setup_slot_env,
 )
 from mind.core.terminal_manager import TerminalManager, WorkerSession
+from mind.ui.terminal_tab import TerminalScreenWidget
 
 
 def test_extract_email_from_token_plain_and_bom():
@@ -43,18 +45,17 @@ def test_get_slot_token_path():
     assert path.parent == Path.home() / ".gemini" / "tokens"
 
 
-def test_setup_slot_env(tmp_path):
-    """Verify slot environment variables and directory isolation."""
+def test_setup_slot_env():
+    """Verify slot environment variables and removal of broken directory overrides."""
     slot = 3
-    base_env = {"EXISTING_VAR": "val123"}
+    base_env = {"EXISTING_VAR": "val123", "ANTIGRAVITY_GEMINI_DIR": "old/path"}
     env = setup_slot_env(slot, base_env=base_env)
 
     assert env["EXISTING_VAR"] == "val123"
     assert env["AGY_SLOT"] == "3"
     assert env["AGY_TOKEN_FILE"].endswith("agy3.token")
-    assert "instances" in env["ANTIGRAVITY_GEMINI_DIR"]
-    assert "agy3" in env["ANTIGRAVITY_GEMINI_DIR"]
-    assert "antigravity-cli" in env["ANTIGRAVITY_APP_DATA_DIR"]
+    assert "ANTIGRAVITY_GEMINI_DIR" not in env
+    assert "ANTIGRAVITY_APP_DATA_DIR" not in env
 
 
 def test_worker_session_slot_deduction():
@@ -111,3 +112,35 @@ def test_graceful_shutdown_preserves_tokens():
     if existing_content is not None:
         assert token_file.exists()
         assert token_file.read_bytes() == existing_content
+
+
+def test_modifier_and_scancode_filtering():
+    """Verify standalone shift/modifiers and rogue 0xE0 / 'à' scancodes are filtered."""
+    session = WorkerSession(worker_id="test-filter")
+    written = []
+    session.write = lambda text, press_enter=False: written.append(text)
+
+    widget = TerminalScreenWidget(worker_session=session)
+    widget.mode = "PTY_INTERACT"
+
+    # 1. Shift key alone should NOT write anything
+    ev_shift = events.Key("shift", "shift")
+    widget.on_key(ev_shift)
+    assert len(written) == 0
+
+    # 2. Rogue 'à' from scancode prefix 0xE0 should be ignored when key is not 'à'
+    ev_rogue = events.Key("shift", "à")
+    widget.on_key(ev_rogue)
+    assert len(written) == 0
+
+    # 3. Legitimate 'à' character typed directly should be written
+    ev_legit = events.Key("à", "à")
+    widget.on_key(ev_legit)
+    assert written == ["à"]
+    written.clear()
+
+    # 4. Clipboard paste with Ctrl+V strips rogue 0xE0
+    with patch("mind.ui.terminal_tab.get_clipboard_text", return_value="\xe0hello world"):
+        ev_paste = events.Key("ctrl+v", "")
+        widget.on_key(ev_paste)
+        assert written == ["hello world"]

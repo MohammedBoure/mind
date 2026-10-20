@@ -108,21 +108,21 @@ class WorkspaceScreen(Screen):
         if self._goal:
             prompt += f" Overall Session Goal: {self._goal}."
 
-        # 1. Search for agy1 executable / launcher
-        agy1_launcher = shutil.which("agy1") or shutil.which("agy1.cmd")
-        if not agy1_launcher and sys.platform == "win32":
-            local_agy1 = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy1.cmd")
-            if os.path.exists(local_agy1):
-                agy1_launcher = local_agy1
-
-        # 2. Fallback to standard agy executable
+        # 1. Prioritize direct agy executable to avoid nested cmd/python wrapper delays and lock contention
         agy_bin = shutil.which("agy") or shutil.which("agy.exe")
         if not agy_bin and sys.platform == "win32":
             local_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
             if os.path.exists(local_agy):
                 agy_bin = local_agy
 
-        target_bin = agy1_launcher or agy_bin
+        # 2. Fallback to agy1 launcher
+        agy1_launcher = shutil.which("agy1") or shutil.which("agy1.cmd")
+        if not agy1_launcher and sys.platform == "win32":
+            local_agy1 = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy1.cmd")
+            if os.path.exists(local_agy1):
+                agy1_launcher = local_agy1
+
+        target_bin = agy_bin or agy1_launcher
         if target_bin:
             return [target_bin, "--mode", "auto", "--prompt-interactive", prompt]
 
@@ -190,7 +190,7 @@ class WorkspaceScreen(Screen):
                                 name=agent.name,
                                 model=agent.model,
                                 task=agent.task,
-                                assigned_agent=f"agy{worker_id}" if worker_id.isdigit() else "",
+                                assigned_agent=f"agy{int(worker_id) + 1}" if worker_id.isdigit() else "",
                                 autostart=True,
                             )
                             tab_widget = WorkerTerminalTab(
@@ -735,7 +735,7 @@ class WorkspaceScreen(Screen):
             name=new_agent.name,
             model=new_agent.model,
             task=new_agent.task,
-            assigned_agent=f"agy{new_id}" if new_id.isdigit() else "",
+            assigned_agent=f"agy{int(new_id) + 1}" if new_id.isdigit() else "",
             autostart=True,
         )
         tab_widget = WorkerTerminalTab(
