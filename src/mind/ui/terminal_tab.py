@@ -499,6 +499,7 @@ class WorkerTerminalTab(Widget):
         self.worker_session = worker_session
         self.screen_widget = TerminalScreenWidget(worker_session=worker_session, mode=mode)
         self._toast_timer = None
+        self._alarm_badge: str = ""
         self.add_class("worker-terminal-tab")
 
     def compose(self) -> ComposeResult:
@@ -550,12 +551,17 @@ class WorkerTerminalTab(Widget):
                 warn_label = latest_warn[:24]
             warning_badge = f" [bold #1a1b26 on #f7768e] ⚠ Warning: {warn_label} [/]"
 
+        # Alarm badge (e.g. Worker-1 Finished / Idle)
+        alarm_badge = ""
+        if getattr(self, "_alarm_badge", ""):
+            alarm_badge = f" [bold #1a1b26 on #e0af68] {self._alarm_badge} [/]"
+
         if self.worker_session.role == "coordinator" or str(self.worker_session.worker_id) == "coordinator":
             return (
                 f" [bold #1a1b26 on #bb9af7] 🧠 PRIMARY COORDINATOR [/] "
                 f"[dim]Instance:[/] [bold #bb9af7]{instance_name}[/] "
                 f"[dim]({self.worker_session.model} · {pid_info})[/] "
-                f"{state_str}{directive_badge}{warning_badge} "
+                f"{state_str}{directive_badge}{warning_badge}{alarm_badge} "
                 f"[italic #7982a9]— {self.worker_session.task}[/]"
             )
 
@@ -563,9 +569,19 @@ class WorkerTerminalTab(Widget):
             f" [bold #7aa2f7]● Worker-{self.worker_session.worker_id}[/] "
             f"[dim]Instance:[/] [bold #bb9af7]{instance_name}[/] "
             f"[dim]({self.worker_session.model} · {pid_info})[/] "
-            f"{state_str}{directive_badge}{warning_badge} "
+            f"{state_str}{directive_badge}{warning_badge}{alarm_badge} "
             f"[italic #7982a9]— {self.worker_session.task}[/]"
         )
+
+    def set_alarm_badge(self, badge_text: str) -> None:
+        """Display an event or alarm notification badge in the tab header."""
+        self._alarm_badge = badge_text
+        self._refresh_header()
+
+    def clear_alarm_badge(self) -> None:
+        """Clear active alarm badge."""
+        self._alarm_badge = ""
+        self._refresh_header()
 
     def update_header_info(self) -> None:
         """Force immediate re-render of tab header and notifications."""

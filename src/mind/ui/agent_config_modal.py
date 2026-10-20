@@ -1,68 +1,380 @@
-"""Interactive in-app Agent Configuration & Dynamic System Agent Discovery Modal.
+"""Interactive in-app Agent Configuration & Settings Modal (Antigravity CLI Style).
 
-Allows inspecting, configuring, and tuning CLI flags, models, reasoning effort,
-and directives for individual worker agents directly from the TUI, with dynamic
-system agent discovery (agy1, agy2, agy3, etc.) on the host machine.
+Implements a pure keyboard-driven, two-column interactive configuration menu
+matching the Antigravity CLI / Codex config layout:
+- Real-time search filter at the top (`Search: `)
+- Two-column interactive settings list with `>` cursor indicator
+- Instant option cycling via Left/Right, Space, or Enter
+- Dynamic bottom description explaining the currently selected setting
+- Full keyboard navigation (Up/Down/j/k, Left/Right/h/l, /, Backspace, Ctrl+R, Esc)
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import re
 from typing import Any, Callable
+
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static, TextArea
+from textual.widget import Widget
+from textual.widgets import Button, Input, Static, TextArea
 
 from mind.core.agent_discovery import discover_system_agents, get_agent_preset_config
+from mind.core.directives import (
+    ensure_default_directives,
+    get_worker_directive_path,
+    load_directive,
+    open_directive_in_editor,
+    resolve_directive_path,
+    save_directive,
+)
 from mind.core.terminal_manager import TerminalManager
 
 
-class DirectiveTextArea(TextArea):
-    """Multi-line text area supporting smooth Tab / Shift+Tab keyboard focus traversal."""
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "tab":
-            self.screen.focus_next()
-            event.stop()
-            event.prevent_default()
-        elif event.key == "shift+tab":
-            self.screen.focus_previous()
-            event.stop()
-            event.prevent_default()
-
-
-_CLI_MODES = [
-    ("Auto (Autonomous Execution)", "auto"),
-    ("Accept Edits (Auto-Apply Tool Edits)", "accept-edits"),
-    ("Plan (Read-only Analysis & Planning)", "plan"),
-]
-
-_MODEL_PRESETS = [
-    ("Gemini 3.8 Flash High (Default)", "gemini-3.8-flash-high"),
-    ("Gemini 3.8 Flash Medium", "gemini-3.8-flash-medium"),
-    ("Gemini 3.8 Flash Low", "gemini-3.8-flash-low"),
-    ("Claude Sonnet 4.6 (Thinking)", "claude-sonnet-4-6"),
-    ("Claude Opus 4.6 (Thinking)", "claude-opus-4-6-thinking"),
-    ("GPT-OSS 120B Medium", "gpt-oss-120b-medium"),
-    ("Custom Model Name...", "custom"),
-]
-
-_EFFORT_OPTIONS = [
-    ("Low", "low"),
-    ("Medium", "medium"),
-    ("High (Default)", "high"),
-    ("Extra High (xhigh)", "xhigh"),
-    ("Max", "max"),
-]
-
-
-class AgentConfigModal(ModalScreen[None]):
-    """Modal overlay for inspecting and tuning worker agent CLI arguments and profiles."""
+class DirectiveEditorModal(ModalScreen[str | None]):
+    """In-app modal editor for inspecting and editing agent directive markdown directly."""
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
+        ("ctrl+s", "save_directive_content", "Save Directive"),
+        ("ctrl+o", "open_in_editor", "Open in External Editor"),
+    ]
+
+    def __init__(self, target: str, current_content: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.target = target
+        self.current_content = current_content
+        self.file_path = resolve_directive_path(target)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="directive-editor-dialog"):
+            yield Static(
+                f"📝 [bold #bb9af7]Edit Directive: {self.target}[/] [dim]({self.file_path})[/]",
+                id="directive-editor-title",
+            )
+            self.text_area = TextArea(self.current_content, id="directive-text-area")
+            yield self.text_area
+            with Horizontal(id="directive-editor-buttons"):
+                yield Button("💾 Save Directive (Ctrl+S)", variant="success", id="btn-save-directive")
+                yield Button("📄 Open in External Editor (Ctrl+O)", variant="primary", id="btn-open-ext")
+                yield Button("Cancel (Esc)", variant="default", id="btn-cancel-directive")
+
+    def on_mount(self) -> None:
+        self.set_timer(0.05, self._focus_text)
+
+    def _focus_text(self) -> None:
+        try:
+            self.text_area.focus()
+        except Exception:
+            pass
+
+    def action_save_directive_content(self) -> None:
+        """Persist edited directive to disk and dismiss modal."""
+        new_text = self.text_area.text
+        save_directive(self.target, new_text)
+        self.dismiss(new_text)
+
+    def action_open_in_editor(self) -> None:
+        """Open in system default external editor."""
+        path = open_directive_in_editor(self.target)
+        if hasattr(self.app, "notify"):
+            self.app.notify(f"Opened: {path}", severity="information")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-save-directive":
+            self.action_save_directive_content()
+        elif btn_id == "btn-open-ext":
+            self.action_open_in_editor()
+        elif btn_id == "btn-cancel-directive":
+            self.action_cancel()
+
+
+@dataclass
+class ConfigOption:
+    """Represents a single configuration setting entry with interactive options."""
+    key: str
+    label: str
+    options: list[str]
+    current_index: int = 0
+    description: str = ""
+    is_worker_specific: bool = False
+
+    @property
+    def value(self) -> str:
+        if not self.options:
+            return ""
+        return self.options[self.current_index % len(self.options)]
+
+    def cycle_next(self) -> str:
+        if self.options:
+            self.current_index = (self.current_index + 1) % len(self.options)
+        return self.value
+
+    def cycle_prev(self) -> str:
+        if self.options:
+            self.current_index = (self.current_index - 1) % len(self.options)
+        return self.value
+
+    def set_value(self, val: str) -> None:
+        if val in self.options:
+            self.current_index = self.options.index(val)
+        elif self.options:
+            # Custom or fuzzy match
+            for i, opt in enumerate(self.options):
+                if opt.lower() == val.lower():
+                    self.current_index = i
+                    return
+            # If not in options, append as custom option and select it
+            self.options.append(val)
+            self.current_index = len(self.options) - 1
+
+
+class ConfigSettingsListWidget(Widget):
+    """Interactive, keyboard-driven two-column settings list with cursor and scrolling."""
+
+    can_focus = True
+
+    def __init__(
+        self,
+        entries: list[ConfigOption],
+        on_change: Callable[[ConfigOption], None] | None = None,
+        on_selection_change: Callable[[ConfigOption | None], None] | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.entries = entries
+        self._on_change = on_change
+        self._on_selection_change = on_selection_change
+        self.selected_index: int = 0
+        self.scroll_offset: int = 0
+        self.search_query: str = ""
+
+    def get_filtered_entries(self) -> list[tuple[int, ConfigOption]]:
+        """Return list of (original_index, entry) matching current search query."""
+        if not self.search_query.strip():
+            return list(enumerate(self.entries))
+        q = self.search_query.lower()
+        return [
+            (i, entry)
+            for i, entry in enumerate(self.entries)
+            if q in entry.label.lower() or q in entry.key.lower() or q in entry.value.lower()
+        ]
+
+    def get_active_entry(self) -> ConfigOption | None:
+        """Get currently highlighted entry."""
+        filtered = self.get_filtered_entries()
+        if not filtered:
+            return None
+        safe_idx = max(0, min(self.selected_index, len(filtered) - 1))
+        return filtered[safe_idx][1]
+
+    def set_search_query(self, query: str) -> None:
+        """Update search query and adjust selection."""
+        self.search_query = query
+        self.selected_index = 0
+        self.scroll_offset = 0
+        self.refresh()
+        self._notify_selection_changed()
+
+    def _notify_selection_changed(self) -> None:
+        if self._on_selection_change:
+            self._on_selection_change(self.get_active_entry())
+
+    def action_move_up(self) -> None:
+        """Move cursor up."""
+        filtered = self.get_filtered_entries()
+        if not filtered:
+            return
+        if self.selected_index > 0:
+            self.selected_index -= 1
+            if self.selected_index < self.scroll_offset:
+                self.scroll_offset = self.selected_index
+            self.refresh()
+            self._notify_selection_changed()
+
+    def action_move_down(self) -> None:
+        """Move cursor down."""
+        filtered = self.get_filtered_entries()
+        if not filtered:
+            return
+        if self.selected_index < len(filtered) - 1:
+            self.selected_index += 1
+            visible_rows = max(1, self.size.height or 16)
+            if self.selected_index >= self.scroll_offset + visible_rows:
+                self.scroll_offset = self.selected_index - visible_rows + 1
+            self.refresh()
+            self._notify_selection_changed()
+
+    def action_cycle_next(self) -> None:
+        """Cycle current setting option forward."""
+        entry = self.get_active_entry()
+        if entry:
+            entry.cycle_next()
+            self.refresh()
+            if self._on_change:
+                self._on_change(entry)
+            self._notify_selection_changed()
+
+    def action_cycle_prev(self) -> None:
+        """Cycle current setting option backward."""
+        entry = self.get_active_entry()
+        if entry:
+            entry.cycle_prev()
+            self.refresh()
+            if self._on_change:
+                self._on_change(entry)
+            self._notify_selection_changed()
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle keyboard navigation and option toggling."""
+        key = event.key
+        char = event.character or ""
+
+        if key in ("up", "k"):
+            self.action_move_up()
+            event.stop()
+            event.prevent_default()
+        elif key in ("down", "j"):
+            self.action_move_down()
+            event.stop()
+            event.prevent_default()
+        elif key in ("right", "l", "space", "enter"):
+            self.action_cycle_next()
+            event.stop()
+            event.prevent_default()
+        elif key in ("left", "h"):
+            self.action_cycle_prev()
+            event.stop()
+            event.prevent_default()
+        elif key == "pageup":
+            for _ in range(5):
+                self.action_move_up()
+            event.stop()
+            event.prevent_default()
+        elif key == "pagedown":
+            for _ in range(5):
+                self.action_move_down()
+            event.stop()
+            event.prevent_default()
+        elif key == "home":
+            self.selected_index = 0
+            self.scroll_offset = 0
+            self.refresh()
+            self._notify_selection_changed()
+            event.stop()
+            event.prevent_default()
+        elif key == "end":
+            filtered = self.get_filtered_entries()
+            if filtered:
+                self.selected_index = len(filtered) - 1
+                visible_rows = max(1, self.size.height or 16)
+                self.scroll_offset = max(0, len(filtered) - visible_rows)
+                self.refresh()
+                self._notify_selection_changed()
+            event.stop()
+            event.prevent_default()
+        elif key == "slash":
+            # Focus search input on '/'
+            try:
+                inp = self.screen.query_one("#config-search-input", Input)
+                inp.focus()
+            except Exception:
+                pass
+            event.stop()
+            event.prevent_default()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """Click to select row or cycle value."""
+        self.focus()
+        clicked_row = event.y + self.scroll_offset
+        filtered = self.get_filtered_entries()
+        if 0 <= clicked_row < len(filtered):
+            if self.selected_index == clicked_row:
+                self.action_cycle_next()
+            else:
+                self.selected_index = clicked_row
+                self.refresh()
+                self._notify_selection_changed()
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        self.action_move_up()
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        self.action_move_down()
+
+    def render(self) -> Text:
+        """Render two-column settings list with cursor and colors."""
+        filtered = self.get_filtered_entries()
+        if not filtered:
+            return Text.from_markup("  [dim #565f89]No matching configuration options found.[/]")
+
+        visible_rows = max(1, self.size.height or 16)
+        # Ensure selected_index is within bounds
+        self.selected_index = max(0, min(self.selected_index, len(filtered) - 1))
+
+        # Adjust scroll offset
+        if self.selected_index < self.scroll_offset:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= self.scroll_offset + visible_rows:
+            self.scroll_offset = self.selected_index - visible_rows + 1
+
+        slice_entries = filtered[self.scroll_offset : self.scroll_offset + visible_rows]
+
+        out = Text()
+        col_width = 33
+
+        for i, (orig_idx, entry) in enumerate(slice_entries):
+            current_abs_idx = self.scroll_offset + i
+            is_selected = current_abs_idx == self.selected_index
+
+            val = entry.value
+            val_style = "bold #7dcfff"
+            if val == "on":
+                val_style = "bold #9ece6a"
+            elif val == "off":
+                val_style = "dim #565f89"
+            elif val in ("accept-edits", "auto", "always proceeds", "always-proceed", "fast"):
+                val_style = "bold #7dcfff"
+            elif val in ("vim", "colorblind-friendly dark", "tokyo-night"):
+                val_style = "#bb9af7"
+
+            label_str = f"{entry.label:<{col_width}}"
+
+            if is_selected:
+                out.append("> ", style="bold #7aa2f7")
+                out.append(label_str, style="bold #ffffff")
+                out.append(" ")
+                out.append(val, style=val_style)
+            else:
+                out.append("  ", style="#565f89")
+                out.append(label_str, style="#c0caf5")
+                out.append(" ")
+                out.append(val, style=val_style)
+
+            if i < len(slice_entries) - 1:
+                out.append("\n")
+
+        return out
+
+
+class AgentConfigModal(ModalScreen[None]):
+    """Modal overlay presenting the sleek Antigravity CLI configuration layout."""
+
+    BINDINGS = [
+        ("escape", "save_and_close", "Save & Close"),
+        ("ctrl+r", "save_and_restart", "Save & Restart Worker"),
+        ("ctrl+s", "save_and_close", "Save"),
+        ("o", "open_directive_file", "Open Directive File"),
+        ("ctrl+o", "open_directive_file", "Open Directive File"),
+        ("e", "edit_directive_inline", "Edit Directive In-App"),
     ]
 
     def __init__(
@@ -76,304 +388,572 @@ class AgentConfigModal(ModalScreen[None]):
         self._on_save_callback = on_save_callback
         self._terminal_manager = TerminalManager.get_instance()
         self._discovered_agents = discover_system_agents()
+        self.options: list[ConfigOption] = []
+        self._init_options()
+
+    def _init_options(self) -> None:
+        """Build full list of configuration options matching the screenshot & active agents."""
+        workers = self._terminal_manager.list_workers()
+
+        # 1. Target Worker Tab
+        tab_options: list[str] = []
+        for w in workers:
+            tag = w.assigned_agent or w.name
+            if w.role == "coordinator" or str(w.worker_id) in ("coordinator", "primary"):
+                tab_options.append(f"Coordinator: {tag} (Slot {w.get_slot_id() or 1})")
+            else:
+                tab_options.append(f"Tab {w.worker_id}: {tag} (Slot {w.get_slot_id() or w.worker_id})")
+
+        if not tab_options:
+            tab_options = ["Coordinator: agy1 (Slot 1)", "Tab 1: agy2 (Slot 2)"]
+
+        # Default tab selection
+        target_tab_idx = 0
+        if self._default_target:
+            for i, opt in enumerate(tab_options):
+                if str(self._default_target).lower() in opt.lower():
+                    target_tab_idx = i
+                    break
+
+        # Discovered agents
+        agent_names = list(self._discovered_agents) if self._discovered_agents else ["agy1", "agy2"]
+        if "agy1" not in agent_names:
+            agent_names.insert(0, "agy1")
+        if "agy2" not in agent_names:
+            agent_names.insert(1, "agy2")
+
+        # Get current worker settings
+        current_worker = None
+        if workers:
+            if self._default_target:
+                for w in workers:
+                    if str(w.worker_id) == str(self._default_target):
+                        current_worker = w
+                        break
+            if not current_worker:
+                current_worker = workers[0]
+
+        cur_mode = current_worker.cli_mode if current_worker else "accept-edits"
+        cur_model = current_worker.model if current_worker else "gemini-3.8-flash-high"
+        cur_effort = current_worker.reasoning_effort if current_worker else "high"
+        cur_agent = current_worker.assigned_agent if current_worker else "agy1"
+        cur_flags = current_worker.extra_flags if current_worker else "--dangerously-skip-permissions"
+        if not cur_flags:
+            cur_flags = "--dangerously-skip-permissions"
+
+        self.options = [
+            ConfigOption(
+                key="agent_mode",
+                label="Agent Mode",
+                options=["accept-edits", "auto", "plan", "default"],
+                current_index=0,
+                description="'default': standard behavior. 'accept-edits': auto-approve file edits, prompt for commands. 'plan': read-only analysis. 'auto': autonomous execution.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="animation_speed",
+                label="Animation Speed",
+                options=["fast", "medium", "slow", "off"],
+                current_index=0,
+                description="Controls animation frame rate and transition timing for terminal multiplexer UI.",
+            ),
+            ConfigOption(
+                key="artifact_review",
+                label="Artifact Review",
+                options=["always proceeds", "ask", "never"],
+                current_index=0,
+                description="Controls execution gating for generated code artifacts and suggested tasks.",
+            ),
+            ConfigOption(
+                key="color_scheme",
+                label="Color Scheme",
+                options=["colorblind-friendly dark", "tokyo-night", "catppuccin", "monokai", "dark", "light"],
+                current_index=0,
+                description="Active color palette theme applied to TUI borders, headers, and tabs.",
+            ),
+            ConfigOption(
+                key="picker_grouping",
+                label="Conversation Picker Grouping",
+                options=["none", "by-date", "by-project", "by-agent"],
+                current_index=0,
+                description="How conversation sessions are organized in the session picker.",
+            ),
+            ConfigOption(
+                key="copy_on_select",
+                label="Copy on Select",
+                options=["on", "off"],
+                current_index=0,
+                description="Automatically synchronize mouse-selected text in terminal buffers directly to OS clipboard.",
+            ),
+            ConfigOption(
+                key="editor",
+                label="Editor",
+                options=["vim", "nano", "code", "notepad", "emacs"],
+                current_index=0,
+                description="External editor launched for long prompt editing and file inspections.",
+            ),
+            ConfigOption(
+                key="editor_mode",
+                label="Editor Mode",
+                options=["vim", "emacs", "default"],
+                current_index=0,
+                description="Modal keybinding system for outer workspace navigation and terminal passthrough.",
+            ),
+            ConfigOption(
+                key="editor_mode_insert_first",
+                label="Editor Mode > Insert First",
+                options=["off", "on"],
+                current_index=0,
+                description="Start terminal sessions in Insert/PTY mode instead of Normal mode by default.",
+            ),
+            ConfigOption(
+                key="enable_telemetry",
+                label="Enable Telemetry",
+                options=["on", "off"],
+                current_index=0,
+                description="Send anonymous crash logs and diagnostic telemetry to help improve system stability.",
+            ),
+            ConfigOption(
+                key="non_workspace_access",
+                label="Non-Workspace Access",
+                options=["on", "off"],
+                current_index=0,
+                description="Allow worker agents to access files outside the current project workspace root.",
+            ),
+            ConfigOption(
+                key="notifications",
+                label="Notifications",
+                options=["off", "on"],
+                current_index=0,
+                description="Show visual banner popups for inter-agent directives and status changes.",
+            ),
+            ConfigOption(
+                key="queued_messages",
+                label="Queued Messages",
+                options=["Queue", "Discard", "Interrupt"],
+                current_index=0,
+                description="How to handle incoming directives while a worker process is busy executing.",
+            ),
+            ConfigOption(
+                key="rendering_mode",
+                label="Rendering Mode",
+                options=["native terminal (inline)", "alternate screen"],
+                current_index=0,
+                description="Virtual screen rendering technique used by the pseudoterminal multiplexer.",
+            ),
+            ConfigOption(
+                key="sandbox_mode",
+                label="Sandbox Mode",
+                options=["off", "on"],
+                current_index=0,
+                description="Run agent processes inside a sandbox with terminal and filesystem restrictions enabled.",
+            ),
+            ConfigOption(
+                key="show_active_tasks",
+                label="Show Active Tasks",
+                options=["on", "off"],
+                current_index=0,
+                description="Display running background agent tasks and tool calls in the telemetry bars.",
+            ),
+            ConfigOption(
+                key="show_feedback_survey",
+                label="Show Feedback Survey",
+                options=["on", "off"],
+                current_index=0,
+                description="Periodically prompt for feedback upon completing major session goals.",
+            ),
+            ConfigOption(
+                key="show_tips",
+                label="Show Tips",
+                options=["on", "off"],
+                current_index=0,
+                description="Display contextual keyboard shortcut tips in the bottom status bar.",
+            ),
+            ConfigOption(
+                key="tool_permission",
+                label="Tool Permission",
+                options=["always-proceed", "prompt", "strict"],
+                current_index=0,
+                description="'always-proceed': auto-approve safe tool calls. 'prompt': ask before running. 'strict': sandbox.",
+            ),
+            ConfigOption(
+                key="use_ai_credits",
+                label="Use AI Credits",
+                options=["off", "on"],
+                current_index=0,
+                description="Enable cloud AI compute credits for advanced deep-thinking reasoning models.",
+            ),
+            ConfigOption(
+                key="verbosity",
+                label="Verbosity",
+                options=["medium", "low", "high", "debug"],
+                current_index=0,
+                description="Logging verbosity level for terminal manager, MCP bridge, and agent orchestration.",
+            ),
+            # Worker Agent Specific Configurations
+            ConfigOption(
+                key="target_worker",
+                label="Target Worker Tab",
+                options=tab_options,
+                current_index=target_tab_idx,
+                description="Active worker agent tab being inspected, configured, or restarted.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="system_agent",
+                label="System Agent / Profile",
+                options=agent_names,
+                current_index=0,
+                description="Target discovered system CLI agent profile and dedicated token slot identifier (--agent).",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="model_selection",
+                label="Model Selection",
+                options=[
+                    "gemini-3.8-flash-high",
+                    "gemini-3.8-flash-medium",
+                    "gemini-3.8-flash-low",
+                    "claude-sonnet-4-6",
+                    "claude-opus-4-6-thinking",
+                    "gpt-oss-120b-medium",
+                ],
+                current_index=0,
+                description="Underlying foundation model powering the agent CLI session.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="reasoning_effort",
+                label="Reasoning Effort",
+                options=["high", "medium", "low", "xhigh", "max"],
+                current_index=0,
+                description="Reasoning token budget and thinking depth allocated for multi-step orchestration.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="extra_flags",
+                label="Extra CLI Flags",
+                options=[
+                    "--dangerously-skip-permissions",
+                    "--dangerously-skip-permissions --sandbox",
+                    "--sandbox",
+                    "none",
+                ],
+                current_index=0,
+                description="Additional command-line startup arguments passed directly to the agy process.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="open_directive",
+                label="Directives File",
+                options=["[Open in System Editor (o)]"],
+                current_index=0,
+                description=f"Directives file: {resolve_directive_path(self._resolve_selected_worker_id())}. Press Enter or 'o' to open in default system editor.",
+                is_worker_specific=True,
+            ),
+            ConfigOption(
+                key="behavioral_directive",
+                label="Role & Behavioral Directive Prompt",
+                options=["[Edit In-App (e)]", "Autonomous Worker", "Architect Planner", "Code Reviewer"],
+                current_index=0,
+                description="Persisted in ~/.mind/directives/. Press 'e' or Enter to inspect and edit full markdown rules in-app.",
+                is_worker_specific=True,
+            ),
+        ]
+
+        # Apply worker defaults to options
+        for opt in self.options:
+            if opt.key == "agent_mode" and cur_mode:
+                opt.set_value(cur_mode)
+            elif opt.key == "model_selection" and cur_model:
+                opt.set_value(cur_model)
+            elif opt.key == "reasoning_effort" and cur_effort:
+                opt.set_value(cur_effort)
+            elif opt.key == "system_agent" and cur_agent:
+                opt.set_value(cur_agent)
+            elif opt.key == "extra_flags" and cur_flags:
+                opt.set_value(cur_flags)
 
     def compose(self) -> ComposeResult:
-        workers = self._terminal_manager.list_workers()
-        target_options: list[tuple[str, str]] = []
-        for w in workers:
-            agent_tag = w.assigned_agent or w.name
-            if w.role == "coordinator" or str(w.worker_id) in ("coordinator", "primary"):
-                target_options.append((f"🧠 Coordinator: {agent_tag} (Primary)", str(w.worker_id)))
-            else:
-                target_options.append((f"⚡ Tab {w.worker_id}: {agent_tag} (Worker-{w.worker_id})", str(w.worker_id)))
-
-        if not target_options:
-            target_options = [
-                ("⚡ Tab 1: agy1 (Worker-1)", "1"),
-                ("⚡ Tab 2: agy2 (Worker-2)", "2"),
-            ]
-
-        default_val = self._default_target or target_options[0][1]
-        valid_keys = {val for _, val in target_options}
-        if default_val not in valid_keys:
-            default_val = target_options[0][1]
-
-        # Discovered system agent options
-        system_agent_options: list[tuple[str, str]] = []
-        for agent_name in self._discovered_agents:
-            system_agent_options.append((f"🤖 {agent_name} (Installed System Agent)", agent_name))
-
-        if not system_agent_options:
-            system_agent_options = [
-                ("🤖 agy1 (Installed System Agent)", "agy1"),
-                ("🤖 agy2 (Installed System Agent)", "agy2"),
-            ]
-
         with Vertical(id="agent-config-dialog"):
-            yield Static("⚙ [bold #bb9af7]Agent Configuration & Dynamic Discovery[/]", id="config-title")
+            # 1. Search Bar
+            with Horizontal(id="config-search-box"):
+                yield Static("Search: ", id="config-search-prompt")
+                yield Input(
+                    placeholder="",
+                    id="config-search-input",
+                )
+
+            # 2. Main Two-Column Interactive Settings List
+            self.settings_list = ConfigSettingsListWidget(
+                entries=self.options,
+                on_change=self._on_option_changed,
+                on_selection_change=self._on_selection_changed,
+                id="config-settings-view",
+            )
+            yield self.settings_list
+
+            # 3. Dynamic Description Footer
+            initial_entry = self.settings_list.get_active_entry()
+            desc = initial_entry.description if initial_entry else ""
+            yield Static(desc, id="config-description-view")
+
+            # 4. Action Hints Bar
             yield Static(
-                f"[dim]Discovered {len(self._discovered_agents)} system agents on host. Tune CLI flags & directives.[/]",
-                id="config-subtitle",
+                "[bold #7aa2f7]↑↓/jk[/] Navigate  [bold #7aa2f7]←→/Space/Enter[/] Change  [bold #7aa2f7]o[/] Open Directive  [bold #7aa2f7]e[/] Edit In-App  [bold #e0af68]Ctrl+R[/] Restart  [bold #bb9af7]Esc[/] Close",
+                id="config-footer-hints",
             )
 
-            with VerticalScroll(id="config-scroll-body"):
-                # 1. Target Worker Tab
-                with Vertical(classes="modal-field"):
-                    yield Label("Target Worker Tab:", classes="modal-label")
-                    yield Select(
-                        options=target_options,
-                        value=default_val,
-                        id="target-worker-select",
-                        allow_blank=False,
-                    )
-
-                # 2. Target Discovered System Agent
-                with Vertical(classes="modal-field"):
-                    yield Label("System Agent / Profile (--agent):", classes="modal-label")
-                    yield Select(
-                        options=system_agent_options,
-                        value=system_agent_options[0][1],
-                        id="system-agent-select",
-                        allow_blank=False,
-                    )
-
-                # 3. Agent Name / Alias
-                with Vertical(classes="modal-field"):
-                    yield Label("Agent Alias / Display Name:", classes="modal-label")
-                    yield Input(
-                        placeholder="e.g. agy1 or Worker-1",
-                        id="worker-alias-input",
-                    )
-
-                # 4. Execution Mode
-                with Vertical(classes="modal-field"):
-                    yield Label("Agent Execution Mode (--mode):", classes="modal-label")
-                    yield Select(
-                        options=_CLI_MODES,
-                        value="auto",
-                        id="cli-mode-select",
-                        allow_blank=False,
-                    )
-
-                # 5. Model Preset & Custom Model Name
-                with Vertical(classes="modal-field"):
-                    yield Label("Model Selection (--model):", classes="modal-label")
-                    yield Select(
-                        options=_MODEL_PRESETS,
-                        value="gemini-3.8-flash-high",
-                        id="model-preset-select",
-                        allow_blank=False,
-                    )
-                    yield Input(
-                        placeholder="Model name identifier (e.g. gemini-3.8-flash-high)",
-                        id="model-name-input",
-                    )
-
-                # 6. Reasoning Effort
-                with Vertical(classes="modal-field"):
-                    yield Label("Reasoning Effort (--effort):", classes="modal-label")
-                    yield Select(
-                        options=_EFFORT_OPTIONS,
-                        value="high",
-                        id="reasoning-effort-select",
-                        allow_blank=False,
-                    )
-
-                # 7. Extra Flags
-                with Vertical(classes="modal-field"):
-                    yield Label("Extra CLI Flags (e.g. --dangerously-skip-permissions --sandbox):", classes="modal-label")
-                    yield Input(
-                        placeholder="--dangerously-skip-permissions --sandbox",
-                        id="extra-flags-input",
-                    )
-
-                # 8. Role & Behavioral Directive
-                with Vertical(classes="modal-field"):
-                    yield Label("Role & Behavioral Directive Prompt:", classes="modal-label")
-                    yield DirectiveTextArea(
-                        text="",
-                        id="instructions-area",
-                    )
-
-            # Action Buttons
-            with Horizontal(id="config-buttons"):
-                yield Button("⚡ Save & Restart Worker", variant="warning", id="btn-save-restart")
-                yield Button("💾 Save without Restart", variant="primary", id="btn-save-only")
-                yield Button("Cancel", variant="default", id="btn-config-cancel")
-
     def on_mount(self) -> None:
-        """Populate initial fields with the active worker's existing configuration."""
-        target_select = self.query_one("#target-worker-select", Select)
-        initial_id = str(target_select.value) if target_select.value else (self._default_target or "1")
-        self._load_worker_data(initial_id)
-        self.query_one("#worker-alias-input", Input).focus()
+        """Focus the settings list by default for immediate keyboard interaction."""
+        self.set_timer(0.05, self._focus_list)
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Dynamically load worker configuration or react to agent selection."""
-        if event.select.id == "target-worker-select":
-            if event.value is not None:
-                self._load_worker_data(str(event.value))
-        elif event.select.id == "system-agent-select":
-            if event.value is not None:
-                self._apply_discovered_agent(str(event.value))
-        elif event.select.id == "model-preset-select":
-            if event.value and event.value != "custom":
-                try:
-                    self.query_one("#model-name-input", Input).value = str(event.value)
-                except Exception:
-                    pass
-
-    def _apply_discovered_agent(self, agent_name: str) -> None:
-        """When an agent is selected from discovered list, pre-fill its alias and configuration."""
-        alias_input = self.query_one("#worker-alias-input", Input)
-        flags_input = self.query_one("#extra-flags-input", Input)
-        inst_area = self.query_one("#instructions-area", DirectiveTextArea)
-
-        alias_input.value = agent_name
-
-        # Update extra flags to include --agent <agent_name> cleanly
-        current_flags = flags_input.value.strip()
-        # Remove any existing --agent flag
-        clean_flags = re.sub(r"--agent\s+[^\s]+", "", current_flags).strip()
-        new_flags = f"--agent {agent_name} {clean_flags}".strip() if clean_flags else f"--agent {agent_name}"
-        flags_input.value = new_flags
-
-        # Pre-fill default directives if empty or default
-        if not inst_area.text.strip() or "Act as an autonomous" in inst_area.text:
-            inst_area.load_text(f"Act as autonomous system worker agent '{agent_name}'. Listen for directives and execute terminal tasks.")
-
-    def _load_worker_data(self, worker_id: str) -> None:
-        """Populate form fields with current values from the worker session."""
-        worker = self._terminal_manager.get_worker(worker_id)
-        if not worker:
-            return
-
+    def _focus_list(self) -> None:
         try:
-            alias_input = self.query_one("#worker-alias-input", Input)
-            alias_input.value = worker.name
-
-            # Match discovered system agent if assigned
-            sys_select = self.query_one("#system-agent-select", Select)
-            assigned = worker.assigned_agent or (worker.name if worker.name in self._discovered_agents else "")
-            if assigned and assigned in self._discovered_agents:
-                sys_select.value = assigned
-
-            mode_select = self.query_one("#cli-mode-select", Select)
-            if worker.cli_mode in ("auto", "accept-edits", "plan"):
-                mode_select.value = worker.cli_mode
-            else:
-                mode_select.value = "auto"
-
-            model_input = self.query_one("#model-name-input", Input)
-            current_model = worker.model or "gemini-3.8-flash-high"
-            model_input.value = current_model
-
-            preset_select = self.query_one("#model-preset-select", Select)
-            preset_values = {val for _, val in _MODEL_PRESETS}
-            if current_model in preset_values and current_model != "custom":
-                preset_select.value = current_model
-            else:
-                preset_select.value = "custom"
-
-            effort_select = self.query_one("#reasoning-effort-select", Select)
-            if worker.reasoning_effort in ("low", "medium", "high", "xhigh", "max"):
-                effort_select.value = worker.reasoning_effort
-            else:
-                effort_select.value = "high"
-
-            flags_input = self.query_one("#extra-flags-input", Input)
-            flags_input.value = worker.extra_flags or ""
-
-            inst_area = self.query_one("#instructions-area", DirectiveTextArea)
-            inst_area.load_text(worker.instructions or worker.profile.instructions or "")
+            self.settings_list.focus()
+            self._update_description()
         except Exception:
             pass
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button actions."""
-        if event.button.id == "btn-save-restart":
-            self._save_configuration(restart=True)
-        elif event.button.id == "btn-save-only":
-            self._save_configuration(restart=False)
-        else:
-            self.dismiss(None)
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter settings list live as user types into search input."""
+        if event.input.id == "config-search-input":
+            self.settings_list.set_search_query(event.value)
+            self._update_description()
 
-    def action_cancel(self) -> None:
-        """Close modal on escape."""
-        self.dismiss(None)
+    def on_key(self, event: events.Key) -> None:
+        """Global key interceptor for dialog navigation and shortcuts."""
+        # If user presses Down or Enter while in search input, shift focus to settings list
+        if self.focused and getattr(self.focused, "id", "") == "config-search-input":
+            if event.key in ("down", "enter"):
+                self.settings_list.focus()
+                event.stop()
+                event.prevent_default()
+                return
+            elif event.key == "escape":
+                inp = self.query_one("#config-search-input", Input)
+                if inp.value:
+                    inp.value = ""
+                    self.settings_list.set_search_query("")
+                    event.stop()
+                    event.prevent_default()
+                    return
+                else:
+                    self.action_save_and_close()
+                    event.stop()
+                    event.prevent_default()
+                    return
 
-    def _save_configuration(self, restart: bool) -> None:
-        """Persist configuration updates to worker session and optionally restart PTY process."""
-        target_select = self.query_one("#target-worker-select", Select)
-        sys_select = self.query_one("#system-agent-select", Select)
-        alias_input = self.query_one("#worker-alias-input", Input)
-        mode_select = self.query_one("#cli-mode-select", Select)
-        model_input = self.query_one("#model-name-input", Input)
-        effort_select = self.query_one("#reasoning-effort-select", Select)
-        flags_input = self.query_one("#extra-flags-input", Input)
-        inst_area = self.query_one("#instructions-area", DirectiveTextArea)
-
-        target_id = str(target_select.value) if target_select.value else "1"
-        selected_system_agent = str(sys_select.value) if sys_select.value else ""
-        alias = alias_input.value.strip() or selected_system_agent
-        cli_mode = str(mode_select.value) if mode_select.value else "auto"
-        model = model_input.value.strip() or "gemini-3.8-flash-high"
-        effort = str(effort_select.value) if effort_select.value else "high"
-        extra_flags = flags_input.value.strip()
-        instructions = inst_area.text.strip()
-
-        # Ensure --agent <selected_agent> is cleanly reflected in extra_flags if selected
-        if selected_system_agent and f"--agent {selected_system_agent}" not in extra_flags:
-            extra_flags = f"--agent {selected_system_agent} {extra_flags}".strip()
-
-        new_config = {
-            "name": alias,
-            "assigned_agent": selected_system_agent,
-            "cli_mode": cli_mode,
-            "model": model,
-            "reasoning_effort": effort,
-            "extra_flags": extra_flags,
-            "instructions": instructions,
-        }
-
-        worker = self._terminal_manager.get_worker(target_id)
-        if not worker:
-            self._safe_notify(f"Worker '{target_id}' not found.", severity="error")
-            self.dismiss(None)
+        # 'q' in list exits dialog
+        if event.key == "q" and self.focused == self.settings_list:
+            self.action_save_and_close()
+            event.stop()
+            event.prevent_default()
             return
 
-        if restart:
-            self._terminal_manager.restart_worker(target_id, new_args=new_config)
-            self._safe_notify(f"⚡ Worker '{alias or target_id}' restarted with agent '{selected_system_agent}'!", severity="warning")
-        else:
-            if alias:
-                worker.name = alias
-            worker.assigned_agent = selected_system_agent
-            worker.cli_mode = cli_mode
-            worker.model = model
-            worker.reasoning_effort = effort
-            worker.extra_flags = extra_flags
-            worker.instructions = instructions
-            worker.profile.assigned_agent = selected_system_agent
-            worker.profile.cli_mode = cli_mode
-            worker.profile.model = model
-            worker.profile.reasoning_effort = effort
-            worker.profile.extra_flags = extra_flags
-            worker.profile.instructions = instructions
-            self._safe_notify(f"✓ Configuration saved for Worker '{alias or target_id}' (no restart).", severity="information")
+        if event.key in ("o", "ctrl+o"):
+            self.action_open_directive_file()
+            event.stop()
+            event.prevent_default()
+            return
+
+        if event.key == "e" and self.focused == self.settings_list:
+            self.action_edit_directive_inline()
+            event.stop()
+            event.prevent_default()
+            return
+
+    def _on_selection_changed(self, entry: ConfigOption | None) -> None:
+        """Update description bar when active setting changes."""
+        self._update_description()
+
+    def _on_option_changed(self, entry: ConfigOption) -> None:
+        """Handle option value changes dynamically."""
+        self._update_description()
+
+        if entry.key == "open_directive":
+            self.action_open_directive_file()
+            return
+
+        if entry.key == "behavioral_directive":
+            self.action_edit_directive_inline()
+            return
+
+        # If Target Worker Tab was changed, synchronize agent-specific values
+        if entry.key == "target_worker":
+            selected_worker_id = self._resolve_selected_worker_id()
+            worker = self._terminal_manager.get_worker(selected_worker_id)
+            if worker:
+                for opt in self.options:
+                    if opt.key == "agent_mode" and worker.cli_mode:
+                        opt.set_value(worker.cli_mode)
+                    elif opt.key == "model_selection" and worker.model:
+                        opt.set_value(worker.model)
+                    elif opt.key == "reasoning_effort" and worker.reasoning_effort:
+                        opt.set_value(worker.reasoning_effort)
+                    elif opt.key == "system_agent" and worker.assigned_agent:
+                        opt.set_value(worker.assigned_agent)
+                    elif opt.key == "extra_flags" and worker.extra_flags:
+                        opt.set_value(worker.extra_flags)
+                    elif opt.key == "open_directive":
+                        opt.description = f"Directives file: {resolve_directive_path(selected_worker_id)}. Press Enter or 'o' to open in editor."
+                self.settings_list.refresh()
+
+    def _resolve_directive_target(self) -> str:
+        """Resolve the target agent slot / identifier for directive persistence."""
+        selected_id = self._resolve_selected_worker_id()
+        worker = self._terminal_manager.get_worker(selected_id)
+        if worker and worker.assigned_agent:
+            return worker.assigned_agent
+        for opt in self.options:
+            if opt.key == "system_agent" and opt.value:
+                return opt.value
+        return selected_id
+
+    def action_open_directive_file(self) -> None:
+        """Open the active worker agent's directive Markdown file in the system default editor."""
+        target_id = self._resolve_directive_target()
+        path = open_directive_in_editor(target_id)
+        try:
+            if hasattr(self, "app") and hasattr(self.app, "notify"):
+                self.app.notify(f"📄 Directives File: {path}", title="Directives Open", severity="information", timeout=3.0)
+        except Exception:
+            pass
+
+    def action_edit_directive_inline(self) -> None:
+        """Open the in-app directive editor modal for the currently selected worker."""
+        target_id = self._resolve_directive_target()
+        current_content = load_directive(target_id)
+        try:
+            self.app.push_screen(
+                DirectiveEditorModal(
+                    target=target_id,
+                    current_content=current_content,
+                ),
+                callback=self._on_directive_edited,
+            )
+        except Exception:
+            pass
+
+    def _on_directive_edited(self, new_text: str | None) -> None:
+        """Callback when directive is saved from DirectiveEditorModal."""
+        if new_text is not None:
+            worker_id = self._resolve_selected_worker_id()
+            directive_target = self._resolve_directive_target()
+            save_directive(directive_target, new_text)
+            worker = self._terminal_manager.get_worker(worker_id)
+            if worker:
+                worker.instructions = new_text
+                worker.profile.instructions = new_text
+            try:
+                if hasattr(self, "app") and hasattr(self.app, "notify"):
+                    self.app.notify("✓ Directive updated & saved to disk", severity="information", timeout=2.0)
+            except Exception:
+                pass
+
+    def _update_description(self) -> None:
+        """Update contextual description display."""
+        try:
+            desc_widget = self.query_one("#config-description-view", Static)
+            entry = self.settings_list.get_active_entry()
+            if entry and entry.description:
+                desc_widget.update(Text.from_markup(f"[dim]{entry.description}[/]"))
+            else:
+                desc_widget.update("")
+        except Exception:
+            pass
+
+    def _resolve_selected_worker_id(self) -> str:
+        """Determine target worker id from selected Target Worker Tab option."""
+        for opt in self.options:
+            if opt.key == "target_worker":
+                val = opt.value
+                if "coordinator" in val.lower():
+                    return "coordinator"
+                m = re.search(r"tab\s*(\d+)", val, re.IGNORECASE)
+                if m:
+                    return m.group(1)
+        return self._default_target or "1"
+
+    def _gather_config_dict(self) -> dict[str, Any]:
+        """Collect current values into configuration dictionary."""
+        config_map: dict[str, str] = {opt.key: opt.value for opt in self.options}
+
+        extra_flags = config_map.get("extra_flags", "")
+        if extra_flags == "none":
+            extra_flags = ""
+
+        cli_mode = config_map.get("agent_mode", "auto")
+        if cli_mode == "default":
+            cli_mode = "auto"
+
+        assigned_agent = config_map.get("system_agent", "")
+        name = assigned_agent or f"Worker-{self._resolve_selected_worker_id()}"
+
+        return {
+            "name": name,
+            "cli_mode": cli_mode,
+            "model": config_map.get("model_selection", "gemini-3.8-flash-high"),
+            "reasoning_effort": config_map.get("reasoning_effort", "high"),
+            "extra_flags": extra_flags,
+            "assigned_agent": assigned_agent,
+            "instructions": "",
+            # Global settings
+            "animation_speed": config_map.get("animation_speed", "fast"),
+            "copy_on_select": config_map.get("copy_on_select", "on") == "on",
+            "editor_mode": config_map.get("editor_mode", "vim"),
+            "color_scheme": config_map.get("color_scheme", "colorblind-friendly dark"),
+        }
+
+    def action_save_and_close(self) -> None:
+        """Save configuration without restarting worker process and dismiss modal."""
+        target_id = self._resolve_selected_worker_id()
+        new_config = self._gather_config_dict()
+
+        # Update worker in TerminalManager
+        worker = self._terminal_manager.get_worker(target_id)
+        if worker:
+            worker.cli_mode = new_config["cli_mode"]
+            worker.model = new_config["model"]
+            worker.reasoning_effort = new_config["reasoning_effort"]
+            worker.extra_flags = new_config["extra_flags"]
+            worker.profile.cli_mode = new_config["cli_mode"]
+            worker.profile.model = new_config["model"]
+            worker.profile.reasoning_effort = new_config["reasoning_effort"]
+            worker.profile.extra_flags = new_config["extra_flags"]
 
         if self._on_save_callback:
             try:
-                self._on_save_callback(target_id, new_config, restart)
+                self._on_save_callback(target_id, new_config, False)
             except Exception:
                 pass
 
         self.dismiss(None)
 
-    def _safe_notify(self, message: str, severity: str = "information") -> None:
-        """Safely trigger application toast notification."""
+    def action_save_and_restart(self) -> None:
+        """Save configuration, restart child worker process in PTY, and dismiss modal."""
+        target_id = self._resolve_selected_worker_id()
+        new_config = self._gather_config_dict()
+
+        # Respawn worker through TerminalManager
         try:
-            if hasattr(self.app, "notify"):
-                self.app.notify(message, severity=severity, timeout=3.5)
-        except Exception:
-            pass
+            self._terminal_manager.restart_worker(target_id, new_config)
+            try:
+                if hasattr(self, "app") and hasattr(self.app, "notify"):
+                    self.app.notify(f"⚡ Config applied & Worker {target_id} restarted", severity="information", timeout=2.0)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                if hasattr(self, "app") and hasattr(self.app, "notify"):
+                    self.app.notify(f"Restart error: {e}", severity="error", timeout=3.0)
+            except Exception:
+                pass
+
+        if self._on_save_callback:
+            try:
+                self._on_save_callback(target_id, new_config, True)
+            except Exception:
+                pass
+
+        self.dismiss(None)

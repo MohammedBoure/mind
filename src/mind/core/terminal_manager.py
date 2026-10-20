@@ -26,6 +26,7 @@ from mind.core.credentials import (
     setup_slot_env,
     sync_slot_credential_from_system,
 )
+from mind.core.directives import load_directive, save_directive
 from mind.core.pty_process import BasePtyProcess, spawn_pty
 from mind.core.terminal_buffer import TerminalBuffer
 
@@ -84,7 +85,7 @@ class WorkerSession:
         self.name = name or f"Worker-{worker_id}"
         self.role = role
         self.model = model
-        self.task = task or "Awaiting task assignment"
+        self.task = task or "Idle - Standing by for directives"
         self.cli_mode = cli_mode
         self.reasoning_effort = reasoning_effort
         self.extra_flags = extra_flags
@@ -102,7 +103,11 @@ class WorkerSession:
                     assigned_agent = f"agy{m.group()}"
 
         self.assigned_agent = assigned_agent or (name if name and name.startswith("agy") else "")
-        self.instructions = instructions or "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
+        if not instructions:
+            target_key = self.assigned_agent or ("coordinator" if self.role == "coordinator" else f"agy{self.worker_id}")
+            self.instructions = load_directive(target_key)
+        else:
+            self.instructions = instructions
         self.created_at = datetime.now()
         self.runtime_warnings: list[str] = []
 
@@ -135,8 +140,11 @@ class WorkerSession:
             instructions=self.instructions,
         )
 
+        self._last_output_time: float = time.time()
+        self._idle_check_timer: threading.Timer | None = None
         self._output_listeners: list[Callable[[str], None]] = []
         self._notification_listeners: list[Callable[[WorkerSession, str], None]] = []
+        self._idle_listeners: list[Callable[[WorkerSession], None]] = []
         self._lock = threading.Lock()
 
     @property
@@ -157,9 +165,37 @@ class WorkerSession:
         with self._lock:
             self._notification_listeners.append(listener)
 
+    def add_idle_listener(self, listener: Callable[[WorkerSession], None]) -> None:
+        """Register a callback for when worker transitions to idle prompt."""
+        with self._lock:
+            self._idle_listeners.append(listener)
+
+    def _check_idle_state(self) -> None:
+        """Transition process to waiting_input and notify listeners when terminal settles."""
+        if not self.is_alive:
+            return
+        if self.state == WorkerProcessState.RUNNING:
+            self.state = WorkerProcessState.WAITING_INPUT
+            with self._lock:
+                listeners = list(self._idle_listeners)
+            for listener in listeners:
+                try:
+                    listener(self)
+                except Exception:
+                    pass
+
     def _on_process_output(self, chunk: str) -> None:
         """Receive output chunk from PTY process and update buffer/listeners."""
         self.buffer.feed(chunk)
+        self._last_output_time = time.time()
+        self.state = WorkerProcessState.RUNNING
+
+        # Schedule debounced check for terminal idle state
+        if self._idle_check_timer:
+            self._idle_check_timer.cancel()
+        self._idle_check_timer = threading.Timer(1.2, self._check_idle_state)
+        self._idle_check_timer.daemon = True
+        self._idle_check_timer.start()
 
         # Detect runtime warnings from stderr/stdout (e.g. --effort fallback, unknown agent)
         chunk_lower = chunk.lower()
@@ -342,16 +378,6 @@ class WorkerSession:
                 cmd.extend(["--model", self.model])
             if self.reasoning_effort:
                 cmd.extend(["--effort", self.reasoning_effort])
-            if self.role == "coordinator" or str(self.worker_id) == "coordinator":
-                prompt = (
-                    "You are the Primary Coordinator agent for mind. "
-                    "Active worker agent terminals are running in the right pane. "
-                    "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
-                    "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
-                )
-                if self.task and "orchestrate workers" not in self.task.lower():
-                    prompt += f" Overall Session Goal: {self.task}."
-                cmd.extend(["--prompt-interactive", prompt])
             if self.extra_flags:
                 import shlex
                 try:
@@ -475,6 +501,74 @@ class TerminalManager:
         self._workers: dict[str, WorkerSession] = {}
         self._lock = threading.Lock()
         self._global_notification_listeners: list[Callable[[WorkerSession, str], None]] = []
+        self._coordinator_alarms: list[dict[str, Any]] = []
+        self._alarm_listeners: list[Callable[[dict[str, Any]], None]] = []
+
+    def add_alarm_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        """Register a listener for coordinator wake-up alarm events."""
+        with self._lock:
+            self._alarm_listeners.append(listener)
+
+    def emit_coordinator_alarm(self, event: dict[str, Any]) -> None:
+        """Emit an alarm/event to wake up the Primary Coordinator and notify subscribers."""
+        with self._lock:
+            self._coordinator_alarms.append(event)
+            listeners = list(self._alarm_listeners)
+        for listener in listeners:
+            try:
+                listener(event)
+            except Exception:
+                pass
+
+    def get_coordinator_alarms(self) -> list[dict[str, Any]]:
+        """Return all recorded coordinator alarms and event triggers."""
+        with self._lock:
+            return list(self._coordinator_alarms)
+
+    def clear_coordinator_alarms(self) -> None:
+        """Clear the coordinator alarm queue."""
+        with self._lock:
+            self._coordinator_alarms.clear()
+
+    def notify_coordinator_worker_idle(self, worker_id: str, status_summary: str = "") -> dict[str, Any]:
+        """Record worker task completion / idle prompt detection and emit alarm event."""
+        worker = self.get_worker(worker_id)
+        name = worker.name if worker else f"Worker-{worker_id}"
+        event = {
+            "type": "worker_idle",
+            "worker_id": str(worker_id),
+            "name": name,
+            "summary": status_summary or f"{name} finished execution and is IDLE at terminal prompt.",
+            "timestamp": datetime.now().isoformat(),
+        }
+        self.emit_coordinator_alarm(event)
+        return event
+
+    def notify_coordinator_worker_help(
+        self,
+        worker_id: str,
+        reason: str = "",
+        priority: str = "high",
+    ) -> dict[str, Any]:
+        """Record a worker assistance request and emit priority alarm event."""
+        worker = self.get_worker(worker_id)
+        name = worker.name if worker else f"Worker-{worker_id}"
+        event = {
+            "type": "worker_help",
+            "worker_id": str(worker_id),
+            "name": name,
+            "reason": reason or f"{name} encountered an obstacle and requests assistance.",
+            "priority": priority,
+            "timestamp": datetime.now().isoformat(),
+        }
+        self.emit_coordinator_alarm(event)
+        return event
+
+    def _on_worker_idle_detected(self, worker: WorkerSession) -> None:
+        """Internal callback fired when a worker PTY process settles to idle prompt."""
+        if worker.role == "coordinator" or str(worker.worker_id).lower() in ("coordinator", "primary"):
+            return
+        self.notify_coordinator_worker_idle(worker.worker_id)
 
     @classmethod
     def get_instance(cls) -> TerminalManager:
@@ -559,6 +653,7 @@ class TerminalManager:
                 lines=lines,
             )
             session.add_notification_listener(self._on_worker_notification)
+            session.add_idle_listener(self._on_worker_idle_detected)
             self._workers[worker_id] = session
 
         if autostart:

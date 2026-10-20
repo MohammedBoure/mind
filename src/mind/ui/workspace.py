@@ -98,16 +98,7 @@ class WorkspaceScreen(Screen):
         self._terminal_manager = TerminalManager.get_instance()
 
     def _resolve_coordinator_command(self) -> list[str]:
-        """Resolve command line to launch agy1.cmd as Primary Coordinator with orchestration prompt."""
-        prompt = (
-            "You are the Primary Coordinator agent for mind. "
-            "Active worker agent terminals are running in the right pane. "
-            "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
-            "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
-        )
-        if self._goal:
-            prompt += f" Overall Session Goal: {self._goal}."
-
+        """Resolve command line to launch agy as Primary Coordinator in a clean, idle state."""
         # 1. Prioritize direct agy executable to avoid nested cmd/python wrapper delays and lock contention
         agy_bin = shutil.which("agy") or shutil.which("agy.exe")
         if not agy_bin and sys.platform == "win32":
@@ -124,7 +115,18 @@ class WorkspaceScreen(Screen):
 
         target_bin = agy_bin or agy1_launcher
         if target_bin:
-            return [target_bin, "--mode", "auto", "--prompt-interactive", prompt]
+            cmd = [target_bin, "--mode", "auto"]
+            # Only inject prompt if user explicitly provided a non-empty session goal
+            if self._goal:
+                prompt = (
+                    "You are the Primary Coordinator agent for mind. "
+                    "Active worker agent terminals are running in the right pane. "
+                    "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
+                    "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
+                    f" Overall Session Goal: {self._goal}."
+                )
+                cmd.extend(["--prompt-interactive", prompt])
+            return cmd
 
         # 3. Fallback for test/offline environments
         if sys.platform == "win32":
@@ -148,7 +150,7 @@ class WorkspaceScreen(Screen):
 
         # 3. Main Workspace: Primary coordinator pane (left) + Worker PTYs (right)
         coordinator_cmd = self._resolve_coordinator_command()
-        coordinator_task = self._goal or "Orchestrate workers via mind-bridge MCP tools"
+        coordinator_task = self._goal or "Idle - Standing by for user prompt"
         coordinator_session = self._terminal_manager.create_worker(
             worker_id="coordinator",
             agent_id="coordinator",
@@ -208,7 +210,29 @@ class WorkspaceScreen(Screen):
         """Initialize background MCP server, notification listeners, and auto-focus active terminal."""
         start_background_mcp_server(host="127.0.0.1", port=8765)
         self._terminal_manager.add_notification_listener(self._on_mcp_directive_injected)
+        self._terminal_manager.add_alarm_listener(self._on_coordinator_alarm_received)
         self.set_timer(0.05, self._auto_focus_terminal)
+
+    def _on_coordinator_alarm_received(self, event: dict[str, Any]) -> None:
+        """Handle event-driven wake-up alarms from worker terminals."""
+        event_type = event.get("type", "worker_idle")
+        worker_id = event.get("worker_id", "")
+        summary = event.get("summary") or event.get("reason") or "Worker event received"
+        badge = f"⚡ Worker-{worker_id} Finished (Idle)" if event_type == "worker_idle" else f"🚨 Worker-{worker_id} Assistance"
+
+        # 1. Update Coordinator pane header badge
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        if coord_tab:
+            coord_tab.set_alarm_badge(badge)
+
+        # 2. Notify user with non-intrusive alert
+        self._safe_notify(f"🔔 {badge}: {summary}", severity="information", timeout=3.0)
+
+        # 3. Inject event notice to Coordinator PTY so it wakes up and reasons only upon an actual event
+        coord_session = self._terminal_manager.get_worker("coordinator")
+        if coord_session and coord_session.is_alive:
+            status_line = f"\n[Event Received]: {summary}\n"
+            coord_session.write(status_line, press_enter=False)
 
     def on_unmount(self) -> None:
         """Clean up background tasks on unmount."""

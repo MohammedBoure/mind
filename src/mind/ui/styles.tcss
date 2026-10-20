@@ -449,126 +449,64 @@ AgentConfigModal {
 }
 
 #agent-config-dialog {
-    width: 84;
-    max-width: 95%;
-    height: auto;
-    max-height: 90%;
+    width: 90;
+    max-width: 96%;
+    height: 32;
+    max-height: 92%;
     border: thick #7aa2f7;
-    background: #1a1b26;
+    background: #16161e;
     padding: 1 2;
 }
 
-#config-title {
-    text-align: center;
+#config-search-box {
+    height: 3;
+    width: 100%;
+    margin-bottom: 1;
+    layout: horizontal;
+}
+
+#config-search-prompt {
+    width: 9;
+    color: #7aa2f7;
     text-style: bold;
-    color: #bb9af7;
-    margin-bottom: 0;
+    padding-top: 1;
 }
 
-#config-subtitle {
-    text-align: center;
-    color: #565f89;
-    margin-bottom: 1;
-}
-
-#config-scroll-body {
-    height: auto;
-    max-height: 25;
-    margin-bottom: 1;
-}
-
-#config-scroll-body .modal-field {
-    width: 100%;
-    margin-bottom: 1;
-}
-
-#config-scroll-body Select {
-    width: 100%;
-    background: #1f2335;
+#config-search-input {
+    width: 1fr;
+    background: #1a1b26;
     color: #c0caf5;
-    border: round #3b4261;
+    border: tall #3b4261;
 }
 
-#config-scroll-body Select:focus {
-    border: round #7aa2f7;
-}
-
-#config-scroll-body SelectCurrent {
-    background: #1f2335;
-    color: #c0caf5;
-    border: none;
-}
-
-#config-scroll-body SelectOverlay {
-    background: #24283b;
-    color: #c0caf5;
-    border: round #7aa2f7;
-}
-
-#config-scroll-body SelectOverlay > .option-list--option {
-    background: #24283b;
-    color: #c0caf5;
-    padding: 0 1;
-}
-
-#config-scroll-body SelectOverlay > .option-list--option.-highlighted {
-    background: #7aa2f7;
-    color: #1a1b26;
-    text-style: bold;
-}
-
-#config-scroll-body Input {
-    width: 100%;
-    background: #1f2335;
-    color: #c0caf5;
-    border: round #3b4261;
-}
-
-#config-scroll-body Input:focus {
+#config-search-input:focus {
+    border: tall #7aa2f7;
     background: #24283b;
     color: #ffffff;
-    border: round #7aa2f7;
 }
 
-#instructions-area {
+#config-settings-view {
+    height: 1fr;
     width: 100%;
-    height: 4;
-    min-height: 3;
-    max-height: 6;
-    border: round #3b4261;
-    background: #1f2335;
+    background: #16161e;
     color: #c0caf5;
 }
 
-#instructions-area:focus {
-    border: round #7aa2f7;
+#config-description-view {
+    height: 2;
+    width: 100%;
+    border-top: solid #292e42;
+    color: #9aa5ce;
+    padding-top: 1;
 }
 
-#config-buttons {
+#config-footer-hints {
+    height: 1;
+    width: 100%;
+    text-align: center;
+    color: #565f89;
+    background: #1a1b26;
     margin-top: 1;
-    align: center middle;
-    height: 3;
-}
-
-#config-buttons Button {
-    margin: 0 1;
-}
-
-#btn-save-restart {
-    background: #e0af68;
-    color: #1a1b26;
-    text-style: bold;
-}
-
-#btn-save-only {
-    background: #7aa2f7;
-    color: #1a1b26;
-    text-style: bold;
-}
-
-#btn-config-cancel {
-    background: #24283b;
-    color: #c0caf5;
 }
 
 /* ── Help Modal ──────────────────────────────────────────────────── */
@@ -690,5 +628,40 @@ AgentConfigModal {
 }
 
 #modal-buttons Button {
+    margin: 0 1;
+}
+
+/* ── Directive Editor Modal ─────────────────────────────────────── */
+#directive-editor-dialog {
+    width: 86;
+    max-width: 95%;
+    height: 24;
+    max-height: 90%;
+    border: thick #bb9af7;
+    background: #16161e;
+    padding: 1 2;
+}
+
+#directive-editor-title {
+    text-align: center;
+    color: #bb9af7;
+    margin-bottom: 1;
+}
+
+#directive-text-area {
+    height: 1fr;
+    width: 100%;
+    background: #1a1b26;
+    color: #c0caf5;
+    border: round #3b4261;
+}
+
+#directive-editor-buttons {
+    height: 3;
+    margin-top: 1;
+    align: center middle;
+}
+
+#directive-editor-buttons Button {
     margin: 0 1;
 }

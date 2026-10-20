@@ -25,50 +25,37 @@ MOCK_SESSIONS: list[SessionInfo] = [
         name="aze",
         created_at=datetime.now() - timedelta(hours=2),
         agent_count=3,
-        goal="Refactor authentication module",
+        goal="General development workspace",
         active=True,
     ),
     SessionInfo(
         name="default",
         created_at=datetime.now() - timedelta(days=1),
         agent_count=2,
-        goal="General development workspace",
+        goal="General workspace",
         active=True,
     ),
     SessionInfo(
         name="refactor-core",
         created_at=datetime.now() - timedelta(hours=5),
         agent_count=4,
-        goal="Core engine refactoring with test coverage",
+        goal="Core engine workspace",
         active=True,
     ),
 ]
 
 
 def get_mock_agents(count: int = 3) -> list[AgentInfo]:
-    """Generate a list of mock agents for a session."""
+    """Generate a list of mock agents for a session in an idle standby state."""
     agents = [
         AgentInfo(
             id=0,
             name="Primary Agent",
             role=AgentRole.PRIMARY,
-            status=AgentStatus.THINKING,
-            model="gpt-4o",
-            task="Coordinating refactor workflow",
+            status=AgentStatus.IDLE,
+            model="gemini-3.8-flash-high",
+            task="Idle - Standing by for user prompt",
         ),
-    ]
-    worker_tasks = [
-        "Analyzing module dependencies",
-        "Running test suite",
-        "Generating documentation",
-        "Code review pass",
-        "Linting & formatting",
-    ]
-    worker_statuses = [
-        AgentStatus.EXECUTING,
-        AgentStatus.IDLE,
-        AgentStatus.WAITING,
-        AgentStatus.THINKING,
     ]
     for i in range(1, count):
         agents.append(
@@ -76,9 +63,9 @@ def get_mock_agents(count: int = 3) -> list[AgentInfo]:
                 id=i,
                 name=f"Worker-{i}",
                 role=AgentRole.WORKER,
-                status=random.choice(worker_statuses),
-                model="gpt-4o-mini",
-                task=worker_tasks[i % len(worker_tasks)],
+                status=AgentStatus.IDLE,
+                model="gemini-3.8-flash-high",
+                task="Idle - Standing by for task assignment",
             )
         )
     return agents

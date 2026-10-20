@@ -183,6 +183,73 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             "available_agents": [w.agent_id for w in mgr.list_workers()],
         }
 
+    # ── Tool 6: notify_coordinator_worker_idle ────────────────────────
+    @server.tool()
+    def notify_coordinator_worker_idle(
+        worker_id: str = "",
+        status_summary: str = "",
+        target: str = "",
+    ) -> str:
+        """Notify the Primary Coordinator that a worker has finished its task and is idle.
+
+        Args:
+            worker_id: Identifier of the worker agent that finished.
+            status_summary: Optional summary of completed work or output.
+            target: Alias for worker_id.
+
+        Returns:
+            Confirmation message and alarm event status.
+        """
+        actual_id = worker_id or target
+        if not actual_id:
+            return "Error: worker_id must be provided."
+        
+        event = mgr.notify_coordinator_worker_idle(
+            worker_id=actual_id,
+            status_summary=status_summary,
+        )
+        return f"Coordinator notified: Worker '{actual_id}' is IDLE. (Alarm: {event.get('summary')})"
+
+    # ── Tool 7: notify_coordinator_help ───────────────────────────────
+    @server.tool()
+    def notify_coordinator_help(
+        worker_id: str = "",
+        reason: str = "",
+        priority: str = "high",
+        target: str = "",
+    ) -> str:
+        """Trigger an urgent assistance alarm to the Primary Coordinator from a worker agent.
+
+        Args:
+            worker_id: Identifier of the worker requiring assistance.
+            reason: Explanation of the roadblock, error, or coordination need.
+            priority: Severity level ('normal', 'high', 'critical').
+            target: Alias for worker_id.
+
+        Returns:
+            Confirmation of dispatched alarm event.
+        """
+        actual_id = worker_id or target
+        if not actual_id:
+            return "Error: worker_id must be provided."
+
+        event = mgr.notify_coordinator_worker_help(
+            worker_id=actual_id,
+            reason=reason,
+            priority=priority,
+        )
+        return f"Coordinator assistance alarm emitted for Worker '{actual_id}' (Priority: {priority})."
+
+    # ── Tool 8: check_coordinator_alarms ──────────────────────────────
+    @server.tool()
+    def check_coordinator_alarms() -> list[dict[str, Any]]:
+        """Retrieve unread alarm triggers, worker completion notices, and assistance requests.
+
+        Returns:
+            List of alarm event dictionaries queued for the coordinator.
+        """
+        return mgr.get_coordinator_alarms()
+
     return server
 
 
