@@ -27,6 +27,7 @@ from mind.state.mock_data import (
     get_random_interrupt_message,
 )
 from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, LogEntry, MessagePriority
+from mind.ui.agent_config_modal import AgentConfigModal
 from mind.ui.agent_pane import AgentLogPane
 from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_modal import DirectiveModal
@@ -61,6 +62,8 @@ class WorkspaceScreen(Screen):
         ("enter", "enter_pty", "Enter PTY"),
         ("escape", "enter_normal", "Normal Mode"),
         ("ctrl+m", "open_directive_modal", "Inject Directive"),
+        ("e", "open_agent_config_modal", "Configure Agent"),
+        ("ctrl+e", "open_agent_config_modal", "Configure Agent"),
         ("ctrl+c", "interrupt_active", "Interrupt"),
         ("h", "prev_worker", "Prev Worker"),
         ("l", "next_worker", "Next Worker"),
@@ -213,6 +216,11 @@ class WorkspaceScreen(Screen):
         """Handle directive modal request triggered while in PTY mode."""
         self.action_open_directive_modal()
 
+    @on(TerminalScreenWidget.OpenConfigRequested)
+    def on_open_config_requested(self, event: TerminalScreenWidget.OpenConfigRequested) -> None:
+        """Handle agent config modal request triggered while in PTY mode."""
+        self.action_open_agent_config_modal()
+
     def _auto_focus_terminal(self) -> None:
         """Focus the currently active worker terminal screen."""
         tab_widget = self._worker_tabs.get(str(self._active_worker_id))
@@ -284,7 +292,14 @@ class WorkspaceScreen(Screen):
             event.prevent_default()
             return
 
-        # 6. 's': Toggle between Split View and Full-Screen Active Worker
+        # 6. 'e': Open Agent Configuration & CLI Tuning Modal
+        if key == "e" or char == "e":
+            self.action_open_agent_config_modal()
+            event.stop()
+            event.prevent_default()
+            return
+
+        # 7. 's': Toggle between Split View and Full-Screen Active Worker
         if key == "s" or char == "s":
             self.action_toggle_split()
             event.stop()
@@ -391,6 +406,47 @@ class WorkspaceScreen(Screen):
     def action_open_directive_modal(self) -> None:
         """Open Agent Assignment & Task Dispatcher modal."""
         self.app.push_screen(DirectiveModal(default_target=self._active_worker_id))
+
+    def action_open_agent_config_modal(self) -> None:
+        """Open Agent Configuration & CLI Tuning modal."""
+        self.app.push_screen(
+            AgentConfigModal(
+                default_target=self._active_worker_id,
+                on_save_callback=self._on_worker_configured,
+            )
+        )
+
+    def _on_worker_configured(self, worker_id: str, new_config: dict[str, Any], restarted: bool) -> None:
+        """Callback when worker configuration is updated in AgentConfigModal."""
+        new_name = new_config.get("name")
+        if new_name:
+            # Update matching agent in self._agents
+            for agent in self._agents:
+                if str(agent.id) == str(worker_id):
+                    agent.name = new_name
+                    if new_config.get("model"):
+                        agent.model = new_config["model"]
+                    break
+
+            # Rebuild tab bar
+            try:
+                tab_bar = self.query_one("#worker-tab-bar", WorkerTabBar)
+                tab_bar.rebuild(
+                    workers=[(str(a.id), a.name) for a in self._agents[1:]],
+                    active_worker_id=self._active_worker_id,
+                )
+            except Exception:
+                pass
+
+            # Update WorkerTerminalTab header
+            tab_widget = self._worker_tabs.get(str(worker_id))
+            if tab_widget:
+                try:
+                    tab_widget.query_one(".terminal-header", Static).update(
+                        f"[bold #7aa2f7]● {new_name}[/] [dim]({new_config.get('cli_mode', 'auto')})[/]"
+                    )
+                except Exception:
+                    pass
 
     def action_interrupt_active(self) -> None:
         """Send immediate interrupt (SIGINT/Ctrl+C) to the currently selected worker."""

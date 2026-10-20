@@ -35,7 +35,10 @@ class AgentProfile:
     """Configuration profile and behavioral instructions for an agent."""
     agent_id: str
     role: str = "worker"
-    model: str = "gpt-4o-mini"
+    model: str = "gemini-3.8-flash-high"
+    cli_mode: str = "auto"
+    reasoning_effort: str = "high"
+    extra_flags: str = ""
     principles: list[str] = field(
         default_factory=lambda: [
             "Execute tasks assigned by the primary coordinator.",
@@ -57,8 +60,12 @@ class WorkerSession:
         agent_id: str | None = None,
         name: str | None = None,
         role: str = "worker",
-        model: str = "gpt-4o-mini",
+        model: str = "gemini-3.8-flash-high",
         task: str = "",
+        cli_mode: str = "auto",
+        reasoning_effort: str = "high",
+        extra_flags: str = "",
+        instructions: str = "",
         columns: int = 80,
         lines: int = 24,
     ) -> None:
@@ -68,6 +75,10 @@ class WorkerSession:
         self.role = role
         self.model = model
         self.task = task or "Awaiting task assignment"
+        self.cli_mode = cli_mode
+        self.reasoning_effort = reasoning_effort
+        self.extra_flags = extra_flags
+        self.instructions = instructions or "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
         self.created_at = datetime.now()
 
         self.buffer = TerminalBuffer(columns=columns, lines=lines)
@@ -75,11 +86,18 @@ class WorkerSession:
         self.state = WorkerProcessState.PAUSED
         self.unread_notifications = 0
         self.last_interrupt_directive: str | None = None
+        self.custom_command: str | list[str] | None = None
+        self.last_cwd: str | None = None
+        self.last_env: dict[str, str] | None = None
 
         self.profile = AgentProfile(
             agent_id=self.agent_id,
             role=self.role,
             model=self.model,
+            cli_mode=self.cli_mode,
+            reasoning_effort=self.reasoning_effort,
+            extra_flags=self.extra_flags,
+            instructions=self.instructions,
         )
 
         self._output_listeners: list[Callable[[str], None]] = []
@@ -125,19 +143,64 @@ class WorkerSession:
         if self.process and self.process.is_alive():
             return
 
+        self.custom_command = command
+        self.last_cwd = cwd or self.last_cwd or os.getcwd()
+        self.last_env = env if env is not None else self.last_env
+
         resolved_command = self._resolve_command(command)
         self.process = spawn_pty(
             command=resolved_command,
-            cwd=cwd or os.getcwd(),
-            env=env,
+            cwd=self.last_cwd,
+            env=self.last_env,
             columns=self.buffer.columns,
             lines=self.buffer.lines,
             on_output=self._on_process_output,
         )
         self.state = WorkerProcessState.RUNNING
 
+    def restart(
+        self,
+        new_config: dict[str, Any] | None = None,
+        command: str | list[str] | None = None,
+    ) -> None:
+        """Cleanly terminate old process, update configuration flags, and respawn worker PTY."""
+        if new_config:
+            if "name" in new_config and new_config["name"]:
+                self.name = new_config["name"]
+            if "role" in new_config and new_config["role"]:
+                self.role = new_config["role"]
+                self.profile.role = new_config["role"]
+            if "model" in new_config and new_config["model"]:
+                self.model = new_config["model"]
+                self.profile.model = new_config["model"]
+            if "cli_mode" in new_config and new_config["cli_mode"]:
+                self.cli_mode = new_config["cli_mode"]
+                self.profile.cli_mode = new_config["cli_mode"]
+            if "reasoning_effort" in new_config and new_config["reasoning_effort"]:
+                self.reasoning_effort = new_config["reasoning_effort"]
+                self.profile.reasoning_effort = new_config["reasoning_effort"]
+            if "extra_flags" in new_config:
+                self.extra_flags = new_config["extra_flags"]
+                self.profile.extra_flags = new_config["extra_flags"]
+            if "instructions" in new_config:
+                self.instructions = new_config["instructions"]
+                self.profile.instructions = new_config["instructions"]
+            if "task" in new_config and new_config["task"]:
+                self.task = new_config["task"]
+
+        # 1. Terminate old process
+        self.terminate()
+
+        # 2. Reset virtual terminal screen buffer
+        self.buffer.clear()
+        self.unread_notifications = 0
+
+        # 3. Respawn with updated command or flags
+        target_command = command if command is not None else self.custom_command
+        self.start(command=target_command, cwd=self.last_cwd, env=self.last_env)
+
     def _resolve_command(self, command: str | list[str] | None) -> list[str]:
-        """Resolve executable command, defaulting to `agy` if present."""
+        """Resolve executable command, defaulting to `agy` with tuned CLI flags if present."""
         if command:
             if isinstance(command, str):
                 return command.split()
@@ -153,7 +216,20 @@ class WorkerSession:
                 agy_path = local_agy
 
         if agy_path:
-            return [agy_path]
+            cmd = [agy_path]
+            if self.cli_mode:
+                cmd.extend(["--mode", self.cli_mode])
+            if self.model and self.model != "default":
+                cmd.extend(["--model", self.model])
+            if self.reasoning_effort:
+                cmd.extend(["--effort", self.reasoning_effort])
+            if self.extra_flags:
+                import shlex
+                try:
+                    cmd.extend(shlex.split(self.extra_flags))
+                except Exception:
+                    cmd.extend(self.extra_flags.split())
+            return cmd
 
         # Fallback to interactive shell
         if sys.platform == "win32":
@@ -227,11 +303,14 @@ class WorkerSession:
             "name": self.name,
             "role": self.role,
             "model": self.model,
+            "cli_mode": self.cli_mode,
+            "reasoning_effort": self.reasoning_effort,
+            "extra_flags": self.extra_flags,
             "task": self.task,
             "state": self.state.value,
             "pid": self.pid,
             "principles": self.profile.principles,
-            "instructions": self.profile.instructions,
+            "instructions": self.instructions or self.profile.instructions,
             "unread_notifications": self.unread_notifications,
         }
 
@@ -300,8 +379,12 @@ class TerminalManager:
         agent_id: str | None = None,
         name: str | None = None,
         role: str = "worker",
-        model: str = "gpt-4o-mini",
+        model: str = "gemini-3.8-flash-high",
         task: str = "",
+        cli_mode: str = "auto",
+        reasoning_effort: str = "high",
+        extra_flags: str = "",
+        instructions: str = "",
         command: str | list[str] | None = None,
         cwd: str | None = None,
         columns: int = 80,
@@ -320,6 +403,10 @@ class TerminalManager:
                 role=role,
                 model=model,
                 task=task,
+                cli_mode=cli_mode,
+                reasoning_effort=reasoning_effort,
+                extra_flags=extra_flags,
+                instructions=instructions,
                 columns=columns,
                 lines=lines,
             )
@@ -330,6 +417,19 @@ class TerminalManager:
             session.start(command=command, cwd=cwd)
 
         return session
+
+    def restart_worker(
+        self,
+        worker_id: str,
+        new_config: dict[str, Any] | None = None,
+        command: str | list[str] | None = None,
+    ) -> WorkerSession | None:
+        """Find and restart an active worker session with optional new configuration."""
+        worker = self.get_worker(worker_id)
+        if not worker:
+            return None
+        worker.restart(new_config=new_config, command=command)
+        return worker
 
     def get_worker(self, worker_id: str) -> WorkerSession | None:
         """Find a worker session by ID, name, or normalized identifier."""

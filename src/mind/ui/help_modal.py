@@ -30,6 +30,10 @@ _HELP_TEXT = """\
 [bold #7aa2f7]Ctrl+M[/]           Open Directive Injection Modal (Any mode)
 [bold #7aa2f7]Ctrl+C[/]           Send immediate interrupt signal (SIGINT) to active Worker
 
+[bold underline #bb9af7]Agent Configuration & Tuning[/]
+[bold #7aa2f7]e[/]                Open Agent Config & Flags Modal (NORMAL mode)
+[bold #7aa2f7]Ctrl+E[/]           Open Agent Config & Flags Modal (Any mode)
+
 [bold underline #bb9af7]General[/]
 [bold #7aa2f7]?[/]                Toggle this help screen
 [bold #7aa2f7]q[/]                Quit application and cleanly terminate worker processes

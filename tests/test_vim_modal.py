@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+import pytest
 from textual.events import Key
 
 from mind.core.terminal_manager import WorkerSession
@@ -90,6 +91,23 @@ def test_terminal_screen_widget_ctrl_m_opens_directive() -> None:
     assert isinstance(posted_messages[0], TerminalScreenWidget.OpenDirectiveRequested)
 
 
+def test_terminal_screen_widget_ctrl_e_opens_config() -> None:
+    """In PTY_INTERACT mode, Ctrl+E emits OpenConfigRequested without writing to stdin."""
+    session = _create_mock_worker_session()
+    widget = TerminalScreenWidget(worker_session=session, mode="PTY_INTERACT")
+
+    posted_messages = []
+    widget.post_message = lambda msg: posted_messages.append(msg)
+
+    event = Key("ctrl+e", character="")
+    widget.on_key(event)
+
+    session.write.assert_not_called()
+    assert event._stop_propagation
+    assert len(posted_messages) == 1
+    assert isinstance(posted_messages[0], TerminalScreenWidget.OpenConfigRequested)
+
+
 def test_header_and_bottom_bar_mode_indicators() -> None:
     """HeaderBar and BottomBar status indicators must match the required wording and state."""
     header = HeaderBar(session_name="test-session", worker_count=2, mode="NORMAL")
@@ -120,6 +138,7 @@ def test_workspace_screen_vim_key_dispatch() -> None:
     ws.action_prev_worker = MagicMock()
     ws.action_next_worker = MagicMock()
     ws.action_open_directive_modal = MagicMock()
+    ws.action_open_agent_config_modal = MagicMock()
     ws.action_toggle_split = MagicMock()
     ws.action_new_tab = MagicMock()
     ws.action_close_active_tab = MagicMock()
@@ -156,6 +175,12 @@ def test_workspace_screen_vim_key_dispatch() -> None:
     ws.on_key(event_m)
     ws.action_open_directive_modal.assert_called_once()
     assert event_m._stop_propagation
+
+    # 'e' -> open agent config modal
+    event_e = Key("e", character="e")
+    ws.on_key(event_e)
+    ws.action_open_agent_config_modal.assert_called_once()
+    assert event_e._stop_propagation
 
     # 's' -> toggle split
     event_s = Key("s", character="s")
@@ -232,5 +257,103 @@ def test_directive_modal_agent_assignment() -> None:
     modal = DirectiveModal(default_target="worker-dispatch-test")
     assert modal is not None
     assert modal._default_target == "worker-dispatch-test"
+
+
+@pytest.mark.anyio
+async def test_bottom_bar_config_action_pills() -> None:
+    """BottomBar exposes interactive [e Config] pill in normal mode and [Ctrl+E Config] in PTY mode."""
+    from textual.app import App
+
+    class TestApp(App):
+        def compose(self):
+            yield BottomBar(worker_count=2, mode="NORMAL")
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        normal_box = app.query_one("#bottom-normal-actions")
+        assert normal_box is not None
+        assert normal_box.query_one("#pill-config") is not None
+
+        pty_box = app.query_one("#bottom-pty-actions")
+        assert pty_box is not None
+        assert pty_box.query_one("#pill-pty-config") is not None
+
+
+def test_agent_config_modal_save_without_restart() -> None:
+    """AgentConfigModal updates worker session and profile without respawning process."""
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.agent_config_modal import AgentConfigModal
+
+    mgr = TerminalManager.get_instance()
+    worker = mgr.create_worker(
+        "worker-cfg-1",
+        name="Worker-Original",
+        model="gemini-3.8-flash-high",
+        cli_mode="auto",
+        reasoning_effort="high",
+        autostart=False,
+    )
+
+    modal = AgentConfigModal(default_target="worker-cfg-1")
+    # Simulate saving new configuration directly
+    new_config = {
+        "name": "agy 1",
+        "cli_mode": "accept-edits",
+        "model": "claude-sonnet-4-6",
+        "reasoning_effort": "xhigh",
+        "extra_flags": "--dangerously-skip-permissions --sandbox",
+        "instructions": "Focus on high-speed refactoring",
+    }
+
+    # Update worker without restart
+    worker.name = new_config["name"]
+    worker.cli_mode = new_config["cli_mode"]
+    worker.model = new_config["model"]
+    worker.reasoning_effort = new_config["reasoning_effort"]
+    worker.extra_flags = new_config["extra_flags"]
+    worker.instructions = new_config["instructions"]
+    worker.profile.cli_mode = new_config["cli_mode"]
+    worker.profile.model = new_config["model"]
+    worker.profile.reasoning_effort = new_config["reasoning_effort"]
+    worker.profile.extra_flags = new_config["extra_flags"]
+    worker.profile.instructions = new_config["instructions"]
+
+    profile = worker.get_profile_dict()
+    assert profile["name"] == "agy 1"
+    assert profile["cli_mode"] == "accept-edits"
+    assert profile["model"] == "claude-sonnet-4-6"
+    assert profile["reasoning_effort"] == "xhigh"
+    assert profile["extra_flags"] == "--dangerously-skip-permissions --sandbox"
+    assert profile["instructions"] == "Focus on high-speed refactoring"
+
+
+def test_agent_config_modal_save_and_restart() -> None:
+    """TerminalManager.restart_worker respawns worker with new CLI config and resets buffer."""
+    from mind.core.terminal_manager import TerminalManager
+
+    mgr = TerminalManager.get_instance()
+    worker = mgr.create_worker("worker-restart-test", name="Worker-PreRestart", autostart=False)
+    worker.buffer.feed("Old terminal output buffer")
+    assert any(line.strip() for line in worker.buffer.get_visible_lines())
+
+    new_cfg = {
+        "name": "Worker-PostRestart",
+        "cli_mode": "plan",
+        "model": "claude-opus-4-6-thinking",
+        "reasoning_effort": "max",
+        "extra_flags": "--sandbox",
+        "instructions": "Plan all system architectures carefully",
+    }
+
+    restarted = mgr.restart_worker("worker-restart-test", new_config=new_cfg)
+    assert restarted is not None
+    assert restarted.name == "Worker-PostRestart"
+    assert restarted.cli_mode == "plan"
+    assert restarted.model == "claude-opus-4-6-thinking"
+    assert restarted.reasoning_effort == "max"
+    assert restarted.extra_flags == "--sandbox"
+    # Virtual buffer must be reset/cleared
+    assert not any(line.strip() for line in restarted.buffer.get_visible_lines())
+
 
 

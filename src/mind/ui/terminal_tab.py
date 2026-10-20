@@ -96,6 +96,10 @@ class TerminalScreenWidget(Widget):
         """Emitted when user triggers directive modal (e.g. via Ctrl+M) from PTY mode."""
         pass
 
+    class OpenConfigRequested(Message):
+        """Emitted when user triggers agent config modal (e.g. via Ctrl+E) from PTY mode."""
+        pass
+
     def __init__(self, worker_session: WorkerSession, mode: str = "NORMAL", **kwargs) -> None:
         super().__init__(**kwargs)
         self.worker_session = worker_session
@@ -231,7 +235,14 @@ class TerminalScreenWidget(Widget):
             self.post_message(self.OpenDirectiveRequested())
             return
 
-        # 3. Special key mappings
+        # 3. Ctrl+E: Open Agent Configuration Modal directly
+        if key_name == "ctrl+e":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.OpenConfigRequested())
+            return
+
+        # 4. Special key mappings
         if key_name in _SPECIAL_KEYS:
             self.worker_session.write(_SPECIAL_KEYS[key_name])
             event.stop()

@@ -12,6 +12,7 @@ This directory contains all Textual-based UI widgets and screens for the `mind` 
 | `new_session_modal.py` | Modal dialog for creating a new session (name, agent count, goal). |
 | `workspace.py` | Main multiplexer workspace screen implementing Vim Modal System, visible tab bar, split-view toggling ('s'), and MCP lifecycle. |
 | `terminal_tab.py` | Interactive terminal components: `TerminalScreenWidget`, `WorkerTerminalTab`, clickable `WorkerTabPill`, `WorkerNewTabPill`, and `WorkerTabBar`. |
+| `agent_config_modal.py` | Interactive Agent Configuration Modal (`AgentConfigModal`): inspect and tune CLI flags (`--mode`, `--model`, `--effort`, extra flags), behavioral directives, and save/restart worker PTYs. |
 | `directive_modal.py` | Agent Assignment & Task Dispatcher modal (`DirectiveModal`): select agent (Primary or Worker 1..N), assign role, and dispatch prompt to agy.exe. |
 | `header_bar.py` | Streamlined Zellij-inspired top bar (`HeaderBar`): fixed 1-line dock-top with brand, session, Vim mode badge, and MCP status. |
 | `bottom_bar.py` | Multi-segment status bar (`BottomBar`): fixed 1-line dock-bottom with dynamic action pills and PTY platform status. |

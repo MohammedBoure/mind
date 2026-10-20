@@ -97,6 +97,7 @@ def test_mcp_sse_runner() -> None:
 def test_ui_imports() -> None:
     print("[5/5] Testing Textual UI widget imports & instantiation...")
     from mind.app import MindApp
+    from mind.ui.agent_config_modal import AgentConfigModal
     from mind.ui.bottom_bar import ActionPill, BottomBar
     from mind.ui.directive_modal import DirectiveModal
     from mind.ui.header_bar import HeaderBar

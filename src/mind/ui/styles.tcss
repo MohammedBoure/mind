@@ -440,6 +440,67 @@ BottomBar {
     color: #c0caf5;
 }
 
+/* ── Agent Configuration Modal ───────────────────────────────────── */
+AgentConfigModal {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+#agent-config-dialog {
+    width: 78;
+    height: auto;
+    max-height: 90%;
+    border: thick #7aa2f7;
+    background: #1a1b26;
+    padding: 1 2;
+}
+
+#config-title {
+    text-align: center;
+    text-style: bold;
+    color: #bb9af7;
+    margin-bottom: 0;
+}
+
+#config-subtitle {
+    text-align: center;
+    color: #565f89;
+    margin-bottom: 1;
+}
+
+#config-scroll-body {
+    height: auto;
+    max-height: 24;
+    margin-bottom: 1;
+}
+
+#config-buttons {
+    margin-top: 1;
+    align: center middle;
+    height: 3;
+}
+
+#config-buttons Button {
+    margin: 0 1;
+}
+
+#btn-save-restart {
+    background: #e0af68;
+    color: #1a1b26;
+    text-style: bold;
+}
+
+#btn-save-only {
+    background: #7aa2f7;
+    color: #1a1b26;
+    text-style: bold;
+}
+
+#btn-config-cancel {
+    background: #24283b;
+    color: #c0caf5;
+}
+
 /* ── Help Modal ──────────────────────────────────────────────────── */
 #help-modal {
     align: center middle;

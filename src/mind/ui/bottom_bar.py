@@ -66,6 +66,7 @@ class BottomBar(Widget):
                     yield ActionPill("1..9", "Jump", "show_help", id="pill-jump")
                     yield ActionPill("h/l", "Prev/Next", "next_worker", id="pill-cycle")
                     yield ActionPill("m", "Inject", "open_directive_modal", id="pill-inject")
+                    yield ActionPill("e", "Config", "open_agent_config_modal", id="pill-config")
                     yield ActionPill("c", "New Tab", "new_tab", id="pill-new")
                     yield ActionPill("x", "Close Tab", "close_active_tab", id="pill-close")
                     yield ActionPill("s", "Split", "toggle_split", id="pill-split")
@@ -76,6 +77,7 @@ class BottomBar(Widget):
                 with Horizontal(id="bottom-pty-actions"):
                     yield ActionPill("Esc", "Normal Mode", "enter_normal", id="pill-esc")
                     yield ActionPill("Ctrl+M", "Inject", "open_directive_modal", id="pill-pty-inject")
+                    yield ActionPill("Ctrl+E", "Config", "open_agent_config_modal", id="pill-pty-config")
                     yield ActionPill("Ctrl+C", "Interrupt", "interrupt_active", id="pill-interrupt")
                     yield ActionPill("?", "Help", "show_help", id="pill-pty-help")
 
