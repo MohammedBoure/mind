@@ -254,7 +254,15 @@ Screen {
 }
 
 .terminal-screen:focus {
+    border: round #e0af68;
+}
+
+.terminal-screen.mode-pty:focus {
     border: round #7aa2f7;
+}
+
+.terminal-screen.mode-normal:focus {
+    border: round #e0af68;
 }
 
 .terminal-controls {
@@ -296,6 +304,19 @@ Screen {
     width: 1fr;
     height: 1;
     layout: horizontal;
+}
+
+#bottom-normal-actions {
+    width: auto;
+    height: 1;
+    layout: horizontal;
+}
+
+#bottom-pty-actions {
+    width: auto;
+    height: 1;
+    layout: horizontal;
+    display: none;
 }
 
 .action-pill {

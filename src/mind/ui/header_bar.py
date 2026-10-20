@@ -8,8 +8,6 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
-from mind.state.models import AgentInfo
-
 
 class HeaderBar(Widget):
     """Zellij-inspired top bar displaying branding, session, mode, and MCP health."""
@@ -23,11 +21,13 @@ class HeaderBar(Widget):
         self,
         session_name: str = "unnamed",
         worker_count: int = 2,
+        mode: str = "NORMAL",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.session_name = session_name
         self.worker_count = worker_count
+        self.mode = mode
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-bar"):
@@ -37,7 +37,7 @@ class HeaderBar(Widget):
             # Active session pill
             yield Static(f"📂 {self.session_name}", id="session-pill")
 
-            # Interactive mode badge
+            # Interactive mode badge (Vim modal state)
             yield Static(self._build_mode_badge(), id="mode-badge")
 
             # Center spacer
@@ -51,9 +51,9 @@ class HeaderBar(Widget):
 
     def _build_mode_badge(self) -> str:
         """Construct the mode indicator badge."""
-        if self.mode == "PTY INTERACT":
-            return "[bold #1a1b26 on #bb9af7] ⌨ PTY INTERACT [/]"
-        return "[bold #1a1b26 on #7aa2f7] 🔍 NORMAL [/]"
+        if self.mode in ("PTY_INTERACT", "PTY"):
+            return "[bold #1a1b26 on #7aa2f7] ⌨ PTY INTERACT (Press Esc for Normal) [/]"
+        return "[bold #1a1b26 on #e0af68] 🔍 NORMAL MODE (Press 'i' to type in agy) [/]"
 
     def watch_session_name(self, value: str) -> None:
         try:

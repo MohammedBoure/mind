@@ -122,15 +122,17 @@ def test_ui_imports() -> None:
     header = HeaderBar(session_name="test-session", worker_count=2)
     assert header.session_name == "test-session"
     assert header.worker_count == 2
-    assert "NORMAL" in header._build_mode_badge()
-    header.mode = "PTY INTERACT"
+    assert "NORMAL MODE" in header._build_mode_badge()
+    header.mode = "PTY_INTERACT"
     assert "PTY INTERACT" in header._build_mode_badge()
     print("  ✓ HeaderBar reactive mode and status pills verified.")
 
     # Test BottomBar & ActionPills
     bottom = BottomBar(worker_count=2)
     assert bottom.worker_count == 2
-    assert "NORMAL" in bottom._build_mode_indicator()
+    assert "NORMAL MODE" in bottom._build_mode_indicator()
+    bottom.mode = "PTY_INTERACT"
+    assert "PTY INTERACT" in bottom._build_mode_indicator()
     pill = ActionPill("Ctrl+M", "Inject", "open_directive_modal")
     assert pill.action_name == "open_directive_modal"
     print("  ✓ BottomBar and ActionPills verified.")
@@ -143,7 +145,12 @@ def test_ui_imports() -> None:
     # Test WorkspaceScreen
     ws = WorkspaceScreen(session_name="test-session", agent_count=3)
     assert ws._session_name == "test-session"
-    print("  ✓ WorkspaceScreen instantiated.")
+    assert ws.mode == "NORMAL"
+    ws.action_enter_pty()
+    assert ws.mode == "PTY_INTERACT"
+    ws.action_enter_normal()
+    assert ws.mode == "NORMAL"
+    print("  ✓ WorkspaceScreen Vim modal transitions verified.")
 
     mgr.stop_all()
     print("  ✓ All test workers stopped.")

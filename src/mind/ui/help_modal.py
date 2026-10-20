@@ -9,27 +9,31 @@ from textual.widgets import Static
 
 
 _HELP_TEXT = """\
-[bold underline #bb9af7]Navigation & Focus[/]
-[bold #7aa2f7]Alt+1..9[/]        Switch directly to Worker tab N
-[bold #7aa2f7]Tab[/]             Toggle focus between Primary Agent & Worker PTY
-[bold #7aa2f7]Shift+Tab[/]       Cycle widget focus in reverse
+[bold underline #bb9af7]Vim-like Modal Architecture[/]
+[bold #e0af68]NORMAL Mode[/]       Vim Command mode (single-key shortcuts, no modifiers needed)
+[bold #7aa2f7]PTY Mode[/]          Insert mode (raw keystrokes stream directly to agy.exe stdin)
 
-[bold underline #bb9af7]Inter-Agent & Terminal Actions[/]
-[bold #7aa2f7]Ctrl+M[/]          Open Directive Injection Modal (Targeted Inter-Agent Interrupt)
-[bold #7aa2f7]Ctrl+C[/]          Send immediate interrupt signal (SIGINT) to active Worker
-[bold #7aa2f7]m[/]               Simulate quick random interrupt test
-[bold #7aa2f7]n[/]               Spawn a new live Worker PTY tab
-[bold #7aa2f7]s[/]               Toggle split layout (Side-by-side / Stacked)
+[bold underline #bb9af7]Mode Switching[/]
+[bold #7aa2f7]i / Enter / a[/]   Enter PTY Insert mode from NORMAL mode
+[bold #e0af68]Escape[/]            Leave PTY Insert mode and return to NORMAL mode
 
-[bold underline #bb9af7]Scrolling & Inspection[/]
-[bold #7aa2f7]↑ / ↓[/]           Scroll terminal screen buffer or coordinator log
-[bold #7aa2f7]PgUp / PgDn[/]     Page scroll terminal buffer
-[bold #7aa2f7]Home / End[/]      Jump to top or bottom of output
+[bold underline #bb9af7]NORMAL Mode Navigation & Tab Controls (Single-Key)[/]
+[bold #7aa2f7]1..9[/]             Jump directly to Worker tab N
+[bold #7aa2f7]h / l[/]            Switch to previous / next worker tab
+[bold #7aa2f7]c[/]                Spawn a new worker agent tab
+[bold #7aa2f7]x[/]                Terminate and close active worker tab
+[bold #7aa2f7]s[/]                Toggle split layout (Side-by-side / Stacked)
+[bold #7aa2f7]Tab[/]              Toggle focus between Primary Agent coordinator & Worker PTY
 
-[bold underline #bb9af7]System & App[/]
-[bold #7aa2f7]?[/]               Toggle this help screen
-[bold #7aa2f7]Escape[/]          Close modal / return to workspace
-[bold #7aa2f7]q[/]               Quit application and terminate background processes
+[bold underline #bb9af7]Inter-Agent & Directive Injection[/]
+[bold #7aa2f7]m[/]                Open Directive Injection Modal (NORMAL mode)
+[bold #7aa2f7]Ctrl+M[/]           Open Directive Injection Modal (Any mode)
+[bold #7aa2f7]Ctrl+C[/]           Send immediate interrupt signal (SIGINT) to active Worker
+
+[bold underline #bb9af7]General[/]
+[bold #7aa2f7]?[/]                Toggle this help screen
+[bold #7aa2f7]q[/]                Quit application and cleanly terminate worker processes
+[bold #7aa2f7]Escape[/]           Close modal / return to workspace
 """
 
 
@@ -44,7 +48,7 @@ class HelpModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="help-dialog"):
-            yield Static("⌨ [bold #7aa2f7]Mind Keyboard Shortcuts & Architecture[/]", id="help-title")
+            yield Static("⌨ [bold #7aa2f7]Mind Vim Modal Shortcuts & Architecture[/]", id="help-title")
             with VerticalScroll(id="help-content"):
                 yield Static(_HELP_TEXT)
 

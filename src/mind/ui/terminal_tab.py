@@ -3,6 +3,7 @@
 Hosts a real PTY session running agy (or shell), renders the virtual screen
 buffer with full ANSI styles, captures user keystrokes for direct interactive
 control, and displays visual toast badges upon MCP directive injections.
+Implements Vim-like modal input (NORMAL vs PTY_INTERACT).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import Button, Input, Static
+from textual.widgets import Static
 
 from mind.core.terminal_manager import WorkerProcessState, WorkerSession
 
@@ -50,11 +51,13 @@ _SPECIAL_KEYS: dict[str, str] = {
 class TerminalScreenWidget(Widget):
     """The interactive terminal screen pane within a worker tab.
 
-    Can be focused to capture raw keystrokes and type directly into agy.
+    Can be focused to capture raw keystrokes in PTY_INTERACT mode, or allows
+    single-key navigation commands to bubble to WorkspaceScreen in NORMAL mode.
     Renders the live ANSI screen buffer or an informative banner when starting up.
     """
 
     can_focus = True
+    mode: reactive[str] = reactive("NORMAL")
 
     DEFAULT_CSS = """
     TerminalScreenWidget {
@@ -68,22 +71,57 @@ class TerminalScreenWidget(Widget):
         overflow-x: hidden;
     }
 
-    TerminalScreenWidget:focus {
+    TerminalScreenWidget.mode-pty:focus {
         border: round #7aa2f7;
+    }
+
+    TerminalScreenWidget.mode-normal:focus {
+        border: round #e0af68;
     }
     """
 
     class TerminalFocusChanged(Message):
-        """Emitted when terminal focus changes to update global mode."""
+        """Emitted when terminal focus changes to update focus indicators."""
         def __init__(self, is_focused: bool) -> None:
             super().__init__()
             self.is_focused = is_focused
 
-    def __init__(self, worker_session: WorkerSession, **kwargs) -> None:
+    class ModeChangeRequested(Message):
+        """Emitted when user requests switching between NORMAL and PTY modes."""
+        def __init__(self, target_mode: str) -> None:
+            super().__init__()
+            self.target_mode = target_mode
+
+    class OpenDirectiveRequested(Message):
+        """Emitted when user triggers directive modal (e.g. via Ctrl+M) from PTY mode."""
+        pass
+
+    def __init__(self, worker_session: WorkerSession, mode: str = "NORMAL", **kwargs) -> None:
         super().__init__(**kwargs)
         self.worker_session = worker_session
+        self.mode = mode
         self._last_rendered_version = -1
         self.add_class("terminal-screen")
+        self._sync_mode_classes()
+
+    def _sync_mode_classes(self) -> None:
+        """Update CSS classes corresponding to the current modal state."""
+        if self.is_pty_mode:
+            self.remove_class("mode-normal")
+            self.add_class("mode-pty")
+        else:
+            self.remove_class("mode-pty")
+            self.add_class("mode-normal")
+
+    def watch_mode(self, new_mode: str) -> None:
+        """React to external mode changes (e.g. from WorkspaceScreen)."""
+        self._sync_mode_classes()
+        self.refresh()
+
+    @property
+    def is_pty_mode(self) -> bool:
+        """Return True if currently in direct PTY input (Insert) mode."""
+        return self.mode in ("PTY_INTERACT", "PTY")
 
     def render(self) -> Text:
         """Render virtual screen buffer or placeholder banner if still initializing."""
@@ -123,16 +161,16 @@ class TerminalScreenWidget(Widget):
         t.append("│\n", style="#3b4261")
         t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
 
-        if self.has_focus:
-            focus_hint = "[ ⌨ FOCUSED - RAW PTY INPUT ACTIVE ]"
-            focus_style = "bold #bb9af7"
-        else:
-            focus_hint = "[ 🔍 CLICK OR PRESS TAB TO FOCUS & TYPE ]"
+        if self.is_pty_mode:
+            focus_hint = "[ ⌨ PTY INTERACT (Press Esc for Normal) ]"
             focus_style = "bold #7aa2f7"
+        else:
+            focus_hint = "[ 🔍 NORMAL MODE (Press 'i' to type in agy) ]"
+            focus_style = "bold #e0af68"
 
         t.append("   │  ", style="#3b4261")
-        t.append(f"{focus_hint:<42}", style=focus_style)
-        t.append("│  Ctrl+M: Inject Directive     │\n", style="#7982a9")
+        t.append(f"{focus_hint:<45}", style=focus_style)
+        t.append("│  m: Inject  s: Split  ?: Help │\n", style="#7982a9")
         t.append("   ╰────────────────────────────────────────────────────────────────────────╯\n", style="#3b4261")
         t.append("\n   [dim #565f89]Live stream active. Commands sent directly to child agy process.[/dim #565f89]\n")
         return t
@@ -165,17 +203,42 @@ class TerminalScreenWidget(Widget):
             self.worker_session.process.resize(columns=cols, lines=rows)
 
     def on_key(self, event: events.Key) -> None:
-        """Handle keystrokes and deliver directly to the worker process."""
+        """Handle keystrokes based on current modal state.
+
+        In NORMAL mode: Does not consume keys, allowing them to bubble up to
+        WorkspaceScreen for single-key command processing.
+
+        In PTY_INTERACT mode: Raw keystrokes are written directly to worker stdin,
+        except Escape (returns to NORMAL mode) and Ctrl+M (opens injection modal).
+        """
+        # If in NORMAL mode, do NOT consume: allow bubbling to WorkspaceScreen.on_key()
+        if not self.is_pty_mode:
+            return
+
         key_name = event.key.lower()
 
-        # Check special key mappings
+        # 1. Escape: Immediately leave Insert/PTY Mode and return to NORMAL mode
+        if key_name in ("escape", "caps_lock"):
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.ModeChangeRequested("NORMAL"))
+            return
+
+        # 2. Ctrl+M: Open Directive Injection Modal directly
+        if key_name == "ctrl+m":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.OpenDirectiveRequested())
+            return
+
+        # 3. Special key mappings
         if key_name in _SPECIAL_KEYS:
             self.worker_session.write(_SPECIAL_KEYS[key_name])
             event.stop()
             event.prevent_default()
             return
 
-        # Regular characters
+        # 4. Regular characters
         if event.character:
             self.worker_session.write(event.character)
             event.stop()
@@ -197,10 +260,10 @@ class WorkerTerminalTab(Widget):
     }
     """
 
-    def __init__(self, worker_session: WorkerSession, **kwargs) -> None:
+    def __init__(self, worker_session: WorkerSession, mode: str = "NORMAL", **kwargs) -> None:
         super().__init__(**kwargs)
         self.worker_session = worker_session
-        self.screen_widget = TerminalScreenWidget(worker_session=worker_session)
+        self.screen_widget = TerminalScreenWidget(worker_session=worker_session, mode=mode)
         self._toast_timer = None
         self.add_class("worker-terminal-tab")
 
