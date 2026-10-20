@@ -1,6 +1,6 @@
 # `src/micro/` — Root Package
 
-This is the root Python package for the **mind · micro** TUI application.
+This is the root Python package for the **mind** (`micro`) AI Multi-Agent Orchestration system.
 
 ## Files
 
@@ -14,6 +14,8 @@ This is the root Python package for the **mind · micro** TUI application.
 
 | Directory | Description |
 |---|---|
-| `cli/` | Click CLI entrypoint (`micro` command and `micro new` subcommand). |
+| `cli/` | Click CLI entrypoint (`mind` / `micro`, `new`, `mcp`, `register-mcp`). |
+| `core/` | Pseudoterminal multiplexing, virtual screen buffers, process lifecycles. |
+| `mcp/` | Embedded Model Context Protocol server exposing tools to coordinator agents. |
 | `state/` | Domain models, enums, and mock data providers. |
-| `ui/` | All Textual widgets, screens, modals, and the global stylesheet. |
+| `ui/` | All Textual widgets, terminal screens, modals, and the global stylesheet. |

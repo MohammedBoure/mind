@@ -25,3 +25,6 @@ Thumbs.db
 
 # Textual
 .textual/
+
+# Tests
+.pytest_cache/

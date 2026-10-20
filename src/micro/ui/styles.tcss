@@ -284,12 +284,69 @@ Screen {
 
 /* ── Worker Tabs ─────────────────────────────────────────────────── */
 #worker-tabs {
-    height: 3;
+    height: 1fr;
     background: $primary-darken-1;
 }
 
 #worker-tab-content {
     height: 1fr;
+}
+
+/* ── Worker Terminal Tab & Screen ─────────────────────────────────── */
+.worker-terminal-tab {
+    height: 1fr;
+    layout: vertical;
+    padding: 0;
+    margin: 0;
+}
+
+.terminal-header {
+    height: 1;
+    dock: top;
+    background: $primary-darken-2;
+    color: $text;
+    padding: 0 1;
+}
+
+.terminal-toast {
+    dock: top;
+    height: auto;
+    max-height: 5;
+    background: $warning-darken-3;
+    border-bottom: solid $warning;
+    color: $text;
+    padding: 0 1;
+    display: none;
+}
+
+.terminal-toast.visible {
+    display: block;
+}
+
+.terminal-screen {
+    height: 1fr;
+    background: #0d1117;
+    border: round $primary-darken-1;
+    padding: 0 1;
+    overflow-y: hidden;
+    overflow-x: hidden;
+}
+
+.terminal-screen:focus {
+    border: round $accent;
+}
+
+.terminal-controls {
+    height: 1;
+    dock: bottom;
+    background: $primary-darken-3;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+.terminal-helper-text {
+    width: 100%;
+    color: $text-muted;
 }
 
 /* ── Help Modal ──────────────────────────────────────────────────── */
