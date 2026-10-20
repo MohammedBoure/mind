@@ -97,6 +97,9 @@ def test_mcp_sse_runner() -> None:
 def test_ui_imports() -> None:
     print("[5/5] Testing Textual UI widget imports & instantiation...")
     from mind.app import MindApp
+    from mind.ui.bottom_bar import ActionPill, BottomBar
+    from mind.ui.directive_modal import DirectiveModal
+    from mind.ui.header_bar import HeaderBar
     from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
     from mind.ui.workspace import WorkspaceScreen
 
@@ -107,6 +110,40 @@ def test_ui_imports() -> None:
     tab = WorkerTerminalTab(worker_session=worker)
     assert tab.worker_session == worker
     print("  ✓ WorkerTerminalTab instantiated successfully.")
+
+    # Test TerminalScreenWidget placeholder banner
+    screen_widget = TerminalScreenWidget(worker_session=worker)
+    rendered = screen_widget.render()
+    assert rendered is not None
+    assert len(str(rendered)) > 0
+    print("  ✓ TerminalScreenWidget rendered non-empty content (placeholder banner).")
+
+    # Test HeaderBar
+    header = HeaderBar(session_name="test-session", worker_count=2)
+    assert header.session_name == "test-session"
+    assert header.worker_count == 2
+    assert "NORMAL" in header._build_mode_badge()
+    header.mode = "PTY INTERACT"
+    assert "PTY INTERACT" in header._build_mode_badge()
+    print("  ✓ HeaderBar reactive mode and status pills verified.")
+
+    # Test BottomBar & ActionPills
+    bottom = BottomBar(worker_count=2)
+    assert bottom.worker_count == 2
+    assert "NORMAL" in bottom._build_mode_indicator()
+    pill = ActionPill("Ctrl+M", "Inject", "open_directive_modal")
+    assert pill.action_name == "open_directive_modal"
+    print("  ✓ BottomBar and ActionPills verified.")
+
+    # Test DirectiveModal
+    modal = DirectiveModal()
+    assert modal is not None
+    print("  ✓ DirectiveModal instantiated.")
+
+    # Test WorkspaceScreen
+    ws = WorkspaceScreen(session_name="test-session", agent_count=3)
+    assert ws._session_name == "test-session"
+    print("  ✓ WorkspaceScreen instantiated.")
 
     mgr.stop_all()
     print("  ✓ All test workers stopped.")

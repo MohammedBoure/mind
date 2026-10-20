@@ -1,4 +1,4 @@
-"""Header bar widget with session info and agent tabs."""
+"""Streamlined Zellij-inspired header bar widget."""
 
 from __future__ import annotations
 
@@ -6,70 +6,69 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import Static, TabbedContent, TabPane
+from textual.widgets import Static
 
-from mind.state.models import AgentInfo, AgentStatus
-
-
-# Status emoji mapping
-_STATUS_ICONS: dict[AgentStatus, str] = {
-    AgentStatus.IDLE: "⏸",
-    AgentStatus.THINKING: "🧠",
-    AgentStatus.EXECUTING: "⚡",
-    AgentStatus.WAITING: "⏳",
-    AgentStatus.ERROR: "❌",
-}
+from mind.state.models import AgentInfo
 
 
 class HeaderBar(Widget):
-    """Top bar displaying session name, status, and agent tabs."""
+    """Zellij-inspired top bar displaying branding, session, mode, and MCP health."""
 
     session_name: reactive[str] = reactive("unnamed")
-    is_active: reactive[bool] = reactive(True)
+    mode: reactive[str] = reactive("NORMAL")
+    mcp_port: reactive[int] = reactive(8765)
+    worker_count: reactive[int] = reactive(2)
 
     def __init__(
         self,
         session_name: str = "unnamed",
-        agents: list[AgentInfo] | None = None,
+        worker_count: int = 2,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.session_name = session_name
-        self._agents = agents or []
+        self.worker_count = worker_count
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-bar"):
-            yield Static(
-                f"🧠 {self.session_name}",
-                id="session-badge",
-            )
-            yield Static("● Active", id="status-indicator")
+            # Brand logo pill
+            yield Static("🧠 mind", id="brand-pill")
 
-            # Agent tabs
-            with TabbedContent(id="agent-tabs"):
-                for agent in self._agents:
-                    icon = _STATUS_ICONS.get(agent.status, "●")
-                    tab_label = f"{icon} {agent.id}: {agent.name}"
-                    with TabPane(tab_label, id=f"agent-tab-{agent.id}"):
-                        yield Static("")  # Placeholder content inside tab
+            # Active session pill
+            yield Static(f"📂 {self.session_name}", id="session-pill")
+
+            # Interactive mode badge
+            yield Static(self._build_mode_badge(), id="mode-badge")
+
+            # Center spacer
+            yield Static("", id="header-spacer")
+
+            # MCP Health status indicator
+            yield Static(f"● MCP {self.mcp_port}", id="mcp-indicator")
+
+            # Active worker count
+            yield Static(f"⚡ {self.worker_count} Workers", id="worker-count-pill")
+
+    def _build_mode_badge(self) -> str:
+        """Construct the mode indicator badge."""
+        if self.mode == "PTY INTERACT":
+            return "[bold #1a1b26 on #bb9af7] ⌨ PTY INTERACT [/]"
+        return "[bold #1a1b26 on #7aa2f7] 🔍 NORMAL [/]"
 
     def watch_session_name(self, value: str) -> None:
-        """Update the session badge when name changes."""
         try:
-            badge = self.query_one("#session-badge", Static)
-            badge.update(f"🧠 {value}")
+            self.query_one("#session-pill", Static).update(f"📂 {value}")
         except Exception:
             pass
 
-    def watch_is_active(self, value: bool) -> None:
-        """Update the status indicator."""
+    def watch_mode(self, value: str) -> None:
         try:
-            indicator = self.query_one("#status-indicator", Static)
-            if value:
-                indicator.update("● Active")
-                indicator.styles.color = "green"
-            else:
-                indicator.update("○ Paused")
-                indicator.styles.color = "yellow"
+            self.query_one("#mode-badge", Static).update(self._build_mode_badge())
+        except Exception:
+            pass
+
+    def watch_worker_count(self, value: int) -> None:
+        try:
+            self.query_one("#worker-count-pill", Static).update(f"⚡ {value} Workers")
         except Exception:
             pass

@@ -8,9 +8,11 @@ control, and displays visual toast badges upon MCP directive injections.
 from __future__ import annotations
 
 import sys
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Button, Input, Static
@@ -49,10 +51,33 @@ class TerminalScreenWidget(Widget):
     """The interactive terminal screen pane within a worker tab.
 
     Can be focused to capture raw keystrokes and type directly into agy.
-    Renders the live ANSI screen buffer.
+    Renders the live ANSI screen buffer or an informative banner when starting up.
     """
 
     can_focus = True
+
+    DEFAULT_CSS = """
+    TerminalScreenWidget {
+        height: 1fr;
+        width: 100%;
+        min-height: 15;
+        background: #0f141c;
+        border: round #3b4261;
+        padding: 0 1;
+        overflow-y: hidden;
+        overflow-x: hidden;
+    }
+
+    TerminalScreenWidget:focus {
+        border: round #7aa2f7;
+    }
+    """
+
+    class TerminalFocusChanged(Message):
+        """Emitted when terminal focus changes to update global mode."""
+        def __init__(self, is_focused: bool) -> None:
+            super().__init__()
+            self.is_focused = is_focused
 
     def __init__(self, worker_session: WorkerSession, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -60,13 +85,69 @@ class TerminalScreenWidget(Widget):
         self._last_rendered_version = -1
         self.add_class("terminal-screen")
 
-    def render(self):
-        """Render the 2D virtual screen buffer with ANSI styles and cursor."""
-        return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+    def render(self) -> Text:
+        """Render virtual screen buffer or placeholder banner if still initializing."""
+        visible_lines = self.worker_session.buffer.get_visible_lines()
+        has_content = any(line.strip() for line in visible_lines)
+
+        if has_content:
+            return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+
+        return self._render_placeholder_banner()
+
+    def _render_placeholder_banner(self) -> Text:
+        """Render an elegant Tokyo Night placeholder banner while buffer initializes."""
+        t = Text()
+        s = self.worker_session
+        pid_str = f"PID: {s.pid}" if s.pid else "Spawning..."
+        mode_str = "ConPTY / UTF-8" if sys.platform == "win32" else "Unix PTY / UTF-8"
+
+        t.append("\n")
+        t.append("   ╭────────────────────────────────────────────────────────────────────────╮\n", style="#3b4261")
+        t.append("   │  ", style="#3b4261")
+        t.append("🧠  mind ", style="bold #7aa2f7")
+        t.append("· ", style="#565f89")
+        t.append("Interactive Worker Terminal ", style="bold #bb9af7")
+        t.append(f"({s.name})", style="bold #7dcfff")
+        fill_spaces = max(1, 44 - len(s.name))
+        t.append(" " * fill_spaces)
+        t.append("│\n", style="#3b4261")
+        t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
+        t.append("   │  ", style="#3b4261")
+        t.append("Status: ", style="#7982a9")
+        t.append("● RUNNING ", style="bold #9ece6a")
+        t.append(f"│  {pid_str:<14} │  Model: {s.model:<10} │  {mode_str}\n", style="#7982a9")
+        t.append("   │  ", style="#3b4261")
+        t.append("Task:   ", style="#7982a9")
+        t.append(f"{s.task[:58]:<58}", style="italic #c0caf5")
+        t.append("│\n", style="#3b4261")
+        t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
+
+        if self.has_focus:
+            focus_hint = "[ ⌨ FOCUSED - RAW PTY INPUT ACTIVE ]"
+            focus_style = "bold #bb9af7"
+        else:
+            focus_hint = "[ 🔍 CLICK OR PRESS TAB TO FOCUS & TYPE ]"
+            focus_style = "bold #7aa2f7"
+
+        t.append("   │  ", style="#3b4261")
+        t.append(f"{focus_hint:<42}", style=focus_style)
+        t.append("│  Ctrl+M: Inject Directive     │\n", style="#7982a9")
+        t.append("   ╰────────────────────────────────────────────────────────────────────────╯\n", style="#3b4261")
+        t.append("\n   [dim #565f89]Live stream active. Commands sent directly to child agy process.[/dim #565f89]\n")
+        return t
 
     def on_mount(self) -> None:
         """Set up a high-frequency polling timer for smooth screen updates."""
         self.set_interval(0.04, self._check_for_updates)
+
+    def on_focus(self) -> None:
+        self.post_message(self.TerminalFocusChanged(is_focused=True))
+        self.refresh()
+
+    def on_blur(self) -> None:
+        self.post_message(self.TerminalFocusChanged(is_focused=False))
+        self.refresh()
 
     def _check_for_updates(self) -> None:
         """Trigger a re-render if new output arrived in the buffer."""
@@ -106,6 +187,16 @@ class WorkerTerminalTab(Widget):
 
     has_unread: reactive[bool] = reactive(False)
 
+    DEFAULT_CSS = """
+    WorkerTerminalTab {
+        height: 1fr;
+        width: 100%;
+        layout: vertical;
+        padding: 0;
+        margin: 0;
+    }
+    """
+
     def __init__(self, worker_session: WorkerSession, **kwargs) -> None:
         super().__init__(**kwargs)
         self.worker_session = worker_session
@@ -125,15 +216,6 @@ class WorkerTerminalTab(Widget):
         # 3. Interactive terminal screen
         yield self.screen_widget
 
-        # 4. Quick action helper bar
-        with Horizontal(classes="terminal-controls"):
-            yield Static(
-                "[bold cyan]Click / Tab[/] Type in agy  ·  "
-                "[bold red]Ctrl+C[/] Interrupt  ·  "
-                "[dim]MCP Bridge: Active (http://127.0.0.1:8765/sse)[/]",
-                classes="terminal-helper-text",
-            )
-
     def on_mount(self) -> None:
         """Register notification listener with worker session."""
         self.worker_session.add_notification_listener(self._on_notification)
@@ -143,24 +225,24 @@ class WorkerTerminalTab(Widget):
         """Construct the styled header bar text."""
         state = self.worker_session.state
         if state == WorkerProcessState.RUNNING:
-            state_str = "[bold green]● RUNNING[/]"
+            state_str = "[bold #9ece6a]● RUNNING[/]"
         elif state == WorkerProcessState.PAUSED:
-            state_str = "[bold yellow]⏸ PAUSED[/]"
+            state_str = "[bold #e0af68]⏸ PAUSED[/]"
         elif state == WorkerProcessState.WAITING_INPUT:
-            state_str = "[bold blue]⏳ WAITING INPUT[/]"
+            state_str = "[bold #7dcfff]⏳ WAITING INPUT[/]"
         else:
-            state_str = "[bold red]❌ TERMINATED[/]"
+            state_str = "[bold #f7768e]❌ TERMINATED[/]"
 
         pid_info = f"PID: {self.worker_session.pid}" if self.worker_session.pid else "PID: -"
         badge = ""
         if self.worker_session.unread_notifications > 0:
-            badge = f"  [bold red on white] 🔔 {self.worker_session.unread_notifications} NEW DIRECTIVE [/]"
+            badge = f"  [bold #1a1b26 on #e0af68] 🔔 {self.worker_session.unread_notifications} NEW DIRECTIVE [/]"
 
         return (
-            f" [bold cyan]{self.worker_session.name}[/] "
+            f" [bold #7aa2f7]{self.worker_session.name}[/] "
             f"[dim]({self.worker_session.model} · {pid_info})[/] "
             f"{state_str}{badge} "
-            f"[dim italic]— {self.worker_session.task}[/]"
+            f"[italic #7982a9]— {self.worker_session.task}[/]"
         )
 
     def _refresh_header(self) -> None:
@@ -183,10 +265,9 @@ class WorkerTerminalTab(Widget):
         try:
             toast_box = self.query_one(f"#toast-{self.worker_session.worker_id}", Vertical)
             toast_text = self.query_one(f"#toast-text-{self.worker_session.worker_id}", Static)
-            toast_text.update(f"[bold yellow]⚡ INCOMING DIRECTIVE INJECTED VIA MCP:[/]\n{message.strip()}")
+            toast_text.update(f"[bold #e0af68]⚡ INCOMING DIRECTIVE INJECTED VIA MCP:[/]\n{message.strip()}")
             toast_box.add_class("visible")
 
-            # Auto-dismiss banner after 8 seconds
             if self._toast_timer:
                 self._toast_timer.stop()
             self._toast_timer = self.set_timer(8.0, self._hide_toast)

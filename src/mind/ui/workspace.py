@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import random
 
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
@@ -21,33 +22,37 @@ from mind.state.mock_data import (
 from mind.state.models import AgentInfo, AgentStatus, InterAgentMessage, LogEntry, MessagePriority
 from mind.ui.agent_pane import AgentLogPane
 from mind.ui.bottom_bar import BottomBar
+from mind.ui.directive_modal import DirectiveModal
 from mind.ui.header_bar import HeaderBar
 from mind.ui.interrupt_banner import InterruptBanner
-from mind.ui.terminal_tab import WorkerTerminalTab
+from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
 
 
 class WorkspaceScreen(Screen):
     """Main workspace screen with split-pane agent views.
 
     Layout:
-    ┌─────────────────────────────────────────────────┐
-    │ HeaderBar: Session name | Status | Agent tabs   │
-    ├─────────────────────────────────────────────────┤
-    │ InterruptBanner (hidden until triggered)        │
-    ├────────────────────┬────────────────────────────┤
-    │ Primary Agent Pane │ Interactive Worker PTYs    │
-    │ (left / main)      │ (right / tabbed terminals) │
-    ├────────────────────┴────────────────────────────┤
-    │ BottomBar: Keybind hints                        │
-    └─────────────────────────────────────────────────┘
+    ┌─────────────────────────────────────────────────────────────┐
+    │ HeaderBar: [mind] | [session] | [mode] | [mcp] | [workers]  │
+    ├─────────────────────────────────────────────────────────────┤
+    │ InterruptBanner (hidden until triggered)                    │
+    ├──────────────────────────────┬──────────────────────────────┤
+    │ Primary Agent Pane           │ Interactive Worker PTYs      │
+    │ (left / coordinator stream)  │ (right / tabbed terminals)   │
+    ├──────────────────────────────┴──────────────────────────────┤
+    │ BottomBar: Mode | Clickable Action Pills | PTY status       │
+    └─────────────────────────────────────────────────────────────┘
     """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("question_mark", "show_help", "Help"),
+        ("ctrl+m", "open_directive_modal", "Inject Directive"),
+        ("ctrl+c", "interrupt_active", "Interrupt"),
         ("m", "mock_interrupt", "Mock Interrupt"),
         ("n", "new_tab", "New Tab"),
         ("s", "toggle_split", "Toggle Split"),
+        ("tab", "focus_next", "Focus Next"),
         ("escape", "go_back", "Back"),
         ("alt+1", "switch_worker('1')", "Worker 1"),
         ("alt+2", "switch_worker('2')", "Worker 2"),
@@ -75,17 +80,18 @@ class WorkspaceScreen(Screen):
 
     def compose(self) -> ComposeResult:
         self._agents = get_mock_agents(self._agent_count)
+        worker_count = max(len(self._agents) - 1, 0)
 
-        # Header
+        # 1. Streamlined Header Bar
         yield HeaderBar(
             session_name=self._session_name,
-            agents=self._agents,
+            worker_count=worker_count,
         )
 
-        # Interrupt banner (hidden by default)
+        # 2. Inter-agent interrupt banner (hidden until directive arrives)
         yield InterruptBanner()
 
-        # Workspace: Primary pane (left) + Worker PTY Panes (right)
+        # 3. Main Workspace: Primary coordinator pane (left) + Worker PTYs (right)
         primary = self._agents[0]
         primary_logs = get_mock_log_stream(primary.id)
         primary_pane = AgentLogPane(
@@ -103,7 +109,7 @@ class WorkspaceScreen(Screen):
                     with TabbedContent(id="worker-tabs"):
                         for agent in self._agents[1:]:
                             worker_id = str(agent.id)
-                            # Create or retrieve real PTY worker session running agy
+                            # Create or retrieve real PTY worker session
                             session = self._terminal_manager.create_worker(
                                 worker_id=worker_id,
                                 name=agent.name,
@@ -117,10 +123,11 @@ class WorkspaceScreen(Screen):
                             with TabPane(f"{agent.name}", id=f"worker-tab-{worker_id}"):
                                 yield tab_widget
 
-        yield BottomBar()
+        # 4. Interactive Bottom Status Bar
+        yield BottomBar(worker_count=worker_count)
 
     def on_mount(self) -> None:
-        """Initialize background MCP server and simulated coordination stream."""
+        """Initialize background MCP server, notification listeners, and auto-focus."""
         # Start embedded MCP server in the background
         start_background_mcp_server(host="127.0.0.1", port=8765)
 
@@ -130,11 +137,60 @@ class WorkspaceScreen(Screen):
         # Start primary agent coordination stream
         self._stream_timer = self.set_interval(2.5, self._emit_primary_log)
 
+        # Auto-focus the active terminal widget after layout stabilization
+        self.set_timer(0.15, self._auto_focus_terminal)
+
     def on_unmount(self) -> None:
         """Clean up background tasks on unmount."""
         if self._stream_timer:
             self._stream_timer.stop()
         stop_background_mcp_server()
+
+    # ── Focus & Mode Management ────────────────────────────────────
+
+    @on(TerminalScreenWidget.TerminalFocusChanged)
+    def on_terminal_focus_changed(self, event: TerminalScreenWidget.TerminalFocusChanged) -> None:
+        """Update header and bottom bar mode indicator when terminal gains/loses focus."""
+        mode = "PTY INTERACT" if event.is_focused else "NORMAL"
+        try:
+            self.query_one(HeaderBar).mode = mode
+        except Exception:
+            pass
+        try:
+            self.query_one(BottomBar).mode = mode
+        except Exception:
+            pass
+
+    @on(TabbedContent.TabActivated)
+    def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Auto-focus child terminal when switching tabs."""
+        if event.pane and event.pane.id and event.pane.id.startswith("worker-tab-"):
+            worker_id = event.pane.id.replace("worker-tab-", "")
+            tab_widget = self._worker_tabs.get(worker_id)
+            if tab_widget and tab_widget.screen_widget:
+                self.set_timer(0.05, tab_widget.screen_widget.focus)
+
+    def _auto_focus_terminal(self) -> None:
+        """Focus the currently active worker terminal screen."""
+        try:
+            tabs = self.query_one("#worker-tabs", TabbedContent)
+            active_pane = tabs.active
+            if active_pane and active_pane.startswith("worker-tab-"):
+                worker_id = active_pane.replace("worker-tab-", "")
+                tab_widget = self._worker_tabs.get(worker_id)
+                if tab_widget and tab_widget.screen_widget:
+                    tab_widget.screen_widget.focus()
+                    return
+        except Exception:
+            pass
+
+        # Fallback to the first available worker screen widget
+        for tab in self._worker_tabs.values():
+            if tab.screen_widget:
+                tab.screen_widget.focus()
+                break
+
+    # ── Event Callbacks ────────────────────────────────────────────
 
     def _on_mcp_directive_injected(self, worker: WorkerSession, formatted_directive: str) -> None:
         """Handle inter-agent message injected via MCP tool call."""
@@ -152,14 +208,13 @@ class WorkspaceScreen(Screen):
 
     def _emit_primary_log(self) -> None:
         """Emit simulated coordination thoughts and MCP tool invocations for Primary Agent."""
-        primary = self._agents[0]
         mock_lines = [
             ("thought", "Primary coordinator monitoring active worker sessions..."),
             ("tool_call", "→ mcp::list_workers()"),
-            ("result", f"✓ {len(self._agents)-1} active workers verified healthy."),
+            ("result", f"✓ {max(len(self._agents)-1, 0)} active workers verified healthy."),
             ("thought", "Evaluating worker progress on assigned tasks."),
             ("tool_call", "→ mcp::get_terminal_screen('1', lines=10)"),
-            ("result", "✓ Worker-1 terminal buffer inspected. No errors reported."),
+            ("result", "✓ Worker-1 terminal buffer inspected. Output steady."),
             ("thought", "All sub-agents executing within parameters."),
             ("info", "Syncing multi-agent state with MCP bridge."),
             ("thought", "Checking for pending inter-agent interrupts..."),
@@ -188,10 +243,63 @@ class WorkspaceScreen(Screen):
         self.app.exit()
 
     def action_show_help(self) -> None:
-        """Show the help modal."""
+        """Show the help modal dialog."""
         from mind.ui.help_modal import HelpModal
 
         self.app.push_screen(HelpModal())
+
+    def action_open_directive_modal(self) -> None:
+        """Open interactive directive injection modal."""
+        self.app.push_screen(DirectiveModal())
+
+    def action_interrupt_active(self) -> None:
+        """Send immediate interrupt (SIGINT/Ctrl+C) to the currently selected worker."""
+        try:
+            tabs = self.query_one("#worker-tabs", TabbedContent)
+            active_id = tabs.active
+            if active_id and active_id.startswith("worker-tab-"):
+                worker_id = active_id.replace("worker-tab-", "")
+                worker = self._terminal_manager.get_worker(worker_id)
+                if worker:
+                    worker.interrupt()
+                    self.notify(f"⚡ Interrupted Worker-{worker_id}", severity="warning")
+                    return
+        except Exception:
+            pass
+
+        workers = self._terminal_manager.list_workers()
+        if workers:
+            workers[0].interrupt()
+            self.notify(f"⚡ Interrupted {workers[0].name}", severity="warning")
+
+    def action_next_worker(self) -> None:
+        """Cycle to the next worker tab."""
+        if len(self._agents) <= 1:
+            return
+        worker_ids = [str(a.id) for a in self._agents[1:]]
+        if not worker_ids:
+            return
+        try:
+            tabs = self.query_one("#worker-tabs", TabbedContent)
+            current_pane_id = tabs.active
+            current_id = current_pane_id.replace("worker-tab-", "") if current_pane_id else worker_ids[0]
+            idx = worker_ids.index(current_id) if current_id in worker_ids else -1
+            next_id = worker_ids[(idx + 1) % len(worker_ids)]
+            self.action_switch_worker(next_id)
+        except Exception:
+            pass
+
+    def action_focus_next(self) -> None:
+        """Toggle focus between primary agent pane and active worker terminal."""
+        focused = self.focused
+        if isinstance(focused, TerminalScreenWidget):
+            try:
+                primary = self.query_one("#primary-pane", AgentLogPane)
+                primary.focus()
+            except Exception:
+                self.focus_next()
+        else:
+            self._auto_focus_terminal()
 
     def action_mock_interrupt(self) -> None:
         """Trigger an interrupt directive test through the worker terminal session."""
@@ -209,12 +317,12 @@ class WorkspaceScreen(Screen):
             banner.show_interrupt(message)
 
     def action_switch_worker(self, worker_id: str) -> None:
-        """Switch active worker tab."""
+        """Switch active worker tab and focus its terminal."""
         try:
             tabs = self.query_one("#worker-tabs", TabbedContent)
             tabs.active = f"worker-tab-{worker_id}"
             tab_widget = self._worker_tabs.get(str(worker_id))
-            if tab_widget:
+            if tab_widget and tab_widget.screen_widget:
                 tab_widget.screen_widget.focus()
         except Exception:
             pass
@@ -245,6 +353,10 @@ class WorkspaceScreen(Screen):
         try:
             tabs = self.query_one("#worker-tabs", TabbedContent)
             tabs.add_pane(TabPane(f"{new_agent.name}", tab_widget, id=f"worker-tab-{new_id}"))
+            # Update counts in header and bottom bar
+            active_worker_count = len(self._agents) - 1
+            self.query_one(HeaderBar).worker_count = active_worker_count
+            self.query_one(BottomBar).worker_count = active_worker_count
             self.notify(f"Spawned {new_agent.name} with live PTY session.")
         except Exception:
             pass
