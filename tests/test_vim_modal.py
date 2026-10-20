@@ -432,5 +432,102 @@ def test_agent_config_modal_discovered_agents() -> None:
     assert "agy1" in modal._discovered_agents
 
 
+def test_coordinator_command_resolution_and_prompt() -> None:
+    """WorkspaceScreen resolves agy1.cmd with coordinator prompt and MCP tools."""
+    from mind.ui.workspace import WorkspaceScreen
+
+    ws = WorkspaceScreen(session_name="test-coord", agent_count=2, goal="Build payment API")
+    cmd = ws._resolve_coordinator_command()
+    assert isinstance(cmd, list)
+    assert len(cmd) >= 3
+
+    # Must include mode auto and interactive prompt
+    assert "--mode" in cmd
+    assert "auto" in cmd
+    assert "--prompt-interactive" in cmd
+
+    # Prompt must instruct the Coordinator to use mind-bridge MCP tools
+    prompt_idx = cmd.index("--prompt-interactive") + 1
+    prompt_str = cmd[prompt_idx]
+    assert "Primary Coordinator" in prompt_str
+    assert "mind-bridge" in prompt_str
+    assert "list_workers" in prompt_str
+    assert "get_terminal_screen" in prompt_str
+    assert "send_terminal_input" in prompt_str
+    assert "interrupt_and_inject" in prompt_str
+    assert "Build payment API" in prompt_str
+
+
+@pytest.mark.anyio
+async def test_primary_pane_coordinator_mounting_and_header() -> None:
+    """WorkspaceScreen mounts #primary-pane as WorkerTerminalTab with Coordinator role and badges."""
+    from textual.app import App
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.terminal_tab import WorkerTerminalTab
+    from mind.ui.workspace import WorkspaceScreen
+
+    TerminalManager.reset()
+
+    class TestApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(WorkspaceScreen(session_name="test-coord-mount", agent_count=3))
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        ws = app.screen
+        assert isinstance(ws, WorkspaceScreen)
+        primary_tab = ws._coordinator_tab
+        assert primary_tab is not None
+        assert isinstance(primary_tab, WorkerTerminalTab)
+        assert primary_tab.id == "primary-pane"
+        assert primary_tab.worker_session.role == "coordinator"
+        assert primary_tab.worker_session.assigned_agent == "agy1"
+
+        # Header text must render the Primary Coordinator badge
+        header_text = primary_tab._build_header_text()
+        assert "PRIMARY COORDINATOR" in header_text
+        assert "agy1" in header_text
+
+
+@pytest.mark.anyio
+async def test_tab_focus_switching_between_coordinator_and_worker() -> None:
+    """action_focus_next toggles focus between Primary Coordinator and active Worker."""
+    from textual.app import App
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.workspace import WorkspaceScreen
+
+    TerminalManager.reset()
+
+    class TestApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(WorkspaceScreen(session_name="test-focus", agent_count=3))
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        ws = app.screen
+        assert isinstance(ws, WorkspaceScreen)
+
+        coord_screen = ws._coordinator_tab.screen_widget
+        active_worker = ws._worker_tabs.get("1")
+        assert active_worker is not None
+        worker_screen = active_worker.screen_widget
+
+        # Focus coordinator screen first
+        coord_screen.focus()
+        await pilot.pause()
+        assert ws.focused == coord_screen
+
+        # Action focus next -> switches focus to worker
+        ws.action_focus_next()
+        await pilot.pause()
+        assert ws.focused == worker_screen
+
+        # Action focus next again -> switches focus back to coordinator
+        ws.action_focus_next()
+        await pilot.pause()
+        assert ws.focused == coord_screen
+
+
+
 
 

@@ -10,7 +10,11 @@ and task assignment dispatcher ('m').
 from __future__ import annotations
 
 from datetime import datetime
+import os
 import random
+import shutil
+import sys
+from typing import Any
 
 from textual import events, on
 from textual.app import ComposeResult
@@ -23,12 +27,10 @@ from mind.core.terminal_manager import TerminalManager, WorkerSession
 from mind.mcp.runner import start_background_mcp_server, stop_background_mcp_server
 from mind.state.mock_data import (
     get_mock_agents,
-    get_mock_log_stream,
     get_random_interrupt_message,
 )
-from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, LogEntry, MessagePriority
+from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, MessagePriority
 from mind.ui.agent_config_modal import AgentConfigModal
-from mind.ui.agent_pane import AgentLogPane
 from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_modal import DirectiveModal
 from mind.ui.header_bar import HeaderBar
@@ -85,11 +87,45 @@ class WorkspaceScreen(Screen):
         self._agent_count = max(agent_count, 1)
         self._goal = goal
         self._agents: list[AgentInfo] = []
+        self._coordinator_tab: WorkerTerminalTab | None = None
         self._worker_tabs: dict[str, WorkerTerminalTab] = {}
         self._active_worker_id: str = "1"
         self._is_split_view: bool = True
-        self._stream_timer = None
         self._terminal_manager = TerminalManager.get_instance()
+
+    def _resolve_coordinator_command(self) -> list[str]:
+        """Resolve command line to launch agy1.cmd as Primary Coordinator with orchestration prompt."""
+        prompt = (
+            "You are the Primary Coordinator agent for mind. "
+            "Active worker agent terminals are running in the right pane. "
+            "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
+            "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
+        )
+        if self._goal:
+            prompt += f" Overall Session Goal: {self._goal}."
+
+        # 1. Search for agy1 executable / launcher
+        agy1_launcher = shutil.which("agy1") or shutil.which("agy1.cmd")
+        if not agy1_launcher and sys.platform == "win32":
+            local_agy1 = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy1.cmd")
+            if os.path.exists(local_agy1):
+                agy1_launcher = local_agy1
+
+        # 2. Fallback to standard agy executable
+        agy_bin = shutil.which("agy") or shutil.which("agy.exe")
+        if not agy_bin and sys.platform == "win32":
+            local_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
+            if os.path.exists(local_agy):
+                agy_bin = local_agy
+
+        target_bin = agy1_launcher or agy_bin
+        if target_bin:
+            return [target_bin, "--mode", "auto", "--prompt-interactive", prompt]
+
+        # 3. Fallback for test/offline environments
+        if sys.platform == "win32":
+            return ["powershell.exe", "-NoLogo"]
+        return ["/bin/bash"]
 
     def compose(self) -> ComposeResult:
         self._agents = get_mock_agents(self._agent_count)
@@ -107,16 +143,27 @@ class WorkspaceScreen(Screen):
         yield InterruptBanner()
 
         # 3. Main Workspace: Primary coordinator pane (left) + Worker PTYs (right)
-        primary = self._agents[0]
-        primary_logs = get_mock_log_stream(primary.id)
-        primary_pane = AgentLogPane(
-            agent=primary,
-            logs=primary_logs,
-            pane_id="primary-pane",
+        coordinator_cmd = self._resolve_coordinator_command()
+        coordinator_task = self._goal or "Orchestrate workers via mind-bridge MCP tools"
+        coordinator_session = self._terminal_manager.create_worker(
+            worker_id="coordinator",
+            agent_id="coordinator",
+            name="Primary-Coordinator",
+            role="coordinator",
+            assigned_agent="agy1",
+            model="gemini-3.8-flash-high",
+            task=coordinator_task,
+            command=coordinator_cmd,
+            autostart=True,
+        )
+        self._coordinator_tab = WorkerTerminalTab(
+            worker_session=coordinator_session,
+            mode=self.mode,
+            id="primary-pane",
         )
 
         with Horizontal(id="workspace-container"):
-            yield primary_pane
+            yield self._coordinator_tab
 
             # Worker interactive PTY terminal viewport with visible Tab Bar
             if len(self._agents) > 1:
@@ -156,13 +203,10 @@ class WorkspaceScreen(Screen):
         """Initialize background MCP server, notification listeners, and auto-focus active terminal."""
         start_background_mcp_server(host="127.0.0.1", port=8765)
         self._terminal_manager.add_notification_listener(self._on_mcp_directive_injected)
-        self._stream_timer = self.set_interval(2.5, self._emit_primary_log)
         self.set_timer(0.05, self._auto_focus_terminal)
 
     def on_unmount(self) -> None:
         """Clean up background tasks on unmount."""
-        if self._stream_timer:
-            self._stream_timer.stop()
         stop_background_mcp_server()
 
     # ── Centralized Mode Management ────────────────────────────────
@@ -178,6 +222,17 @@ class WorkspaceScreen(Screen):
             self.query_one(BottomBar).mode = new_mode
         except Exception:
             pass
+
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        if not coord_tab:
+            try:
+                coord_tab = self.query_one("#primary-pane", WorkerTerminalTab)
+            except Exception:
+                coord_tab = None
+
+        if coord_tab and coord_tab.screen_widget:
+            coord_tab.screen_widget.mode = new_mode
+            coord_tab.screen_widget.refresh()
 
         for tab in self._worker_tabs.values():
             if tab.screen_widget:
@@ -222,11 +277,27 @@ class WorkspaceScreen(Screen):
         self.action_open_agent_config_modal()
 
     def _auto_focus_terminal(self) -> None:
-        """Focus the currently active worker terminal screen."""
+        """Focus the currently active terminal screen."""
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        coord_screen = coord_tab.screen_widget if coord_tab else None
+        if coord_screen and self.focused == coord_screen:
+            try:
+                coord_screen.focus()
+            except Exception:
+                pass
+            return
+
         tab_widget = self._worker_tabs.get(str(self._active_worker_id))
         if tab_widget and tab_widget.screen_widget:
             try:
                 tab_widget.screen_widget.focus()
+            except Exception:
+                pass
+            return
+
+        if coord_screen:
+            try:
+                coord_screen.focus()
             except Exception:
                 pass
             return
@@ -361,34 +432,6 @@ class WorkspaceScreen(Screen):
         except Exception:
             pass
 
-    def _emit_primary_log(self) -> None:
-        """Emit simulated coordination thoughts and MCP tool invocations for Primary Agent."""
-        mock_lines = [
-            ("thought", "Primary coordinator monitoring active worker sessions..."),
-            ("tool_call", "→ mcp::list_workers()"),
-            ("result", f"✓ {max(len(self._agents)-1, 0)} active workers verified healthy."),
-            ("thought", "Evaluating worker progress on assigned tasks."),
-            ("tool_call", "→ mcp::get_terminal_screen('1', lines=10)"),
-            ("result", "✓ Worker-1 terminal buffer inspected. Output steady."),
-            ("thought", "All sub-agents executing within parameters."),
-            ("info", "Syncing multi-agent state with MCP bridge."),
-            ("thought", "Checking for pending inter-agent interrupts..."),
-        ]
-
-        entry_type, content = random.choice(mock_lines)
-        entry = LogEntry(
-            timestamp=datetime.now(),
-            source="Primary-Agent",
-            content=content,
-            entry_type=entry_type,
-        )
-
-        try:
-            primary_pane = self.query_one("#primary-pane", AgentLogPane)
-            primary_pane.append_log(entry)
-        except Exception:
-            pass
-
     # ── Workspace Actions ──────────────────────────────────────────
 
     def action_quit(self) -> None:
@@ -420,6 +463,19 @@ class WorkspaceScreen(Screen):
         """Callback when worker configuration is updated in AgentConfigModal."""
         new_name = new_config.get("name")
         if new_name:
+            if str(worker_id) in ("coordinator", "primary"):
+                if len(self._agents) > 0:
+                    self._agents[0].name = new_name
+                    if new_config.get("model"):
+                        self._agents[0].model = new_config["model"]
+                coord_tab = getattr(self, "_coordinator_tab", None)
+                if coord_tab:
+                    try:
+                        coord_tab.update_header_info()
+                    except Exception:
+                        pass
+                return
+
             # Update matching agent in self._agents
             for agent in self._agents:
                 if str(agent.id) == str(worker_id):
@@ -553,16 +609,52 @@ class WorkspaceScreen(Screen):
             self._safe_notify(f"Could not close worker tab: {exc}", severity="error")
 
     def action_focus_next(self) -> None:
-        """Toggle focus between primary agent pane and active worker terminal."""
-        focused = self.focused
-        if isinstance(focused, TerminalScreenWidget):
+        """Toggle focus between Primary Coordinator terminal and active worker terminal."""
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        if not coord_tab:
             try:
-                primary = self.query_one("#primary-pane", AgentLogPane)
-                primary.focus()
+                coord_tab = self.query_one("#primary-pane", WorkerTerminalTab)
             except Exception:
+                coord_tab = None
+
+        coord_screen = coord_tab.screen_widget if coord_tab else None
+
+        active_worker_tab = self._worker_tabs.get(str(self._active_worker_id))
+        worker_screen = active_worker_tab.screen_widget if active_worker_tab else None
+
+        if not worker_screen:
+            for tab in self._worker_tabs.values():
+                if tab.screen_widget:
+                    worker_screen = tab.screen_widget
+                    break
+
+        if not coord_screen and not worker_screen:
+            try:
                 self.focus_next()
+            except Exception:
+                pass
+            return
+
+        if not coord_screen:
+            if worker_screen:
+                worker_screen.focus()
+            return
+
+        if not worker_screen:
+            coord_screen.focus()
+            return
+
+        # Check whether coordinator is currently focused (or has focus within)
+        is_coord_focused = (self.focused == coord_screen) or (
+            coord_tab is not None and coord_tab.has_focus
+        )
+
+        if is_coord_focused:
+            worker_screen.focus()
+            self._safe_notify("Focused: Active Worker Terminal", timeout=1.0)
         else:
-            self._auto_focus_terminal()
+            coord_screen.focus()
+            self._safe_notify("Focused: Primary Coordinator", timeout=1.0)
 
     def action_new_tab(self) -> None:
         """Add a new worker agent tab dynamically ('c' in NORMAL mode)."""
@@ -633,13 +725,12 @@ class WorkspaceScreen(Screen):
                 primary.styles.display = "none"
                 workers.styles.width = "100%"
                 self._safe_notify("Full Screen View: Active Worker Only (Press 's' for Split)")
+                self._auto_focus_terminal()
         except Exception:
             pass
 
     def action_go_back(self) -> None:
         """Return to session picker screen."""
-        if self._stream_timer:
-            self._stream_timer.stop()
         stop_background_mcp_server()
         if len(self.app.screen_stack) > 1:
             self.app.pop_screen()

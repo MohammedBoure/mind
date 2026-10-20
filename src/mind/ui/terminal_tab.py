@@ -144,14 +144,20 @@ class TerminalScreenWidget(Widget):
         pid_str = f"PID: {s.pid}" if s.pid else "Spawning..."
         mode_str = "ConPTY / UTF-8" if sys.platform == "win32" else "Unix PTY / UTF-8"
 
+        is_coordinator = (
+            self.worker_session.role == "coordinator"
+            or str(self.worker_session.worker_id) == "coordinator"
+        )
+        tab_title = "Primary Coordinator" if is_coordinator else "Interactive Worker Terminal"
+
         t.append("\n")
         t.append("   ╭────────────────────────────────────────────────────────────────────────╮\n", style="#3b4261")
         t.append("   │  ", style="#3b4261")
         t.append("🧠  mind ", style="bold #7aa2f7")
         t.append("· ", style="#565f89")
-        t.append("Interactive Worker Terminal ", style="bold #bb9af7")
+        t.append(f"{tab_title} ", style="bold #bb9af7")
         t.append(f"({s.name})", style="bold #7dcfff")
-        fill_spaces = max(1, 44 - len(s.name))
+        fill_spaces = max(1, 44 - len(s.name) - (len(tab_title) - 27))
         t.append(" " * fill_spaces)
         t.append("│\n", style="#3b4261")
         t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
@@ -176,7 +182,10 @@ class TerminalScreenWidget(Widget):
         t.append(f"{focus_hint:<45}", style=focus_style)
         t.append("│  m: Inject  s: Split  ?: Help │\n", style="#7982a9")
         t.append("   ╰────────────────────────────────────────────────────────────────────────╯\n", style="#3b4261")
-        t.append("\n   [dim #565f89]Live stream active. Commands sent directly to child agy process.[/dim #565f89]\n")
+        if is_coordinator:
+            t.append("\n   [dim #565f89]Live Coordinator stream active. Press Tab to toggle focus between panes.[/dim #565f89]\n")
+        else:
+            t.append("\n   [dim #565f89]Live stream active. Commands sent directly to child agy process.[/dim #565f89]\n")
         return t
 
     def on_mount(self) -> None:
@@ -326,6 +335,15 @@ class WorkerTerminalTab(Widget):
             else:
                 warn_label = latest_warn[:24]
             warning_badge = f" [bold #1a1b26 on #f7768e] ⚠ Warning: {warn_label} [/]"
+
+        if self.worker_session.role == "coordinator" or str(self.worker_session.worker_id) == "coordinator":
+            return (
+                f" [bold #1a1b26 on #bb9af7] 🧠 PRIMARY COORDINATOR [/] "
+                f"[dim]Instance:[/] [bold #bb9af7]{instance_name}[/] "
+                f"[dim]({self.worker_session.model} · {pid_info})[/] "
+                f"{state_str}{directive_badge}{warning_badge} "
+                f"[italic #7982a9]— {self.worker_session.task}[/]"
+            )
 
         return (
             f" [bold #7aa2f7]● Worker-{self.worker_session.worker_id}[/] "

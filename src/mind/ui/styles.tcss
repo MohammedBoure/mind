@@ -140,6 +140,7 @@ HeaderBar {
     height: 1fr;
     width: 1fr;
     min-width: 30;
+    border-right: solid #3b4261;
 }
 
 .pane-title-bar {

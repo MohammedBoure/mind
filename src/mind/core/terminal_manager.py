@@ -276,6 +276,16 @@ class WorkerSession:
                 cmd.extend(["--model", self.model])
             if self.reasoning_effort:
                 cmd.extend(["--effort", self.reasoning_effort])
+            if self.role == "coordinator" or str(self.worker_id) == "coordinator":
+                prompt = (
+                    "You are the Primary Coordinator agent for mind. "
+                    "Active worker agent terminals are running in the right pane. "
+                    "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
+                    "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
+                )
+                if self.task and "orchestrate workers" not in self.task.lower():
+                    prompt += f" Overall Session Goal: {self.task}."
+                cmd.extend(["--prompt-interactive", prompt])
             if self.extra_flags:
                 import shlex
                 try:
@@ -519,8 +529,12 @@ class TerminalManager:
             # 1. Exact match
             if target in self._workers:
                 return self._workers[target]
-            # 2. Case-insensitive / prefix matching
+            # 2. Case-insensitive / role / prefix matching
             target_lower = target.lower()
+            if target_lower in ("coordinator", "primary"):
+                for key, w in self._workers.items():
+                    if key.lower() in ("coordinator", "primary") or w.role == "coordinator":
+                        return w
             target_norm = target_lower.replace("worker-", "").replace("worker_", "").replace("worker", "")
             for key, w in self._workers.items():
                 if key.lower() == target_lower or w.name.lower() == target_lower:

@@ -82,7 +82,10 @@ class AgentConfigModal(ModalScreen[None]):
         target_options: list[tuple[str, str]] = []
         for w in workers:
             agent_tag = w.assigned_agent or w.name
-            target_options.append((f"⚡ Tab {w.worker_id}: {agent_tag} (Worker-{w.worker_id})", str(w.worker_id)))
+            if w.role == "coordinator" or str(w.worker_id) in ("coordinator", "primary"):
+                target_options.append((f"🧠 Coordinator: {agent_tag} (Primary)", str(w.worker_id)))
+            else:
+                target_options.append((f"⚡ Tab {w.worker_id}: {agent_tag} (Worker-{w.worker_id})", str(w.worker_id)))
 
         if not target_options:
             target_options = [

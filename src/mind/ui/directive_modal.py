@@ -43,9 +43,16 @@ class DirectiveModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         workers = self._terminal_manager.list_workers()
-        target_options: list[tuple[str, str]] = [("🧠 Primary Agent (Coordinator)", "primary")]
+        target_options: list[tuple[str, str]] = []
+        has_primary = False
         for w in workers:
-            target_options.append((f"⚡ {w.name} (PID: {w.pid or '-'})", str(w.worker_id)))
+            if w.role == "coordinator" or str(w.worker_id) in ("coordinator", "primary"):
+                target_options.insert(0, (f"🧠 Primary Coordinator (PID: {w.pid or '-'})", str(w.worker_id)))
+                has_primary = True
+            else:
+                target_options.append((f"⚡ {w.name} (PID: {w.pid or '-'})", str(w.worker_id)))
+        if not has_primary:
+            target_options.insert(0, ("🧠 Primary Agent (Coordinator)", "primary"))
         if len(target_options) == 1:
             target_options.append(("⚡ Worker-1 (Default)", "1"))
             target_options.append(("⚡ Worker-2 (Default)", "2"))
@@ -126,8 +133,24 @@ class DirectiveModal(ModalScreen[None]):
             self._safe_notify("Please enter a task prompt or directive.", severity="error")
             return
 
-        if target_id == "primary":
-            self._safe_notify(f"✓ Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
+        if target_id in ("primary", "coordinator"):
+            coord = self._terminal_manager.get_worker("coordinator") or self._terminal_manager.get_worker("primary")
+            if coord and coord.is_alive:
+                coord.task = prompt_text
+                coord.role = role_val
+                coord.profile.role = role_val
+                if dispatch_mode == "interrupt":
+                    coord.interrupt_and_inject(
+                        sender_id="User / Mind UI",
+                        message=prompt_text,
+                        priority="high",
+                    )
+                else:
+                    newline = "\r\n" if sys.platform == "win32" else "\n"
+                    coord.write(prompt_text + newline)
+                self._safe_notify("✓ Directive dispatched to Primary Coordinator!", severity="warning")
+            else:
+                self._safe_notify(f"✓ Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
             self.dismiss(None)
             return
 
