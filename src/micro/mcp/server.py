@@ -61,7 +61,7 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
 
     # ── Tool 2: get_terminal_screen ───────────────────────────────────
     @server.tool()
-    def get_terminal_screen(worker_id: str, lines: int = 50) -> str:
+    def get_terminal_screen(worker_id: str = "", lines: int = 50, target: str = "") -> str:
         """Read the rendered clean text content from a worker's terminal screen buffer.
 
         Inspects what the worker agent is currently viewing or outputting in its terminal.
@@ -69,25 +69,28 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         Args:
             worker_id: The identifier of the worker agent (e.g. '1', 'worker-1').
             lines: Number of recent lines to retrieve (default: 50).
+            target: Alias for worker_id.
 
         Returns:
             Rendered terminal text content, or an error message if not found.
         """
-        worker = mgr.get_worker(worker_id)
+        actual_id = worker_id or target
+        worker = mgr.get_worker(actual_id)
         if not worker:
-            return f"Error: Worker '{worker_id}' not found. Available workers: {[w.worker_id for w in mgr.list_workers()]}"
+            return f"Error: Worker '{actual_id}' not found. Available workers: {[w.worker_id for w in mgr.list_workers()]}"
 
         screen_text = worker.get_screen(lines=lines)
         if not screen_text.strip():
-            return f"(Terminal buffer for Worker '{worker_id}' is currently empty or initializing)"
+            return f"(Terminal buffer for Worker '{actual_id}' is currently empty or initializing)"
         return screen_text
 
     # ── Tool 3: send_terminal_input ───────────────────────────────────
     @server.tool()
     def send_terminal_input(
-        worker_id: str,
-        text: str,
+        worker_id: str = "",
+        text: str = "",
         press_enter: bool = True,
+        target: str = "",
     ) -> str:
         """Write raw input or commands directly to the worker terminal stdin.
 
@@ -95,27 +98,30 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             worker_id: The identifier of the worker agent.
             text: Text, command, or keystrokes to deliver.
             press_enter: Whether to append a newline / enter key (default: True).
+            target: Alias for worker_id.
 
         Returns:
             Status confirmation message.
         """
-        worker = mgr.get_worker(worker_id)
+        actual_id = worker_id or target
+        worker = mgr.get_worker(actual_id)
         if not worker:
-            return f"Error: Worker '{worker_id}' not found."
+            return f"Error: Worker '{actual_id}' not found."
 
         if not worker.is_alive:
-            return f"Error: Worker '{worker_id}' process is not alive."
+            return f"Error: Worker '{actual_id}' process is not alive."
 
         worker.write(text, press_enter=press_enter)
-        return f"Input sent to worker '{worker_id}' ({len(text)} chars, enter={press_enter})."
+        return f"Input sent to worker '{actual_id}' ({len(text)} chars, enter={press_enter})."
 
     # ── Tool 4: interrupt_and_inject ──────────────────────────────────
     @server.tool()
     def interrupt_and_inject(
-        worker_id: str,
-        sender_id: str,
-        message: str,
+        worker_id: str = "",
+        sender_id: str = "primary-agent",
+        message: str = "",
         priority: str = "high",
+        target: str = "",
     ) -> str:
         """Pause ongoing action of the target agent with an interrupt and inject a priority directive.
 
@@ -129,13 +135,15 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             sender_id: Identifier of the sender (e.g. 'primary-coordinator', 'supervisor').
             message: The interrupt explanation or new task directive to inject.
             priority: Priority level ('low', 'normal', 'high', 'critical'). Default is 'high'.
+            target: Alias for worker_id.
 
         Returns:
             Confirmation of interrupt and injection.
         """
-        worker = mgr.get_worker(worker_id)
+        actual_id = worker_id or target
+        worker = mgr.get_worker(actual_id)
         if not worker:
-            return f"Error: Worker '{worker_id}' not found."
+            return f"Error: Worker '{actual_id}' not found."
 
         return worker.interrupt_and_inject(
             sender_id=sender_id,
@@ -145,26 +153,33 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
 
     # ── Tool 5: get_agent_profile ─────────────────────────────────────
     @server.tool()
-    def get_agent_profile(agent_id: str) -> dict[str, Any]:
+    def get_agent_profile(
+        agent_id: str = "",
+        worker_id: str = "",
+        target: str = "",
+    ) -> dict[str, Any]:
         """Return role, principles, local `./agent` config, and assigned instructions.
 
         Args:
             agent_id: Identifier of the agent or worker.
+            worker_id: Alias for agent_id.
+            target: Alias for agent_id.
 
         Returns:
             Dictionary containing role, assigned task, principles, instructions, and config.
         """
-        worker = mgr.get_worker(agent_id)
+        actual_id = agent_id or worker_id or target
+        worker = mgr.get_worker(actual_id)
         if worker:
             return worker.get_profile_dict()
 
         # Check if any worker matches agent_id attribute
         for w in mgr.list_workers():
-            if w.agent_id == agent_id:
+            if w.agent_id == actual_id:
                 return w.get_profile_dict()
 
         return {
-            "error": f"Agent '{agent_id}' not found in active sessions.",
+            "error": f"Agent '{actual_id}' not found in active sessions.",
             "available_agents": [w.agent_id for w in mgr.list_workers()],
         }
 

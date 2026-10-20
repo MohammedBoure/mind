@@ -332,9 +332,22 @@ class TerminalManager:
         return session
 
     def get_worker(self, worker_id: str) -> WorkerSession | None:
-        """Find a worker session by ID."""
+        """Find a worker session by ID, name, or normalized identifier."""
+        target = str(worker_id).strip()
         with self._lock:
-            return self._workers.get(str(worker_id))
+            # 1. Exact match
+            if target in self._workers:
+                return self._workers[target]
+            # 2. Case-insensitive / prefix matching
+            target_lower = target.lower()
+            target_norm = target_lower.replace("worker-", "").replace("worker_", "").replace("worker", "")
+            for key, w in self._workers.items():
+                if key.lower() == target_lower or w.name.lower() == target_lower:
+                    return w
+                key_norm = key.lower().replace("worker-", "").replace("worker_", "").replace("worker", "")
+                if target_norm and key_norm == target_norm:
+                    return w
+            return None
 
     def list_workers(self) -> list[WorkerSession]:
         """Return all registered worker sessions."""
