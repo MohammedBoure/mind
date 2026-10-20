@@ -154,7 +154,7 @@ class ConfigSettingsListWidget(Widget):
         self._on_change = on_change
         self._on_selection_change = on_selection_change
         self.selected_index: int = 0
-        self.scroll_offset: int = 0
+        self.view_scroll_offset: int = 0
         self.search_query: str = ""
 
     def get_filtered_entries(self) -> list[tuple[int, ConfigOption]]:
@@ -180,7 +180,7 @@ class ConfigSettingsListWidget(Widget):
         """Update search query and adjust selection."""
         self.search_query = query
         self.selected_index = 0
-        self.scroll_offset = 0
+        self.view_scroll_offset = 0
         self.refresh()
         self._notify_selection_changed()
 
@@ -195,8 +195,8 @@ class ConfigSettingsListWidget(Widget):
             return
         if self.selected_index > 0:
             self.selected_index -= 1
-            if self.selected_index < self.scroll_offset:
-                self.scroll_offset = self.selected_index
+            if self.selected_index < self.view_scroll_offset:
+                self.view_scroll_offset = self.selected_index
             self.refresh()
             self._notify_selection_changed()
 
@@ -208,8 +208,8 @@ class ConfigSettingsListWidget(Widget):
         if self.selected_index < len(filtered) - 1:
             self.selected_index += 1
             visible_rows = max(1, self.size.height or 16)
-            if self.selected_index >= self.scroll_offset + visible_rows:
-                self.scroll_offset = self.selected_index - visible_rows + 1
+            if self.selected_index >= self.view_scroll_offset + visible_rows:
+                self.view_scroll_offset = self.selected_index - visible_rows + 1
             self.refresh()
             self._notify_selection_changed()
 
@@ -266,7 +266,7 @@ class ConfigSettingsListWidget(Widget):
             event.prevent_default()
         elif key == "home":
             self.selected_index = 0
-            self.scroll_offset = 0
+            self.view_scroll_offset = 0
             self.refresh()
             self._notify_selection_changed()
             event.stop()
@@ -276,7 +276,7 @@ class ConfigSettingsListWidget(Widget):
             if filtered:
                 self.selected_index = len(filtered) - 1
                 visible_rows = max(1, self.size.height or 16)
-                self.scroll_offset = max(0, len(filtered) - visible_rows)
+                self.view_scroll_offset = max(0, len(filtered) - visible_rows)
                 self.refresh()
                 self._notify_selection_changed()
             event.stop()
@@ -294,7 +294,7 @@ class ConfigSettingsListWidget(Widget):
     def on_mouse_down(self, event: events.MouseDown) -> None:
         """Click to select row or cycle value."""
         self.focus()
-        clicked_row = event.y + self.scroll_offset
+        clicked_row = event.y + self.view_scroll_offset
         filtered = self.get_filtered_entries()
         if 0 <= clicked_row < len(filtered):
             if self.selected_index == clicked_row:
@@ -321,18 +321,18 @@ class ConfigSettingsListWidget(Widget):
         self.selected_index = max(0, min(self.selected_index, len(filtered) - 1))
 
         # Adjust scroll offset
-        if self.selected_index < self.scroll_offset:
-            self.scroll_offset = self.selected_index
-        elif self.selected_index >= self.scroll_offset + visible_rows:
-            self.scroll_offset = self.selected_index - visible_rows + 1
+        if self.selected_index < self.view_scroll_offset:
+            self.view_scroll_offset = self.selected_index
+        elif self.selected_index >= self.view_scroll_offset + visible_rows:
+            self.view_scroll_offset = self.selected_index - visible_rows + 1
 
-        slice_entries = filtered[self.scroll_offset : self.scroll_offset + visible_rows]
+        slice_entries = filtered[self.view_scroll_offset : self.view_scroll_offset + visible_rows]
 
         out = Text()
         col_width = 33
 
         for i, (orig_idx, entry) in enumerate(slice_entries):
-            current_abs_idx = self.scroll_offset + i
+            current_abs_idx = self.view_scroll_offset + i
             is_selected = current_abs_idx == self.selected_index
 
             val = entry.value
