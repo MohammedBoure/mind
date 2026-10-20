@@ -1,4 +1,4 @@
-"""CLI entrypoint for the micro TUI."""
+"""CLI entrypoint for the mind TUI."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import click
 @click.group(invoke_without_command=True)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """mind · micro — AI Multi-Agent Orchestration TUI.
+    """mind — AI Multi-Agent Orchestration TUI.
 
     Launch the TUI to manage multi-agent sessions.
     Running without arguments opens the session picker.

@@ -1,4 +1,4 @@
-# mind · micro
+# mind
 
 > **AI Multi-Agent Orchestration TUI** — A terminal user interface for managing and monitoring multi-agent AI sessions within the *mind* system.
 
@@ -26,10 +26,10 @@ uv pip install -e .
 
 ```bash
 # Launch the session picker (default)
-micro
+mind
 
 # Create and enter a new session directly
-micro new <session_name>
+mind new <session_name>
 ```
 
 ### Key Bindings

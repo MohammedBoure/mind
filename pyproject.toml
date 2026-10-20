@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
+mind = "micro.cli.main:main"
 micro = "micro.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
