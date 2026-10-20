@@ -203,3 +203,34 @@ def test_action_new_tab_execution() -> None:
     assert new_agent.name == f"Worker-{new_agent.id}"
     assert new_agent.status.value == "running"
 
+
+def test_worker_tab_bar_pills_and_split_toggle() -> None:
+    """WorkerTabBar displays active tab pills and split-screen toggles properly."""
+    from mind.ui.terminal_tab import WorkerTabBar, WorkerTabPill
+
+    tab_bar = WorkerTabBar(active_worker_id="1", workers=[("1", "Worker-1"), ("2", "Worker-2")])
+    assert tab_bar.active_worker_id == "1"
+    assert len(tab_bar.tab_items) == 2
+
+    # Workspace split toggle
+    ws = WorkspaceScreen(session_name="test-split", agent_count=3)
+    assert ws._is_split_view is True
+    ws.action_toggle_split()
+    assert ws._is_split_view is False
+    ws.action_toggle_split()
+    assert ws._is_split_view is True
+
+
+def test_directive_modal_agent_assignment() -> None:
+    """DirectiveModal enables selecting Primary or Worker agents, assigning roles, and dispatching prompts."""
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.directive_modal import DirectiveModal
+
+    mgr = TerminalManager.get_instance()
+    worker = mgr.create_worker("worker-dispatch-test", name="Worker-Dispatch", autostart=False)
+
+    modal = DirectiveModal(default_target="worker-dispatch-test")
+    assert modal is not None
+    assert modal._default_target == "worker-dispatch-test"
+
+

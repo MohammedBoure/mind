@@ -30,6 +30,16 @@ class ActionPill(Static):
 class BottomBar(Widget):
     """Interactive multi-segment status bar inspired by Zellij, Helix, and Vim."""
 
+    DEFAULT_CSS = """
+    BottomBar {
+        dock: bottom;
+        height: 1;
+        width: 100%;
+        background: #16161e;
+        color: #c0caf5;
+    }
+    """
+
     mode: reactive[str] = reactive("NORMAL")
     worker_count: reactive[int] = reactive(2)
 

@@ -90,7 +90,10 @@ class MindApp(App):
             agent_count=agent_count,
             goal=goal,
         )
-        self.switch_screen(workspace)
+        if len(self.screen_stack) > 1:
+            self.switch_screen(workspace)
+        else:
+            self.push_screen(workspace)
 
 
 

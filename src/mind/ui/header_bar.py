@@ -12,6 +12,16 @@ from textual.widgets import Static
 class HeaderBar(Widget):
     """Zellij-inspired top bar displaying branding, session, mode, and MCP health."""
 
+    DEFAULT_CSS = """
+    HeaderBar {
+        dock: top;
+        height: 1;
+        width: 100%;
+        background: #16161e;
+        color: #c0caf5;
+    }
+    """
+
     session_name: reactive[str] = reactive("unnamed")
     mode: reactive[str] = reactive("NORMAL")
     mcp_port: reactive[int] = reactive(8765)

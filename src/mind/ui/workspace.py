@@ -3,6 +3,8 @@
 Implements a strict Vim-like Modal System:
 - NORMAL mode (Command Mode): Single-key navigation (1..9, h/l, i, m, s, c, x, ?, q).
 - PTY_INTERACT mode (Insert Mode): Direct raw stdin to child agy process; Esc to exit.
+Features visible agent tabs [ 1: Worker-1 (agy) ] [ + New (c) ], split-view toggling ('s'),
+and task assignment dispatcher ('m').
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import TabbedContent, TabPane
+from textual.widgets import ContentSwitcher
 
 from mind.core.terminal_manager import TerminalManager, WorkerSession
 from mind.mcp.runner import start_background_mcp_server, stop_background_mcp_server
@@ -30,11 +32,11 @@ from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_modal import DirectiveModal
 from mind.ui.header_bar import HeaderBar
 from mind.ui.interrupt_banner import InterruptBanner
-from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
+from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTabBar, WorkerTerminalTab
 
 
 class WorkspaceScreen(Screen):
-    """Main workspace screen with split-pane agent views and Vim modal system.
+    """Main workspace screen with split-pane agent views, visible tab bar, and Vim modal system.
 
     Layout:
     ┌─────────────────────────────────────────────────────────────┐
@@ -42,8 +44,9 @@ class WorkspaceScreen(Screen):
     ├─────────────────────────────────────────────────────────────┤
     │ InterruptBanner (hidden until triggered)                    │
     ├──────────────────────────────┬──────────────────────────────┤
-    │ Primary Agent Pane           │ Interactive Worker PTYs      │
-    │ (left / coordinator stream)  │ (right / tabbed terminals)   │
+    │ Primary Agent Pane           │ [1:Worker-1 (agy)] [+New(c)] │
+    │ (left / coordinator stream)  │ Active Terminal Viewport     │
+    │                              │ (right / interactive PTY)    │
     ├──────────────────────────────┴──────────────────────────────┤
     │ BottomBar: Mode | Clickable Action Pills | PTY status       │
     └─────────────────────────────────────────────────────────────┘
@@ -80,15 +83,17 @@ class WorkspaceScreen(Screen):
         self._goal = goal
         self._agents: list[AgentInfo] = []
         self._worker_tabs: dict[str, WorkerTerminalTab] = {}
-        self._is_horizontal = True
+        self._active_worker_id: str = "1"
+        self._is_split_view: bool = True
         self._stream_timer = None
         self._terminal_manager = TerminalManager.get_instance()
 
     def compose(self) -> ComposeResult:
         self._agents = get_mock_agents(self._agent_count)
         worker_count = max(len(self._agents) - 1, 0)
+        self._active_worker_id = str(self._agents[1].id) if len(self._agents) > 1 else "1"
 
-        # 1. Streamlined Header Bar
+        # 1. Streamlined Header Bar (dock: top, height: 1)
         yield HeaderBar(
             session_name=self._session_name,
             worker_count=worker_count,
@@ -110,13 +115,22 @@ class WorkspaceScreen(Screen):
         with Horizontal(id="workspace-container"):
             yield primary_pane
 
-            # Worker interactive PTY terminal panes
+            # Worker interactive PTY terminal viewport with visible Tab Bar
             if len(self._agents) > 1:
                 with Vertical(id="workers-pane"):
-                    with TabbedContent(id="worker-tabs"):
+                    initial_worker_id = str(self._agents[1].id)
+
+                    # Visible Tab Bar at top showing all active workers
+                    yield WorkerTabBar(
+                        active_worker_id=initial_worker_id,
+                        workers=[(str(a.id), a.name) for a in self._agents[1:]],
+                        id="worker-tab-bar",
+                    )
+
+                    # ContentSwitcher holding the active interactive terminal view
+                    with ContentSwitcher(id="worker-switcher", initial=f"worker-view-{initial_worker_id}"):
                         for agent in self._agents[1:]:
                             worker_id = str(agent.id)
-                            # Create or retrieve real PTY worker session
                             session = self._terminal_manager.create_worker(
                                 worker_id=worker_id,
                                 name=agent.name,
@@ -124,21 +138,23 @@ class WorkspaceScreen(Screen):
                                 task=agent.task,
                                 autostart=True,
                             )
-                            tab_widget = WorkerTerminalTab(worker_session=session, mode=self.mode)
+                            tab_widget = WorkerTerminalTab(
+                                worker_session=session,
+                                mode=self.mode,
+                                id=f"worker-view-{worker_id}",
+                            )
                             self._worker_tabs[worker_id] = tab_widget
+                            yield tab_widget
 
-                            with TabPane(f"{agent.name}", id=f"worker-tab-{worker_id}"):
-                                yield tab_widget
-
-        # 4. Interactive Bottom Status Bar
+        # 4. Interactive Bottom Status Bar (dock: bottom, height: 1)
         yield BottomBar(worker_count=worker_count, mode=self.mode)
 
     def on_mount(self) -> None:
-        """Initialize background MCP server, notification listeners, and auto-focus."""
+        """Initialize background MCP server, notification listeners, and auto-focus active terminal."""
         start_background_mcp_server(host="127.0.0.1", port=8765)
         self._terminal_manager.add_notification_listener(self._on_mcp_directive_injected)
         self._stream_timer = self.set_interval(2.5, self._emit_primary_log)
-        self.set_timer(0.15, self._auto_focus_terminal)
+        self.set_timer(0.05, self._auto_focus_terminal)
 
     def on_unmount(self) -> None:
         """Clean up background tasks on unmount."""
@@ -197,40 +213,30 @@ class WorkspaceScreen(Screen):
         """Handle directive modal request triggered while in PTY mode."""
         self.action_open_directive_modal()
 
-    @on(TabbedContent.TabActivated)
-    def on_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Auto-focus child terminal when switching tabs."""
-        if event.pane and event.pane.id and event.pane.id.startswith("worker-tab-"):
-            worker_id = event.pane.id.replace("worker-tab-", "")
-            tab_widget = self._worker_tabs.get(worker_id)
-            if tab_widget and tab_widget.screen_widget:
-                self.set_timer(0.05, tab_widget.screen_widget.focus)
-
     def _auto_focus_terminal(self) -> None:
         """Focus the currently active worker terminal screen."""
-        try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            active_pane = tabs.active
-            if active_pane and active_pane.startswith("worker-tab-"):
-                worker_id = active_pane.replace("worker-tab-", "")
-                tab_widget = self._worker_tabs.get(worker_id)
-                if tab_widget and tab_widget.screen_widget:
-                    tab_widget.screen_widget.focus()
-                    return
-        except Exception:
-            pass
+        tab_widget = self._worker_tabs.get(str(self._active_worker_id))
+        if tab_widget and tab_widget.screen_widget:
+            try:
+                tab_widget.screen_widget.focus()
+            except Exception:
+                pass
+            return
 
-        # Fallback to the first available worker screen widget
+        # Fallback to first available worker screen
         for tab in self._worker_tabs.values():
             if tab.screen_widget:
-                tab.screen_widget.focus()
+                try:
+                    tab.screen_widget.focus()
+                except Exception:
+                    pass
                 break
 
     # ── Vim Modal Key Interception ─────────────────────────────────
 
     def on_key(self, event: events.Key) -> None:
         """Intercept single-key commands in NORMAL mode and prevent leaking to subprocess."""
-        # If in PTY_INTERACT mode, only Escape switches mode
+        # If in PTY_INTERACT mode, only Escape leaves Insert mode
         if self.mode in ("PTY_INTERACT", "PTY"):
             if event.key.lower() in ("escape", "caps_lock"):
                 self.action_enter_normal()
@@ -271,14 +277,14 @@ class WorkspaceScreen(Screen):
             event.prevent_default()
             return
 
-        # 5. 'm': Open Directive Injection Modal
+        # 5. 'm': Open Agent Assignment & Task Dispatcher Modal
         if key == "m" or char == "m":
             self.action_open_directive_modal()
             event.stop()
             event.prevent_default()
             return
 
-        # 6. 's': Toggle split layout orientation
+        # 6. 's': Toggle between Split View and Full-Screen Active Worker
         if key == "s" or char == "s":
             self.action_toggle_split()
             event.stop()
@@ -320,7 +326,7 @@ class WorkspaceScreen(Screen):
             event.prevent_default()
             return
 
-        # Prevent any unmapped keys from leaking in NORMAL mode
+        # Prevent unmapped keys from leaking in NORMAL mode
         event.stop()
         event.prevent_default()
 
@@ -383,23 +389,16 @@ class WorkspaceScreen(Screen):
         self.app.push_screen(HelpModal())
 
     def action_open_directive_modal(self) -> None:
-        """Open interactive directive injection modal."""
-        self.app.push_screen(DirectiveModal())
+        """Open Agent Assignment & Task Dispatcher modal."""
+        self.app.push_screen(DirectiveModal(default_target=self._active_worker_id))
 
     def action_interrupt_active(self) -> None:
         """Send immediate interrupt (SIGINT/Ctrl+C) to the currently selected worker."""
-        try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            active_id = tabs.active
-            if active_id and active_id.startswith("worker-tab-"):
-                worker_id = active_id.replace("worker-tab-", "")
-                worker = self._terminal_manager.get_worker(worker_id)
-                if worker:
-                    worker.interrupt()
-                    self._safe_notify(f"⚡ Interrupted Worker-{worker_id}", severity="warning")
-                    return
-        except Exception:
-            pass
+        worker = self._terminal_manager.get_worker(str(self._active_worker_id))
+        if worker:
+            worker.interrupt()
+            self._safe_notify(f"⚡ Interrupted Worker-{self._active_worker_id}", severity="warning")
+            return
 
         workers = self._terminal_manager.list_workers()
         if workers:
@@ -413,15 +412,9 @@ class WorkspaceScreen(Screen):
         worker_ids = [str(a.id) for a in self._agents[1:]]
         if not worker_ids:
             return
-        try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            current_pane_id = tabs.active
-            current_id = current_pane_id.replace("worker-tab-", "") if current_pane_id else worker_ids[0]
-            idx = worker_ids.index(current_id) if current_id in worker_ids else -1
-            next_id = worker_ids[(idx + 1) % len(worker_ids)]
-            self.action_switch_worker(next_id)
-        except Exception:
-            pass
+        idx = worker_ids.index(str(self._active_worker_id)) if str(self._active_worker_id) in worker_ids else -1
+        next_id = worker_ids[(idx + 1) % len(worker_ids)]
+        self.action_switch_worker(next_id)
 
     def action_prev_worker(self) -> None:
         """Switch to previous worker tab ('h' in NORMAL mode)."""
@@ -430,27 +423,39 @@ class WorkspaceScreen(Screen):
         worker_ids = [str(a.id) for a in self._agents[1:]]
         if not worker_ids:
             return
-        try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            current_pane_id = tabs.active
-            current_id = current_pane_id.replace("worker-tab-", "") if current_pane_id else worker_ids[0]
-            idx = worker_ids.index(current_id) if current_id in worker_ids else 0
-            prev_id = worker_ids[(idx - 1) % len(worker_ids)]
-            self.action_switch_worker(prev_id)
-        except Exception:
-            pass
+        idx = worker_ids.index(str(self._active_worker_id)) if str(self._active_worker_id) in worker_ids else 0
+        prev_id = worker_ids[(idx - 1) % len(worker_ids)]
+        self.action_switch_worker(prev_id)
 
     def action_switch_worker(self, worker_id: str) -> None:
         """Switch active worker tab and focus its terminal."""
-        target_pane_id = f"worker-tab-{worker_id}"
+        worker_id_str = str(worker_id)
+        if worker_id_str not in self._worker_tabs:
+            return
+
+        self._active_worker_id = worker_id_str
+
+        # 1. Switch visible viewport via ContentSwitcher
         try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            tabs.active = target_pane_id
-            tab_widget = self._worker_tabs.get(str(worker_id))
-            if tab_widget and tab_widget.screen_widget:
-                tab_widget.screen_widget.focus()
+            switcher = self.query_one("#worker-switcher", ContentSwitcher)
+            switcher.current = f"worker-view-{worker_id_str}"
         except Exception:
             pass
+
+        # 2. Update visible tab bar highlight
+        try:
+            tab_bar = self.query_one("#worker-tab-bar", WorkerTabBar)
+            tab_bar.set_active(worker_id_str)
+        except Exception:
+            pass
+
+        # 3. Focus active terminal screen widget
+        tab_widget = self._worker_tabs.get(worker_id_str)
+        if tab_widget and tab_widget.screen_widget:
+            try:
+                tab_widget.screen_widget.focus()
+            except Exception:
+                pass
 
     def action_close_active_tab(self) -> None:
         """Terminate and close active worker tab ('x' in NORMAL mode)."""
@@ -458,30 +463,36 @@ class WorkspaceScreen(Screen):
             self._safe_notify("At least one worker agent tab must remain active.", severity="warning")
             return
 
+        worker_id = str(self._active_worker_id)
         try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            active_pane_id = tabs.active
-            if not active_pane_id or not active_pane_id.startswith("worker-tab-"):
-                return
-
-            worker_id = active_pane_id.replace("worker-tab-", "")
             worker_session = self._terminal_manager.get_worker(worker_id)
             if worker_session:
                 worker_session.terminate()
 
-            tabs.remove_pane(active_pane_id)
-            self._worker_tabs.pop(worker_id, None)
+            tab_widget = self._worker_tabs.pop(worker_id, None)
+            if tab_widget:
+                tab_widget.remove()
+
             self._agents = [a for a in self._agents if str(a.id) != worker_id]
 
             # Update count in status bars
             remaining_count = max(len(self._agents) - 1, 0)
-            self.query_one(HeaderBar).worker_count = remaining_count
-            self.query_one(BottomBar).worker_count = remaining_count
+            try:
+                self.query_one(HeaderBar).worker_count = remaining_count
+                self.query_one(BottomBar).worker_count = remaining_count
+            except Exception:
+                pass
 
             # Activate first available remaining tab
-            remaining_ids = [str(a.id) for a in self._agents[1:]]
-            if remaining_ids:
-                self.action_switch_worker(remaining_ids[0])
+            remaining_workers = [(str(a.id), a.name) for a in self._agents[1:]]
+            if remaining_workers:
+                next_id = remaining_workers[0][0]
+                try:
+                    tab_bar = self.query_one("#worker-tab-bar", WorkerTabBar)
+                    tab_bar.rebuild(remaining_workers, active_worker_id=next_id)
+                except Exception:
+                    pass
+                self.action_switch_worker(next_id)
 
             self._safe_notify(f"Closed worker tab {worker_id}", severity="information")
         except Exception as exc:
@@ -521,30 +532,55 @@ class WorkspaceScreen(Screen):
             task=new_agent.task,
             autostart=True,
         )
-        tab_widget = WorkerTerminalTab(worker_session=session, mode=self.mode)
+        tab_widget = WorkerTerminalTab(
+            worker_session=session,
+            mode=self.mode,
+            id=f"worker-view-{new_id}",
+        )
         self._worker_tabs[new_id] = tab_widget
 
         try:
-            tabs = self.query_one("#worker-tabs", TabbedContent)
-            tabs.add_pane(TabPane(f"{new_agent.name}", tab_widget, id=f"worker-tab-{new_id}"))
-            active_worker_count = len(self._agents) - 1
-            self.query_one(HeaderBar).worker_count = active_worker_count
-            self.query_one(BottomBar).worker_count = active_worker_count
-            self.action_switch_worker(new_id)
-            self._safe_notify(f"Spawned {new_agent.name} with live PTY session.")
+            switcher = self.query_one("#worker-switcher", ContentSwitcher)
+            switcher.mount(tab_widget)
         except Exception:
             pass
 
+        try:
+            tab_bar = self.query_one("#worker-tab-bar", WorkerTabBar)
+            tab_bar.rebuild(
+                workers=[(str(a.id), a.name) for a in self._agents[1:]],
+                active_worker_id=new_id,
+            )
+        except Exception:
+            pass
+
+        active_worker_count = len(self._agents) - 1
+        try:
+            self.query_one(HeaderBar).worker_count = active_worker_count
+            self.query_one(BottomBar).worker_count = active_worker_count
+        except Exception:
+            pass
+
+        self.action_switch_worker(new_id)
+        self._safe_notify(f"Spawned {new_agent.name} with live PTY session.")
+
     def action_toggle_split(self) -> None:
-        """Toggle between horizontal and vertical split layout ('s' in NORMAL mode)."""
-        container = self.query_one("#workspace-container")
-        self._is_horizontal = not self._is_horizontal
-        if self._is_horizontal:
-            container.styles.layout = "horizontal"
-            self._safe_notify("Layout: side-by-side")
-        else:
-            container.styles.layout = "vertical"
-            self._safe_notify("Layout: stacked")
+        """Toggle between single-agent full-screen view and split-screen view ('s' in NORMAL mode)."""
+        self._is_split_view = not self._is_split_view
+        try:
+            primary = self.query_one("#primary-pane")
+            workers = self.query_one("#workers-pane")
+            if self._is_split_view:
+                primary.styles.display = "block"
+                primary.styles.width = "1fr"
+                workers.styles.width = "1fr"
+                self._safe_notify("Split View: Primary Coordinator + Active Worker")
+            else:
+                primary.styles.display = "none"
+                workers.styles.width = "100%"
+                self._safe_notify("Full Screen View: Active Worker Only (Press 's' for Split)")
+        except Exception:
+            pass
 
     def action_go_back(self) -> None:
         """Return to session picker screen."""

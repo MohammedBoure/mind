@@ -1,7 +1,12 @@
-"""Directive Injection Modal dialog for sending prioritized directives to workers via MCP."""
+"""Agent Assignment & Task Dispatcher Modal.
+
+Allows selecting an agent (Primary or Worker 1..N), defining its role and assigned
+task prompt, and dispatching the prompt directly into its running agy.exe instance.
+"""
 
 from __future__ import annotations
 
+import sys
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
@@ -10,16 +15,22 @@ from textual.widgets import Button, Input, Label, Select, Static
 from mind.core.terminal_manager import TerminalManager
 
 
-_PRIORITY_OPTIONS = [
-    ("Critical (Red Alert)", "critical"),
-    ("High (Default)", "high"),
-    ("Normal (Informational)", "normal"),
-    ("Low (Background)", "low"),
+_ROLE_OPTIONS = [
+    ("Worker (Autonomous Execution)", "worker"),
+    ("Code Reviewer (Quality & Verification)", "code-reviewer"),
+    ("Test Engineer (Pytest & Edge Cases)", "tester"),
+    ("Researcher (Documentation & Design)", "researcher"),
+    ("Primary Coordinator (High-Level)", "coordinator"),
+]
+
+_DISPATCH_MODES = [
+    ("⚡ Interrupt & Inject (SIGINT + Prompt)", "interrupt"),
+    ("⌨ Direct Stdin Stream (Type + Enter)", "direct"),
 ]
 
 
 class DirectiveModal(ModalScreen[None]):
-    """Modal overlay allowing the user to inject directives into any worker."""
+    """Modal overlay allowing agent assignment and direct task dispatch."""
 
     BINDINGS = [
         ("escape", "cancel", "Cancel"),
@@ -32,99 +43,125 @@ class DirectiveModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         workers = self._terminal_manager.list_workers()
-        target_options = [(f"{w.name} (PID: {w.pid or '-'})", w.worker_id) for w in workers]
-        if not target_options:
-            target_options = [("Worker-1", "worker-1"), ("Worker-2", "worker-2")]
+        target_options: list[tuple[str, str]] = [("🧠 Primary Agent (Coordinator)", "primary")]
+        for w in workers:
+            target_options.append((f"⚡ {w.name} (PID: {w.pid or '-'})", str(w.worker_id)))
+        if len(target_options) == 1:
+            target_options.append(("⚡ Worker-1 (Default)", "1"))
+            target_options.append(("⚡ Worker-2 (Default)", "2"))
 
-        default_val = self._default_target or (target_options[0][1] if target_options else "worker-1")
+        default_val = self._default_target or (target_options[1][1] if len(target_options) > 1 else "primary")
 
         with Vertical(id="directive-modal-dialog"):
-            yield Static("⚡  [bold #e0af68]Inject Inter-Agent Directive[/]", id="directive-title")
+            yield Static("⚡ [bold #e0af68]Agent Assignment & Task Dispatcher[/]", id="directive-title")
             yield Static(
-                "[dim]Sends SIGINT to halt ongoing execution, waits for prompt to settle, and injects directive.[/]",
+                "[dim]Assign role, specify task prompt, and dispatch directly to running agy instance.[/]",
                 id="directive-subtitle",
             )
 
             with Vertical(classes="modal-field"):
-                yield Label("Target Worker Agent:", classes="modal-label")
+                yield Label("Target Agent:", classes="modal-label")
                 yield Select(
                     options=target_options,
                     value=default_val,
-                    id="target-worker-select",
+                    id="target-agent-select",
                     allow_blank=False,
                 )
 
             with Vertical(classes="modal-field"):
-                yield Label("Sender Profile / Identifier:", classes="modal-label")
-                yield Input(
-                    value="primary-coordinator",
-                    placeholder="e.g. primary-coordinator, supervisor",
-                    id="sender-input",
-                )
-
-            with Vertical(classes="modal-field"):
-                yield Label("Priority Level:", classes="modal-label")
+                yield Label("Agent Role Assignment:", classes="modal-label")
                 yield Select(
-                    options=_PRIORITY_OPTIONS,
-                    value="high",
-                    id="priority-select",
+                    options=_ROLE_OPTIONS,
+                    value="worker",
+                    id="role-select",
                     allow_blank=False,
                 )
 
             with Vertical(classes="modal-field"):
-                yield Label("Directive Message / Instructions:", classes="modal-label")
+                yield Label("Assigned Task / Directive Prompt:", classes="modal-label")
                 yield Input(
-                    placeholder="e.g. Stop current build. Verify module imports first.",
-                    id="message-input",
+                    placeholder="e.g. Inspect codebase, verify test coverage, and fix bugs",
+                    id="task-prompt-input",
+                )
+
+            with Vertical(classes="modal-field"):
+                yield Label("Execution Dispatch Mode:", classes="modal-label")
+                yield Select(
+                    options=_DISPATCH_MODES,
+                    value="interrupt",
+                    id="dispatch-mode-select",
+                    allow_blank=False,
                 )
 
             with Horizontal(id="directive-buttons"):
-                yield Button("⚡ Inject Directive", variant="warning", id="btn-inject-submit")
+                yield Button("⚡ Dispatch Task", variant="warning", id="btn-inject-submit")
                 yield Button("Cancel", variant="default", id="btn-inject-cancel")
 
     def on_mount(self) -> None:
-        """Focus message input by default."""
-        self.query_one("#message-input", Input).focus()
+        """Focus task prompt input by default."""
+        self.query_one("#task-prompt-input", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-inject-submit":
-            self._submit_injection()
+            self._submit_dispatch()
         else:
             self.dismiss(None)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self._submit_injection()
+        self._submit_dispatch()
 
-    def _submit_injection(self) -> None:
-        target_select = self.query_one("#target-worker-select", Select)
-        sender_input = self.query_one("#sender-input", Input)
-        prio_select = self.query_one("#priority-select", Select)
-        msg_input = self.query_one("#message-input", Input)
+    def _submit_dispatch(self) -> None:
+        target_select = self.query_one("#target-agent-select", Select)
+        role_select = self.query_one("#role-select", Select)
+        prompt_input = self.query_one("#task-prompt-input", Input)
+        dispatch_select = self.query_one("#dispatch-mode-select", Select)
 
-        target_id = str(target_select.value) if target_select.value else "worker-1"
-        sender_id = sender_input.value.strip() or "primary-coordinator"
-        priority = str(prio_select.value) if prio_select.value else "high"
-        message = msg_input.value.strip()
+        target_id = str(target_select.value) if target_select.value else "1"
+        role_val = str(role_select.value) if role_select.value else "worker"
+        prompt_text = prompt_input.value.strip()
+        dispatch_mode = str(dispatch_select.value) if dispatch_select.value else "interrupt"
 
-        if not message:
-            msg_input.focus()
-            self.notify("Please enter a directive message.", severity="error")
+        if not prompt_text:
+            prompt_input.focus()
+            self._safe_notify("Please enter a task prompt or directive.", severity="error")
             return
 
-        worker = self._terminal_manager.get_worker(target_id)
-        if not worker:
-            self.notify(f"Worker '{target_id}' not found.", severity="error")
+        if target_id == "primary":
+            self._safe_notify(f"✓ Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
             self.dismiss(None)
             return
 
-        # Perform injection via terminal manager
-        result = worker.interrupt_and_inject(
-            sender_id=sender_id,
-            message=message,
-            priority=priority,
-        )
-        self.notify(f"✓ Directive injected into {worker.name}!", severity="warning")
+        # Lookup worker in terminal manager
+        worker = self._terminal_manager.get_worker(target_id)
+        if not worker:
+            self._safe_notify(f"Worker '{target_id}' not found.", severity="error")
+            self.dismiss(None)
+            return
+
+        # Update worker profile & task assignment
+        worker.task = prompt_text
+        worker.role = role_val
+        worker.profile.role = role_val
+
+        # Dispatch prompt to the live agy.exe process
+        if dispatch_mode == "interrupt":
+            worker.interrupt_and_inject(
+                sender_id="Primary Coordinator",
+                message=prompt_text,
+                priority="high",
+            )
+        else:
+            newline = "\r\n" if sys.platform == "win32" else "\n"
+            worker.write(prompt_text + newline)
+
+        self._safe_notify(f"✓ Task dispatched to {worker.name} ({role_val})!", severity="warning")
         self.dismiss(None)
+
+    def _safe_notify(self, message: str, severity: str = "information") -> None:
+        try:
+            self.notify(message, severity=severity)
+        except Exception:
+            pass
 
     def action_cancel(self) -> None:
         self.dismiss(None)

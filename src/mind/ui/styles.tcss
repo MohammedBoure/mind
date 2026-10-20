@@ -9,6 +9,14 @@ Screen {
     color: #c0caf5;
 }
 
+HeaderBar {
+    dock: top;
+    height: 1;
+    width: 100%;
+    background: #16161e;
+    color: #c0caf5;
+}
+
 /* ── Header Bar (Zellij Streamlined Top Bar) ───────────────────────── */
 #header-bar {
     dock: top;
@@ -190,23 +198,56 @@ Screen {
     layout: vertical;
 }
 
-#worker-tabs {
-    height: 1fr;
+WorkerTabBar {
+    dock: top;
+    height: 1;
     width: 100%;
     background: #16161e;
+    color: #c0caf5;
+    padding: 0 1;
 }
 
-#worker-tabs ContentTab {
+#worker-tab-strip {
+    height: 1;
+    width: 100%;
+    layout: horizontal;
+}
+
+.worker-tab-pill {
+    width: auto;
+    margin-right: 1;
+    padding: 0 1;
     background: #1f2335;
-    color: #565f89;
-    padding: 0 2;
+    color: #7aa2f7;
 }
 
-#worker-tabs ContentTab.-active {
-    background: #24283b;
-    color: #7aa2f7;
+.worker-tab-pill.-active {
+    background: #7aa2f7;
+    color: #1a1b26;
     text-style: bold;
-    border-bottom: tall #7aa2f7;
+}
+
+.worker-tab-pill:hover {
+    background: #24283b;
+    color: #bb9af7;
+}
+
+.worker-new-pill {
+    width: auto;
+    padding: 0 1;
+    background: #1f2335;
+    color: #9ece6a;
+    text-style: bold;
+}
+
+.worker-new-pill:hover {
+    background: #24283b;
+    color: #a6e3a1;
+}
+
+#worker-switcher {
+    height: 1fr;
+    width: 100%;
 }
 
 .worker-terminal-tab {
@@ -280,6 +321,14 @@ Screen {
 }
 
 /* ── Bottom Bar (Interactive Multi-Segment Status Bar) ───────────── */
+BottomBar {
+    dock: bottom;
+    height: 1;
+    width: 100%;
+    background: #16161e;
+    color: #c0caf5;
+}
+
 #bottom-bar {
     dock: bottom;
     height: 1;

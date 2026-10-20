@@ -351,3 +351,105 @@ class WorkerTerminalTab(Widget):
         if self.worker_session.unread_notifications > 0:
             self.worker_session.clear_notifications()
             self._refresh_header()
+
+
+class WorkerTabPill(Static):
+    """Clickable tab pill in the worker tab bar."""
+
+    def __init__(self, worker_id: str, label: str, is_active: bool = False, **kwargs) -> None:
+        self.worker_id = worker_id
+        self.is_active = is_active
+        classes = "worker-tab-pill -active" if is_active else "worker-tab-pill"
+        super().__init__(label, classes=classes, **kwargs)
+
+    def on_click(self) -> None:
+        self.run_action(f"switch_worker('{self.worker_id}')")
+
+
+class WorkerNewTabPill(Static):
+    """Clickable '+ New (c)' pill at the end of the tab bar."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__("[bold #9ece6a]+ New (c)[/]", classes="worker-new-pill", **kwargs)
+
+    def on_click(self) -> None:
+        self.run_action("new_tab")
+
+
+class WorkerTabBar(Widget):
+    """Visible tab bar showing all active workers: [ 1: Worker-1 (agy) ] [ 2: Worker-2 (agy) ] ... [ + New (c) ]"""
+
+    DEFAULT_CSS = """
+    WorkerTabBar {
+        dock: top;
+        height: 1;
+        width: 100%;
+        background: #16161e;
+        color: #c0caf5;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(
+        self,
+        active_worker_id: str,
+        workers: list[tuple[str, str]],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.active_worker_id = str(active_worker_id)
+        self.tab_items = list(workers)
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="worker-tab-strip"):
+            for worker_id, name in self.tab_items:
+                is_active = (str(worker_id) == str(self.active_worker_id))
+                label = f"[bold #1a1b26 on #7aa2f7] {worker_id}: {name} (agy) [/]" if is_active else f"[bold #7aa2f7 on #1f2335] {worker_id}: {name} (agy) [/]"
+                yield WorkerTabPill(
+                    worker_id=str(worker_id),
+                    label=label,
+                    is_active=is_active,
+                    id=f"tab-pill-{worker_id}",
+                )
+            yield WorkerNewTabPill(id="tab-pill-new")
+
+    def set_active(self, worker_id: str) -> None:
+        """Update active tab highlight."""
+        self.active_worker_id = str(worker_id)
+        for w_id, name in self.tab_items:
+            try:
+                pill = self.query_one(f"#tab-pill-{w_id}", WorkerTabPill)
+                is_active = (str(w_id) == str(worker_id))
+                pill.is_active = is_active
+                if is_active:
+                    pill.remove_class("-active")
+                    pill.add_class("-active")
+                    pill.update(f"[bold #1a1b26 on #7aa2f7] {w_id}: {name} (agy) [/]")
+                else:
+                    pill.remove_class("-active")
+                    pill.update(f"[bold #7aa2f7 on #1f2335] {w_id}: {name} (agy) [/]")
+            except Exception:
+                pass
+
+    def rebuild(self, workers: list[tuple[str, str]], active_worker_id: str) -> None:
+        """Re-render the tab bar when workers are added or removed."""
+        self.tab_items = list(workers)
+        self.active_worker_id = str(active_worker_id)
+        try:
+            strip = self.query_one("#worker-tab-strip", Horizontal)
+            strip.remove_children()
+            for worker_id, name in self.tab_items:
+                is_active = (str(worker_id) == str(self.active_worker_id))
+                label = f"[bold #1a1b26 on #7aa2f7] {worker_id}: {name} (agy) [/]" if is_active else f"[bold #7aa2f7 on #1f2335] {worker_id}: {name} (agy) [/]"
+                strip.mount(
+                    WorkerTabPill(
+                        worker_id=str(worker_id),
+                        label=label,
+                        is_active=is_active,
+                        id=f"tab-pill-{worker_id}",
+                    )
+                )
+            strip.mount(WorkerNewTabPill(id="tab-pill-new"))
+        except Exception:
+            pass
+
