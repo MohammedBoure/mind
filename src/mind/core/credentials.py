@@ -13,16 +13,19 @@ from typing import Any
 from mind.core.auth import (
     AuthValidator,
     CrossProcessCredentialLock,
+    LinuxFileVaultBackend,
+    LinuxKeyringBackend,
     TokenManager,
     WindowsCredentialBackend,
+    get_default_backend,
 )
 from mind.core.auth.backends import advapi32, CREDENTIAL  # re-export for compatibility
 from mind.core.auth.lock import kernel32  # re-export for compatibility
 
 logger = logging.getLogger("mind.credentials")
 
-# Default global singletons for procedural legacy API
-_default_backend = WindowsCredentialBackend()
+# Default global singletons for procedural legacy API using platform-aware backend
+_default_backend = get_default_backend()
 _default_validator = AuthValidator()
 _default_manager = TokenManager(backend=_default_backend, validator=_default_validator)
 
@@ -33,7 +36,7 @@ def extract_email_from_token(raw_token: str | bytes) -> str | None:
 
 
 def read_credential(target_name: str = "gemini:antigravity") -> bytes | None:
-    """Read credential blob from Windows Credential Manager."""
+    """Read credential blob from system credential manager or keyring."""
     return _default_backend.read(target_name)
 
 
@@ -42,7 +45,7 @@ def write_credential(
     target_name: str = "gemini:antigravity",
     user_name: str = "antigravity",
 ) -> bool:
-    """Write token blob to Windows Credential Manager target."""
+    """Write token blob to system credential manager or keyring target."""
     return _default_backend.write(target_name, token_bytes, user_name)
 
 
@@ -52,12 +55,12 @@ def get_slot_token_path(slot: int) -> Path:
 
 
 def restore_slot_credential(slot: int) -> bool:
-    """Restore a slot's saved token into Windows Credential Manager under a lock."""
+    """Restore a slot's saved token into system credential manager under a lock."""
     return _default_manager.restore_slot(slot)
 
 
 def sync_slot_credential_from_system(slot: int) -> bool:
-    """Sync refreshed token from Windows Credential Manager back to the slot token file."""
+    """Sync refreshed token from system credential manager back to the slot token files."""
     return _default_manager.sync_slot_from_system(slot)
 
 
@@ -69,8 +72,12 @@ def setup_slot_env(slot: int, base_env: dict[str, str] | None = None) -> dict[st
 __all__ = [
     "CREDENTIAL",
     "CrossProcessCredentialLock",
+    "LinuxFileVaultBackend",
+    "LinuxKeyringBackend",
+    "WindowsCredentialBackend",
     "advapi32",
     "extract_email_from_token",
+    "get_default_backend",
     "get_slot_token_path",
     "kernel32",
     "read_credential",

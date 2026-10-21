@@ -264,9 +264,9 @@ class WorkerSession:
         self.last_env = worker_env
         resolved_command = self._resolve_command(command)
 
-        if slot and sys.platform == "win32":
+        if slot:
             with CrossProcessCredentialLock():
-                # 1. Restore the slot's token into Windows Credential Manager
+                # 1. Restore the slot's token into system credential manager / keyring under lock
                 restore_slot_credential(slot)
                 # 2. Spawn the PTY process under the lock
                 self.process = spawn_pty(
@@ -277,7 +277,7 @@ class WorkerSession:
                     lines=self.buffer.lines,
                     on_output=self._on_process_output,
                 )
-                # 3. Hold lock for 800ms so agy.exe boots and loads credentials before next slot
+                # 3. Hold lock for 800ms so agy process boots and loads credentials before next slot
                 time.sleep(0.8)
                 # 4. Sync any newly refreshed token back to slot storage
                 sync_slot_credential_from_system(slot)

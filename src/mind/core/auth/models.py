@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
@@ -21,10 +21,27 @@ class TokenClaims:
     """Decoded claims extracted from a token's identity payload."""
     email: str | None = None
     subject: str | None = None
+    account: str | None = None
     expires_at: datetime | None = None
     issued_at: datetime | None = None
     issuer: str | None = None
+    token_type: str | None = None
     raw_claims: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_expired(self) -> bool:
+        """Return True if the token has expired past its temporal validity window."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+
+    @property
+    def remaining_seconds(self) -> float:
+        """Return remaining seconds until token expiration, or infinity if no expiry is set."""
+        if self.expires_at is None:
+            return float("inf")
+        remaining = (self.expires_at - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, remaining)
 
 
 @dataclass(frozen=True)
@@ -43,7 +60,7 @@ class ValidationResult:
 
 @runtime_checkable
 class CredentialBackend(Protocol):
-    """Interface abstraction over secure OS keyring storage."""
+    """Interface abstraction over secure OS keyring and vault storage."""
 
     def read(self, target_name: str) -> bytes | None:
         """Read a secret credential blob from storage."""
@@ -76,3 +93,7 @@ class KeyringStorageError(AuthError):
 
 class LockTimeoutError(AuthError):
     """Raised when acquiring cross-process synchronization locks times out."""
+
+
+class VaultEncryptionError(AuthError):
+    """Raised when encrypting or decrypting credential vault files fails."""
