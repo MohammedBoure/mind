@@ -16,7 +16,7 @@ from mind.core.pty_process import (
     reap_process_tree,
     spawn_pty,
 )
-from mind.core.terminal_buffer import TerminalBuffer
+from mind.core.terminal_buffer import TerminalBuffer, strip_ansi
 from mind.core.terminal_manager import (
     AgentProfile,
     TerminalManager,
@@ -42,5 +42,6 @@ __all__ = [
     "restore_slot_credential",
     "setup_slot_env",
     "spawn_pty",
+    "strip_ansi",
     "write_credential",
 ]
