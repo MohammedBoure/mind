@@ -1,11 +1,11 @@
-# 1 : high
+# 1 : high [COMPLETED]
 إعادة هيكلة المشروع وتحديث ملفات التكوين وحزم التبعيات العابرة للمنصات (Windows & Linux).
 - مراجعة وتحديث `pyproject.toml` لضبط بيانات التعريف، وإضافة التبعيات اللازمة للعمل بسلاسة على ويندوز ولينكس (`textual`, `rich`, `pyte`, `mcp`, `psutil`, `pywinpty` لويندوز فقط، و`ptyprocess`/`termios` على لينكس).
 - ضبط التثبيت في وضع التطوير (Editable Mode) وتحديد مدخلات سطر الأوامر `project.scripts` (`mind = "mind.cli.main:main"`).
 - إعداد بيئة اختبار `pytest` مع `pytest-asyncio` و `anyio`، وتحديد مسار الاستيراد `pythonpath = ["src"]`.
 - توثيق المعمارية العامة ومجلدات الحزمة الأساسية في `README.md` الرئيسي.
 
-# 2 : high
+# 2 : high [COMPLETED]
 بناء محرك طرفية PTY غير متزامن فائق السرعة وخفيف الوزن (Async Cross-Platform PTY Engine).
 - إنشاء وحدة تجريد موحدة للطرفيات الافتراضية في `src/mind/core/pty_process.py` تدعم بشكل أصلي:
   * ويندوز: استخدام Windows Pseudo Console (ConPTY) عبر `pywinpty` مع معالجة ذكية لحجب المفاتيح الميتة وتجاوز مشاكل scancodes وأحرف البايتات الشاردة (`\xe0`).

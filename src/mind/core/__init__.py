@@ -10,7 +10,12 @@ from mind.core.credentials import (
     setup_slot_env,
     write_credential,
 )
-from mind.core.pty_process import BasePtyProcess, spawn_pty
+from mind.core.pty_process import (
+    BasePtyProcess,
+    WindowsInputSanitizer,
+    reap_process_tree,
+    spawn_pty,
+)
 from mind.core.terminal_buffer import TerminalBuffer
 from mind.core.terminal_manager import (
     AgentProfile,
@@ -25,6 +30,7 @@ __all__ = [
     "CrossProcessCredentialLock",
     "TerminalBuffer",
     "TerminalManager",
+    "WindowsInputSanitizer",
     "WorkerProcessState",
     "WorkerSession",
     "discover_system_agents",
@@ -32,6 +38,7 @@ __all__ = [
     "get_agent_preset_config",
     "get_slot_token_path",
     "read_credential",
+    "reap_process_tree",
     "restore_slot_credential",
     "setup_slot_env",
     "spawn_pty",

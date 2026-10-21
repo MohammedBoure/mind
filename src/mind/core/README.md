@@ -8,7 +8,7 @@ This directory provides the low-level pseudoterminal (PTY) abstractions, virtual
 |---|---|
 | `__init__.py` | Public exports for core classes and helper factories. |
 | `terminal_buffer.py` | Thread-safe 2D virtual screen and history buffer using `pyte.HistoryScreen` and `rich.text.Text`. Features high-performance run-length character batching, Style object caching, O(1) content checks, clean text export for MCP inspection, and ANSI rendering for Textual UI. |
-| `pty_process.py` | Cross-platform PTY process spawner supporting Windows (`pywinpty` / ConPTY), Unix (`pty`/`termios`), and pipe fallbacks. Handles environment blocks for WinPTY, signal propagation (SIGINT/Ctrl+C), and zombie-safe process termination. |
+| `pty_process.py` | High-performance, event-driven cross-platform PTY engine supporting Windows (ConPTY via `pywinpty` with dead-key blocking, scancode translation, and stray `\xe0` byte filtering), Linux/Unix (native `openpty`/`termios` with `epoll` selector reader), zero-polling event-driven async streams (<1ms latency), `SIGINT`/`Ctrl+C` propagation, and zombie process prevention via `psutil`. |
 | `agent_discovery.py` | System-wide Antigravity agent discovery (`discover_system_agents`): discovers installed CLI agents (`agy1`, `agy2`, etc.) via `agy agents`, slot launchers in `%LOCALAPPDATA%\agy\bin`, `~/.gemini/instances`, and tokens. |
 | `credentials.py` | Backwards-compatible facade forwarding credential management, mutex locking, and environment setup to `mind.core.auth`. |
 | `auth/` | Modular authentication package containing models, validator, keyring backends, mutex locking, and token manager. |
