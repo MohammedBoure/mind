@@ -23,45 +23,70 @@ class TokenManager:
         backend: CredentialBackend | None = None,
         validator: AuthValidator | None = None,
         tokens_dir: Path | None = None,
+        instances_dir: Path | None = None,
         lock_name: str = r"Global\AgyCredentialMutex",
     ) -> None:
         self.backend: CredentialBackend = backend or WindowsCredentialBackend()
         self.validator: AuthValidator = validator or AuthValidator()
         self.tokens_dir: Path = tokens_dir or (Path.home() / ".gemini" / "tokens")
+        self.instances_dir: Path = instances_dir or (Path.home() / ".gemini" / "instances")
         self.lock_name: str = lock_name
 
     def get_slot_path(self, slot: int) -> Path:
         """Return the path to the slot's token file."""
         return self.tokens_dir / f"agy{slot}.token"
 
+    def get_instance_dir(self, slot: int) -> Path:
+        """Return the path to the isolated instance directory for the slot."""
+        return self.instances_dir / f"agy{slot}"
+
+    def get_instance_token_path(self, slot: int) -> Path:
+        """Return the path to the instance token file (token.json)."""
+        return self.get_instance_dir(slot) / "token.json"
+
     def write_slot_token(self, slot: int, token_bytes: bytes) -> bool:
-        """Write token bytes to slot storage atomically."""
+        """Write token bytes to slot storage atomically (syncing to both tokens and instances)."""
         sanitized = self.validator.sanitize(token_bytes)
         if not sanitized:
             return False
 
         slot_file = self.get_slot_path(slot)
-        try:
-            slot_file.parent.mkdir(parents=True, exist_ok=True)
-            # Write atomically via temporary file in same directory
-            with tempfile.NamedTemporaryFile("wb", dir=slot_file.parent, delete=False) as tf:
-                tf.write(sanitized)
-                temp_path = Path(tf.name)
-            temp_path.replace(slot_file)
-            return True
-        except Exception as e:
-            logger.error("Failed to write token file for slot %d: %s", slot, e)
-            return False
+        targets = [slot_file]
+
+        inst_dir = self.get_instance_dir(slot)
+        if inst_dir.exists():
+            targets.append(self.get_instance_token_path(slot))
+
+        success = True
+        for target_path in targets:
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile("wb", dir=target_path.parent, delete=False) as tf:
+                    tf.write(sanitized)
+                    temp_path = Path(tf.name)
+                temp_path.replace(target_path)
+            except Exception as e:
+                logger.error("Failed to write token file %s: %s", target_path, e)
+                success = False
+        return success
 
     def restore_slot(self, slot: int, target_name: str = "gemini:antigravity") -> bool:
         """Atomically read slot token, validate/sanitize it, and store into system backend under lock."""
         token_file = self.get_slot_path(slot)
-        if not token_file.exists():
-            logger.warning("Token file for slot agy%d does not exist at %s", slot, token_file)
+        inst_token = self.get_instance_token_path(slot)
+
+        target_file = None
+        if token_file.exists():
+            target_file = token_file
+        elif inst_token.exists():
+            target_file = inst_token
+
+        if not target_file:
+            logger.warning("Token file for slot agy%d does not exist at %s or %s", slot, token_file, inst_token)
             return False
 
         try:
-            raw_bytes = token_file.read_bytes().strip()
+            raw_bytes = target_file.read_bytes().strip()
             if not raw_bytes:
                 return False
 
@@ -114,12 +139,19 @@ class TokenManager:
         slot: int,
         base_env: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        """Construct sanitized environment variables for worker slot."""
+        """Construct sanitized environment variables for worker slot with instance isolation."""
         env = dict(os.environ if base_env is None else base_env)
         env["AGY_SLOT"] = str(slot)
 
         token_file = self.get_slot_path(slot)
         env["AGY_TOKEN_FILE"] = str(token_file)
+
+        # Seamless multi-instance support matching agys:
+        inst_dir = self.get_instance_dir(slot)
+        if inst_dir.exists():
+            env["USERPROFILE"] = str(inst_dir)
+            env["HOME"] = str(inst_dir)
+            env["AGY_INSTANCE_DIR"] = str(inst_dir)
 
         # Clean any directory overrides that prevent agy from reading global config and credentials
         env.pop("ANTIGRAVITY_GEMINI_DIR", None)

@@ -11,4 +11,4 @@ This directory provides modular authentication validation, token claim extractio
 | `validator.py` | `AuthValidator` implementation providing BOM sanitization, JSON schema unpacking, JWT claim decoding, and expiration validation. |
 | `backends.py` | Credential storage implementations including `WindowsCredentialBackend` (Advapi32) and `MockCredentialBackend` (in-memory for testing). |
 | `lock.py` | `CrossProcessCredentialLock` providing inter-process Win32 mutex and file lock synchronization. |
-| `manager.py` | `TokenManager` coordinating slot token file paths, atomic persistence, keyring restoration, and environment variable isolation. |
+| `manager.py` | `TokenManager` coordinating slot token file paths, atomic persistence (dual-sync with `~/.gemini/instances/` and `~/.gemini/tokens/`), keyring restoration, and environment variable isolation (`USERPROFILE` / `HOME` slot isolation). |
