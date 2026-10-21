@@ -74,6 +74,7 @@ class WorkspaceScreen(Screen):
         ("f12", "enter_normal", "Normal Mode"),
         ("ctrl+shift+c", "copy_to_clipboard", "Copy"),
         ("y", "copy_to_clipboard", "Yank / Copy"),
+        ("m", "open_directive_modal", "Inject Directive"),
         ("ctrl+m", "open_directive_modal", "Inject Directive"),
         ("o", "open_directive_external", "Open Directive File"),
         ("ctrl+o", "open_directive_external", "Open Directive File"),
@@ -178,13 +179,16 @@ class WorkspaceScreen(Screen):
             mode=self.mode,
             id="primary-pane",
         )
+        self._coordinator_tab.styles.width = "1fr"
 
         with Horizontal(id="workspace-container"):
             yield self._coordinator_tab
 
             # Worker interactive PTY terminal viewport with visible Tab Bar
             if len(self._agents) > 1:
-                with Vertical(id="workers-pane"):
+                workers_pane = Vertical(id="workers-pane")
+                workers_pane.styles.width = "1fr"
+                with workers_pane:
                     initial_worker_id = str(self._agents[1].id)
 
                     # Visible Tab Bar at top showing all active workers
@@ -405,7 +409,7 @@ class WorkspaceScreen(Screen):
         """Intercept single-key commands in NORMAL mode and prevent leaking to subprocess."""
         # 0. Global Clipboard Copy: Ctrl+Shift+C in both modes
         key = event.key.lower()
-        char = event.character or ""
+        char = (event.character or "").lower()
 
         if key in ("ctrl+shift+c", "ctrl+shift+insert"):
             self.action_copy_to_clipboard()
@@ -522,7 +526,21 @@ class WorkspaceScreen(Screen):
             event.prevent_default()
             return
 
-        # 11. 'tab': Cycle focus between Primary Agent pane and Worker Terminal
+        # 11. 'd': Open In-App Directive Modal Editor
+        if key == "d" or char == "d":
+            self.action_open_directive_editor()
+            event.stop()
+            event.prevent_default()
+            return
+
+        # 12. 'o': Open Directive File in External Editor
+        if key == "o" or char == "o":
+            self.action_open_directive_external()
+            event.stop()
+            event.prevent_default()
+            return
+
+        # 13. 'tab': Cycle focus between Primary Agent pane and Worker Terminal
         if key == "tab":
             self.action_focus_next()
             event.stop()
@@ -697,9 +715,7 @@ class WorkspaceScreen(Screen):
 
     def action_next_worker(self) -> None:
         """Switch to next worker tab ('l' in NORMAL mode)."""
-        if len(self._agents) <= 1:
-            return
-        worker_ids = [str(a.id) for a in self._agents[1:]]
+        worker_ids = list(self._worker_tabs.keys()) if self._worker_tabs else [str(a.id) for a in self._agents[1:]]
         if not worker_ids:
             return
         idx = worker_ids.index(str(self._active_worker_id)) if str(self._active_worker_id) in worker_ids else -1
@@ -708,9 +724,7 @@ class WorkspaceScreen(Screen):
 
     def action_prev_worker(self) -> None:
         """Switch to previous worker tab ('h' in NORMAL mode)."""
-        if len(self._agents) <= 1:
-            return
-        worker_ids = [str(a.id) for a in self._agents[1:]]
+        worker_ids = list(self._worker_tabs.keys()) if self._worker_tabs else [str(a.id) for a in self._agents[1:]]
         if not worker_ids:
             return
         idx = worker_ids.index(str(self._active_worker_id)) if str(self._active_worker_id) in worker_ids else 0
@@ -721,7 +735,15 @@ class WorkspaceScreen(Screen):
         """Switch active worker tab and focus its terminal (spawning PTY lazily if not started)."""
         worker_id_str = str(worker_id)
         if worker_id_str not in self._worker_tabs:
-            return
+            try:
+                idx = int(worker_id_str) - 1
+                available_ids = list(self._worker_tabs.keys())
+                if 0 <= idx < len(available_ids):
+                    worker_id_str = available_ids[idx]
+                else:
+                    return
+            except ValueError:
+                return
 
         self._active_worker_id = worker_id_str
 
@@ -906,13 +928,28 @@ class WorkspaceScreen(Screen):
             if self._is_split_view:
                 primary.styles.display = "block"
                 primary.styles.width = "1fr"
+                workers.styles.display = "block"
                 workers.styles.width = "1fr"
                 self._safe_notify("Split View: Primary Coordinator + Active Worker")
             else:
-                primary.styles.display = "none"
-                workers.styles.width = "100%"
-                self._safe_notify("Full Screen View: Active Worker Only (Press 's' for Split)")
-                self._auto_focus_terminal()
+                # Check whether coordinator pane was currently focused
+                coord_tab = getattr(self, "_coordinator_tab", None)
+                coord_screen = coord_tab.screen_widget if coord_tab else None
+                is_coord_focused = (
+                    self.focused is not None
+                    and (self.focused == coord_screen or (coord_tab is not None and coord_tab.has_focus))
+                )
+                if is_coord_focused:
+                    workers.styles.display = "none"
+                    primary.styles.display = "block"
+                    primary.styles.width = "100%"
+                    self._safe_notify("Full Screen View: Primary Coordinator Only (Press 's' for Split)")
+                else:
+                    primary.styles.display = "none"
+                    workers.styles.display = "block"
+                    workers.styles.width = "100%"
+                    self._safe_notify("Full Screen View: Active Worker Only (Press 's' for Split)")
+            self._auto_focus_terminal()
         except Exception:
             pass
 

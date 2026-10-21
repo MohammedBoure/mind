@@ -656,6 +656,265 @@ def test_pty_interact_preserves_ctrl_c_and_allows_ctrl_shift_c_copy() -> None:
     assert event_copy._stop_propagation
 
 
+@pytest.mark.anyio
+async def test_lazy_spawning_coordinator_and_first_worker_only() -> None:
+    """Test that at boot only Coordinator and Worker-1 start; Worker-2 is lazily spawned on switch."""
+    from textual.app import App
+    from mind.core.terminal_manager import TerminalManager
+
+    TerminalManager.reset()
+
+    class TestApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(WorkspaceScreen(session_name="test-lazy-mount", agent_count=3))
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        ws = app.screen
+        assert isinstance(ws, WorkspaceScreen)
+
+        # 1. Coordinator session must have been created with autostart=True (process started)
+        coord_tab = ws._coordinator_tab
+        assert coord_tab is not None
+        assert coord_tab.worker_session.process is not None
+        assert coord_tab.worker_session.is_alive is True
+
+        # 2. Worker 1 (initial active worker) must have been started
+        worker1_tab = ws._worker_tabs.get("1")
+        assert worker1_tab is not None
+        assert worker1_tab.worker_session.process is not None
+        assert worker1_tab.worker_session.is_alive is True
+
+        # 3. Worker 2 (second worker) must NOT have been started yet (lazy standby)
+        worker2_tab = ws._worker_tabs.get("2")
+        assert worker2_tab is not None
+        assert worker2_tab.worker_session.process is None
+        assert worker2_tab.worker_session.is_alive is False
+
+        # 4. Switching to Worker 2 triggers lazy spawn
+        ws.action_switch_worker("2")
+        await pilot.pause()
+        assert ws._active_worker_id == "2"
+        assert worker2_tab.worker_session.process is not None
+        assert worker2_tab.worker_session.is_alive is True
+
+        # 5. Switching back to Worker 1 and then to Worker 2 does not recreate process
+        proc2 = worker2_tab.worker_session.process
+        ws.action_switch_worker("1")
+        await pilot.pause()
+        ws.action_switch_worker("2")
+        await pilot.pause()
+        assert worker2_tab.worker_session.process is proc2
+
+
+@pytest.mark.anyio
+async def test_split_view_flexible_expansion_and_restore() -> None:
+    """Test Split View layout: Coordinator on left, Worker on right, expandable to full screen."""
+    from textual.app import App
+    from mind.core.terminal_manager import TerminalManager
+
+    TerminalManager.reset()
+
+    class TestApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(WorkspaceScreen(session_name="test-split-view", agent_count=3))
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        ws = app.screen
+        assert isinstance(ws, WorkspaceScreen)
+
+        primary = ws.query_one("#primary-pane")
+        workers = ws.query_one("#workers-pane")
+
+        # Initial state: Split View (both visible with 1fr width)
+        assert ws._is_split_view is True
+        assert primary.styles.display == "block"
+        assert primary.styles.width.value == 1
+        assert workers.styles.display == "block"
+        assert workers.styles.width.value == 1
+
+        # Focus active worker pane first, then press 's' -> expands worker to full screen
+        worker1_tab = ws._worker_tabs.get("1")
+        assert worker1_tab is not None
+        worker1_tab.screen_widget.focus()
+        await pilot.pause()
+
+        ws.action_toggle_split()
+        await pilot.pause()
+        assert ws._is_split_view is False
+        assert primary.styles.display == "none"
+        assert workers.styles.display == "block"
+        assert workers.styles.width.value == 100
+
+        # Press 's' again -> restores split view
+        ws.action_toggle_split()
+        await pilot.pause()
+        assert ws._is_split_view is True
+        assert primary.styles.display == "block"
+        assert primary.styles.width.value == 1
+        assert workers.styles.display == "block"
+        assert workers.styles.width.value == 1
+
+        # Focus coordinator pane, then press 's' -> expands coordinator to full screen
+        ws._coordinator_tab.screen_widget.focus()
+        await pilot.pause()
+        ws.action_toggle_split()
+        await pilot.pause()
+        assert ws._is_split_view is False
+        assert workers.styles.display == "none"
+        assert primary.styles.display == "block"
+        assert primary.styles.width.value == 100
+
+        # Press 's' again -> restores split view
+        ws.action_toggle_split()
+        await pilot.pause()
+        assert ws._is_split_view is True
+        assert primary.styles.display == "block"
+        assert primary.styles.width.value == 1
+        assert workers.styles.display == "block"
+        assert workers.styles.width.value == 1
+
+
+def test_vim_modal_normal_key_isolation_and_navigation() -> None:
+    """Test full single-key navigation suite in NORMAL mode and key leak isolation."""
+    ws = WorkspaceScreen(session_name="test-modal-full", agent_count=3)
+    ws.mode = "NORMAL"
+
+    ws.action_enter_pty = MagicMock()
+    ws.action_prev_worker = MagicMock()
+    ws.action_next_worker = MagicMock()
+    ws.action_open_directive_modal = MagicMock()
+    ws.action_open_agent_config_modal = MagicMock()
+    ws.action_toggle_split = MagicMock()
+    ws.action_new_tab = MagicMock()
+    ws.action_close_active_tab = MagicMock()
+    ws.action_show_help = MagicMock()
+    ws.action_quit = MagicMock()
+    ws.action_switch_worker = MagicMock()
+    ws.action_copy_to_clipboard = MagicMock()
+    ws.action_open_directive_editor = MagicMock()
+    ws.action_open_directive_external = MagicMock()
+
+    # 1..9 jump
+    for num in ("1", "3", "7", "9"):
+        ev = Key(num, character=num)
+        ws.on_key(ev)
+        assert ev._stop_propagation
+        assert ev._no_default_action
+    assert ws.action_switch_worker.call_count == 4
+
+    # h / l navigation
+    ev_h = Key("h", character="h")
+    ws.on_key(ev_h)
+    ws.action_prev_worker.assert_called_once()
+    assert ev_h._stop_propagation
+
+    ev_l = Key("l", character="l")
+    ws.on_key(ev_l)
+    ws.action_next_worker.assert_called_once()
+    assert ev_l._stop_propagation
+
+    # s: split
+    ev_s = Key("s", character="s")
+    ws.on_key(ev_s)
+    ws.action_toggle_split.assert_called_once()
+    assert ev_s._stop_propagation
+
+    # m: inject
+    ev_m = Key("m", character="m")
+    ws.on_key(ev_m)
+    ws.action_open_directive_modal.assert_called_once()
+    assert ev_m._stop_propagation
+
+    # e: config
+    ev_e = Key("e", character="e")
+    ws.on_key(ev_e)
+    ws.action_open_agent_config_modal.assert_called_once()
+    assert ev_e._stop_propagation
+
+    # c: new tab
+    ev_c = Key("c", character="c")
+    ws.on_key(ev_c)
+    ws.action_new_tab.assert_called_once()
+    assert ev_c._stop_propagation
+
+    # x: close tab
+    ev_x = Key("x", character="x")
+    ws.on_key(ev_x)
+    ws.action_close_active_tab.assert_called_once()
+    assert ev_x._stop_propagation
+
+    # y: copy / yank
+    ev_y = Key("y", character="y")
+    ws.on_key(ev_y)
+    ws.action_copy_to_clipboard.assert_called_once()
+    assert ev_y._stop_propagation
+
+    # d: directive editor in-app
+    ev_d = Key("d", character="d")
+    ws.on_key(ev_d)
+    ws.action_open_directive_editor.assert_called_once()
+    assert ev_d._stop_propagation
+
+    # o: directive editor external
+    ev_o = Key("o", character="o")
+    ws.on_key(ev_o)
+    ws.action_open_directive_external.assert_called_once()
+    assert ev_o._stop_propagation
+
+    # Unmapped keys in NORMAL mode must be prevented from leaking
+    ev_unmapped = Key("z", character="z")
+    ws.on_key(ev_unmapped)
+    assert ev_unmapped._stop_propagation
+    assert ev_unmapped._no_default_action
+
+
+def test_pty_interact_exit_keys_and_direct_passthrough() -> None:
+    """In PTY_INTERACT mode: Ctrl+B, F12, and Esc Esc exit to NORMAL mode smoothly; inputs pass directly."""
+    session = _create_mock_worker_session()
+    widget = TerminalScreenWidget(worker_session=session, mode="PTY_INTERACT")
+
+    posted_messages = []
+    widget.post_message = lambda msg: posted_messages.append(msg)
+
+    # 1. Ctrl+B exits immediately (0ms delay)
+    ev_b = Key("ctrl+b", character="")
+    widget.on_key(ev_b)
+    assert len(posted_messages) == 1
+    assert posted_messages[-1].target_mode == "NORMAL"
+    assert ev_b._stop_propagation
+
+    # 2. F12 exits immediately (0ms delay)
+    posted_messages.clear()
+    ev_f12 = Key("f12", character="")
+    widget.on_key(ev_f12)
+    assert len(posted_messages) == 1
+    assert posted_messages[-1].target_mode == "NORMAL"
+    assert ev_f12._stop_propagation
+
+    # 3. Esc Esc within 350ms exits smoothly
+    posted_messages.clear()
+    ev_esc1 = Key("escape", character="")
+    widget.on_key(ev_esc1)
+    assert len(posted_messages) == 0  # 1st escape buffered
+    assert widget._pending_esc is True
+
+    ev_esc2 = Key("escape", character="")
+    widget.on_key(ev_esc2)
+    assert len(posted_messages) == 1
+    assert posted_messages[-1].target_mode == "NORMAL"
+    assert widget._pending_esc is False
+
+    # 4. Standard keystrokes forwarded directly without any lag
+    session.write.reset_mock()
+    ev_char = Key("g", character="g")
+    widget.on_key(ev_char)
+    session.write.assert_called_once_with("g")
+    assert ev_char._stop_propagation
+
+
+
 
 
 
