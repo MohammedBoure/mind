@@ -10,18 +10,73 @@ import click
 
 
 @click.group(invoke_without_command=True)
+@click.option(
+    "-u",
+    "--usage",
+    is_flag=True,
+    help="Display accounts quota & usage monitor table for agy worker slots.",
+)
 @click.pass_context
-def main(ctx: click.Context) -> None:
+def main(ctx: click.Context, usage: bool) -> None:
     """mind — AI Multi-Agent Orchestration TUI.
 
     Launch the TUI to manage multi-agent sessions.
     Running without arguments opens the session picker.
     """
+    if usage:
+        from mind.core.usage_monitor import print_usage_cli
+
+        print_usage_cli()
+        return
+
     if ctx.invoked_subcommand is None:
         from mind.app import MindApp
 
         app = MindApp()
         app.run()
+
+
+@main.command("usage")
+@click.option(
+    "--slot",
+    "-s",
+    default=None,
+    help="Specific agy worker slot to inspect (e.g. agy1).",
+)
+@click.option(
+    "--json",
+    "-j",
+    "as_json",
+    is_flag=True,
+    help="Output usage statistics in JSON format.",
+)
+@click.option(
+    "--hourly-limit",
+    type=int,
+    default=None,
+    help="Custom hourly quota limit.",
+)
+@click.option(
+    "--weekly-limit",
+    type=int,
+    default=None,
+    help="Custom weekly quota limit.",
+)
+def usage_cmd(
+    slot: str | None,
+    as_json: bool,
+    hourly_limit: int | None,
+    weekly_limit: int | None,
+) -> None:
+    """Display accounts quota & usage monitor table for agy worker slots."""
+    from mind.core.usage_monitor import print_usage_cli
+
+    print_usage_cli(
+        slot=slot,
+        as_json=as_json,
+        hourly_limit=hourly_limit,
+        weekly_limit=weekly_limit,
+    )
 
 
 @main.command()

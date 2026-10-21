@@ -58,6 +58,13 @@ mind mcp
 
 # Automatically register the mind-mcp server with agy
 mind register-mcp --transport sse --port 8765
+
+# Inspect multi-account quota and consumption table
+mind usage
+mind -u
+
+# Export quota usage statistics as JSON
+mind usage --json
 ```
 
 ---

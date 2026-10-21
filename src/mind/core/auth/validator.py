@@ -112,7 +112,12 @@ class AuthValidator:
                 return self._build_claims(merged_claims, token_type="OAuth2/OIDC")
 
         # 3. Direct JSON token / OAuth2 claims payload
-        return self._build_claims_from_dict(data)
+        target_dict = dict(data)
+        if isinstance(data.get("token"), dict):
+            target_dict = {**data["token"], **target_dict}
+        elif isinstance(data.get("tokens"), dict):
+            target_dict = {**data["tokens"], **target_dict}
+        return self._build_claims_from_dict(target_dict)
 
     def _build_claims(self, claims_data: dict[str, Any], token_type: str = "Bearer") -> TokenClaims:
         """Construct TokenClaims from a decoded claims dictionary."""
