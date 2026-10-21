@@ -573,10 +573,13 @@ class WorkerTerminalTab(Widget):
                 warn_label = latest_warn[:24]
             warning_badge = f" [bold #1a1b26 on #f7768e] ⚠ Warning: {warn_label} [/]"
 
-        # Alarm badge (e.g. Worker-1 Finished / Idle)
+        # Alarm badge (e.g. ⚡ Worker-X Finished (Idle) or 🚨 Assistance Needed)
         alarm_badge = ""
         if getattr(self, "_alarm_badge", ""):
-            alarm_badge = f" [bold #1a1b26 on #e0af68] {self._alarm_badge} [/]"
+            if "🚨" in self._alarm_badge:
+                alarm_badge = f" [bold #1a1b26 on #f7768e] {self._alarm_badge} [/]"
+            else:
+                alarm_badge = f" [bold #1a1b26 on #e0af68] {self._alarm_badge} [/]"
 
         if self.worker_session.role == "coordinator" or str(self.worker_session.worker_id) == "coordinator":
             return (

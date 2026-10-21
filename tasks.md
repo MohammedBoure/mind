@@ -53,7 +53,7 @@
   * `check_account_quotas`: أداة MCP لفحص استهلاك الحصص الساعية والأسبوعية للحسابات.
 - دعم العمل عبر وسيطين: خادم HTTP SSE محلي على المنفذ `8765`، ووسيط Standard I/O (Stdio) للربط المباشر مع Antigravity CLI.
 
-# 8 : high
+# 8 : high [COMPLETED]
 نظام إشعارات وتنبيهات المنسق المقاد بالأحداث (Event-Driven Coordinator Alarms & Wakeup).
 - بناء دورة إشعارات يقظة للمنسق (Primary Coordinator Alarm Pipeline) تراقب عمال المهام فورياً دون مؤقتات مستمرة.
 - رصد انتقال العامل إلى موجه الأوامر الخامل (`IDLE Prompt`) بعد انتهاء مهامه عبر معالج debounced ذكي بخيط واحد لا يستنزف المعالج.

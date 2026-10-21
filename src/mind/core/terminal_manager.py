@@ -142,6 +142,7 @@ class WorkerSession:
         )
 
         self._last_output_time: float = time.time()
+        self._pipeline = None
         self._idle_check_timer: threading.Timer | None = None
         self._output_listeners: list[Callable[[str], None]] = []
         self._notification_listeners: list[Callable[[WorkerSession, str], None]] = []
@@ -150,7 +151,7 @@ class WorkerSession:
 
     @property
     def pid(self) -> int | None:
-        return self.process.pid if self.process else None
+        return getattr(self.process, "pid", None) if self.process else None
 
     @property
     def is_alive(self) -> bool:
@@ -171,6 +172,16 @@ class WorkerSession:
         with self._lock:
             self._idle_listeners.append(listener)
 
+    def _notify_idle(self) -> None:
+        """Trigger registered idle callbacks."""
+        with self._lock:
+            listeners = list(self._idle_listeners)
+        for listener in listeners:
+            try:
+                listener(self)
+            except Exception:
+                pass
+
     def _check_idle_state(self) -> None:
         """Transition process to waiting_input and notify listeners when terminal settles."""
         if not self.is_alive:
@@ -186,13 +197,7 @@ class WorkerSession:
 
         if self.state == WorkerProcessState.RUNNING:
             self.state = WorkerProcessState.WAITING_INPUT
-            with self._lock:
-                listeners = list(self._idle_listeners)
-            for listener in listeners:
-                try:
-                    listener(self)
-                except Exception:
-                    pass
+            self._notify_idle()
 
     def _on_process_output(self, chunk: str) -> None:
         """Receive output chunk from PTY process and update buffer/listeners."""
@@ -200,12 +205,15 @@ class WorkerSession:
         self._last_output_time = time.time()
         self.state = WorkerProcessState.RUNNING
 
-        # Debounced check for terminal idle state without thread churn
-        with self._lock:
-            if self._idle_check_timer is None or not self._idle_check_timer.is_alive():
-                self._idle_check_timer = threading.Timer(1.2, self._check_idle_state)
-                self._idle_check_timer.daemon = True
-                self._idle_check_timer.start()
+        # Debounced check via single-thread CoordinatorAlarmPipeline (zero thread churn)
+        if getattr(self, "_pipeline", None) is not None:
+            self._pipeline.record_activity(self)
+        else:
+            with self._lock:
+                if self._idle_check_timer is None or not self._idle_check_timer.is_alive():
+                    self._idle_check_timer = threading.Timer(1.2, self._check_idle_state)
+                    self._idle_check_timer.daemon = True
+                    self._idle_check_timer.start()
 
         # Detect runtime warnings from stderr/stdout (e.g. --effort fallback, unknown agent)
         chunk_lower = chunk.lower()
@@ -543,7 +551,11 @@ class WorkerSession:
         """Safely terminate the worker process."""
         self.state = WorkerProcessState.TERMINATED
         if self.process:
-            self.process.terminate()
+            if hasattr(self.process, "terminate"):
+                try:
+                    self.process.terminate()
+                except Exception:
+                    pass
             self.process = None
 
 
@@ -559,48 +571,37 @@ class TerminalManager:
         self._workers: dict[str, WorkerSession] = {}
         self._lock = threading.Lock()
         self._global_notification_listeners: list[Callable[[WorkerSession, str], None]] = []
-        self._coordinator_alarms: list[dict[str, Any]] = []
-        self._alarm_listeners: list[Callable[[dict[str, Any]], None]] = []
+        from mind.core.alarm_pipeline import CoordinatorAlarmPipeline
+        self._alarm_pipeline = CoordinatorAlarmPipeline(manager=self)
+
+    @property
+    def alarm_pipeline(self):
+        """Retrieve the primary coordinator alarm pipeline instance."""
+        return self._alarm_pipeline
 
     def add_alarm_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
         """Register a listener for coordinator wake-up alarm events."""
-        with self._lock:
-            self._alarm_listeners.append(listener)
+        self._alarm_pipeline.add_alarm_listener(listener)
+
+    def remove_alarm_listener(self, listener: Callable[[dict[str, Any]], None]) -> None:
+        """Unregister a listener for coordinator wake-up alarm events."""
+        self._alarm_pipeline.remove_alarm_listener(listener)
 
     def emit_coordinator_alarm(self, event: dict[str, Any]) -> None:
         """Emit an alarm/event to wake up the Primary Coordinator and notify subscribers."""
-        with self._lock:
-            self._coordinator_alarms.append(event)
-            listeners = list(self._alarm_listeners)
-        for listener in listeners:
-            try:
-                listener(event)
-            except Exception:
-                pass
+        self._alarm_pipeline.emit_alarm(event)
 
     def get_coordinator_alarms(self) -> list[dict[str, Any]]:
         """Return all recorded coordinator alarms and event triggers."""
-        with self._lock:
-            return list(self._coordinator_alarms)
+        return self._alarm_pipeline.get_alarms()
 
     def clear_coordinator_alarms(self) -> None:
         """Clear the coordinator alarm queue."""
-        with self._lock:
-            self._coordinator_alarms.clear()
+        self._alarm_pipeline.clear_alarms()
 
     def notify_coordinator_worker_idle(self, worker_id: str, status_summary: str = "") -> dict[str, Any]:
         """Record worker task completion / idle prompt detection and emit alarm event."""
-        worker = self.get_worker(worker_id)
-        name = worker.name if worker else f"Worker-{worker_id}"
-        event = {
-            "type": "worker_idle",
-            "worker_id": str(worker_id),
-            "name": name,
-            "summary": status_summary or f"{name} finished execution and is IDLE at terminal prompt.",
-            "timestamp": datetime.now().isoformat(),
-        }
-        self.emit_coordinator_alarm(event)
-        return event
+        return self._alarm_pipeline.notify_worker_idle(worker_id=worker_id, summary=status_summary)
 
     def notify_coordinator_worker_help(
         self,
@@ -609,24 +610,13 @@ class TerminalManager:
         priority: str = "high",
     ) -> dict[str, Any]:
         """Record a worker assistance request and emit priority alarm event."""
-        worker = self.get_worker(worker_id)
-        name = worker.name if worker else f"Worker-{worker_id}"
-        event = {
-            "type": "worker_help",
-            "worker_id": str(worker_id),
-            "name": name,
-            "reason": reason or f"{name} encountered an obstacle and requests assistance.",
-            "priority": priority,
-            "timestamp": datetime.now().isoformat(),
-        }
-        self.emit_coordinator_alarm(event)
-        return event
+        return self._alarm_pipeline.notify_worker_help(worker_id=worker_id, reason=reason, priority=priority)
 
     def _on_worker_idle_detected(self, worker: WorkerSession) -> None:
         """Internal callback fired when a worker PTY process settles to idle prompt."""
         if worker.role == "coordinator" or str(worker.worker_id).lower() in ("coordinator", "primary"):
             return
-        self.notify_coordinator_worker_idle(worker.worker_id)
+        self._alarm_pipeline.notify_worker_idle(worker.worker_id)
 
     @classmethod
     def get_instance(cls) -> TerminalManager:
@@ -712,6 +702,7 @@ class TerminalManager:
             )
             session.add_notification_listener(self._on_worker_notification)
             session.add_idle_listener(self._on_worker_idle_detected)
+            session._pipeline = self._alarm_pipeline
             self._workers[worker_id] = session
 
         if autostart:
@@ -799,7 +790,9 @@ class TerminalManager:
         return discover_agent_slots()
 
     def stop_all(self) -> None:
-        """Terminate all worker processes."""
+        """Terminate all worker processes and stop alarm pipeline."""
+        if hasattr(self, "_alarm_pipeline") and self._alarm_pipeline:
+            self._alarm_pipeline.stop()
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()

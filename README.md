@@ -15,7 +15,11 @@
   - `send_terminal_input(worker_id, text, press_enter)`: Send raw input/commands directly to worker stdin.
   - `interrupt_and_inject(worker_id, sender_id, message, priority)`: Send SIGINT / Ctrl+C to pause ongoing agent actions, wait for prompt to settle, and inject formatted directives safely.
   - `check_account_quotas(slot, as_json)`: Inspect accounts quota consumption, hourly/weekly remaining steps, and graphic progress bars.
+  - `notify_coordinator_worker_idle(worker_id, status_summary)`: Dispatch immediate wake-up alarms to the Primary Coordinator when a worker completes its task.
+  - `notify_coordinator_help(worker_id, reason, priority)`: Dispatch urgent assistance alarms (`🚨 Assistance Needed`) to the coordinator.
+  - `check_coordinator_alarms()`: Inspect queued wake-up alarms and worker completion events.
   - `get_agent_profile(agent_id)`: Query agent role, principles, instructions, and `./agent` config.
+- **Event-Driven Coordinator Alarm Pipeline** — Single-threaded debounced watcher detecting worker transitions to IDLE prompts without CPU exhaustion or continuous timer churn, displaying visual header badges (`⚡ Worker-X Finished (Idle)` or `🚨 Assistance Needed`), and injecting event summaries into coordinator terminal for immediate reasoning.
 - **Direct Interactive Control** — Switch tabs, click into any worker terminal, and type directly into `agy` at any time.
 - **Instant Visual Feedback** — MCP-injected directives immediately trigger visual toast badges and alert banners in the TUI.
 

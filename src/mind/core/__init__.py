@@ -13,6 +13,11 @@ from mind.core.agent_discovery import (
     parse_slot_id,
     verify_agys_compatibility,
 )
+from mind.core.alarm_pipeline import (
+    CoordinatorAlarmPipeline,
+    extract_status_summary,
+    is_idle_prompt,
+)
 from mind.core.credentials import (
     CrossProcessCredentialLock,
     extract_email_from_token,
@@ -49,6 +54,7 @@ from mind.core.usage_monitor import (
 __all__ = [
     "AgentProfile",
     "BasePtyProcess",
+    "CoordinatorAlarmPipeline",
     "CrossProcessCredentialLock",
     "QuotaStatus",
     "SlotInfo",
@@ -64,12 +70,14 @@ __all__ = [
     "discover_agent_slots",
     "discover_system_agents",
     "extract_email_from_token",
+    "extract_status_summary",
     "generate_agys_command",
     "get_agent_preset_config",
     "get_quota_color_tag",
     "get_real_user_home",
     "get_slot_token_path",
     "initialize_slot_instance",
+    "is_idle_prompt",
     "parse_slot_id",
     "print_usage_cli",
     "read_credential",

@@ -220,10 +220,20 @@ class WorkspaceScreen(Screen):
         event_type = event.get("type", "worker_idle")
         worker_id = event.get("worker_id", "")
         summary = event.get("summary") or event.get("reason") or "Worker event received"
-        badge = f"⚡ Worker-{worker_id} Finished (Idle)" if event_type == "worker_idle" else f"🚨 Worker-{worker_id} Assistance"
+        badge = event.get("badge") or (
+            f"⚡ Worker-{worker_id} Finished (Idle)"
+            if event_type == "worker_idle"
+            else "🚨 Assistance Needed"
+        )
 
         # 1. Update Coordinator pane header badge
         coord_tab = getattr(self, "_coordinator_tab", None)
+        if not coord_tab:
+            try:
+                coord_tab = self.query_one("#primary-pane", WorkerTerminalTab)
+            except Exception:
+                coord_tab = None
+
         if coord_tab:
             coord_tab.set_alarm_badge(badge)
 
@@ -233,8 +243,18 @@ class WorkspaceScreen(Screen):
         # 3. Inject event notice to Coordinator PTY so it wakes up and reasons only upon an actual event
         coord_session = self._terminal_manager.get_worker("coordinator")
         if coord_session and coord_session.is_alive:
-            status_line = f"\n[Event Received]: {summary}\n"
-            coord_session.write(status_line, press_enter=False)
+            if event_type == "worker_idle":
+                status_line = (
+                    f"\n[⚡ Worker-{worker_id} Finished (Idle)]: {summary}\n"
+                    f"Coordinator Directive: Worker task complete. Review output and deduce next execution step.\n"
+                )
+            else:
+                priority = event.get("priority", "high")
+                status_line = (
+                    f"\n[🚨 Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
+                    f"Coordinator Directive: Intervene immediately to resolve roadblock.\n"
+                )
+            coord_session.write(status_line, press_enter=True)
 
     def on_unmount(self) -> None:
         """Clean up background tasks on unmount."""
