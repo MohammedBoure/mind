@@ -42,7 +42,7 @@
 - عزل بيئة العمل لكل عامل (`Slot Isolation`) عبر ضبط متغيرات البيئة تلقائياً: `USERPROFILE` و `HOME` و `AGY_SLOT` و `AGY_INSTANCE_DIR` لضمان استقلال محادثات وتوكنات كل عامل.
 - منع التضارب والتأكد من توافق النظام مع دوال PowerShell المركزية (`agys`).
 
-# 7 : high
+# 7 : high [COMPLETED]
 خادم التنسيق MCP عالي الأداء ومنخفض الاستهلاك (High-Performance Async MCP Server).
 - إعادة هيكلة وتطوير `src/mind/mcp/server.py` و `src/mind/mcp/runner.py` ليعملا بشكل غير متزامن بالكامل (Asyncio-native) دون حجب مسار التطبيق الرئيسي (`wait_for_ready=False`).
 - توفير أدوات MCP أساسية فائقة الخفة:

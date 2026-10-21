@@ -9,11 +9,12 @@
 - **Session Picker** — Browse, create, and launch agent workspaces interactively.
 - **PTY Terminal Multiplexing** — Each worker tab runs a real, interactive terminal session running `agy` (on Windows via `pywinpty` / ConPTY, on Unix/Linux via `ptyprocess` / `termios`).
 - **Virtual Screen Emulation** — In-memory, thread-safe 2D character matrix and ring buffer powered by `pyte` and `rich`.
-- **Embedded MCP Server (`mind-mcp`)** — Background FastMCP server exposing tools to the primary coordinator agent:
-  - `list_workers()`: Inspect active worker tabs, agent IDs, and process states.
-  - `get_terminal_screen(worker_id, lines)`: Read rendered ANSI/clean text from any worker terminal.
-  - `send_terminal_input(worker_id, text, press_enter)`: Send raw input/commands to worker stdin.
-  - `interrupt_and_inject(worker_id, sender_id, message, priority)`: Send SIGINT / Ctrl+C to pause ongoing agent actions, wait for prompt to settle, and inject formatted directives.
+- **Embedded MCP Server (`mind-mcp`)** — Asyncio-native FastMCP server exposing high-performance tools to the primary coordinator agent:
+  - `list_workers()`: Inspect active worker tabs, agent IDs, process states, and linked account/slot details.
+  - `get_terminal_screen(worker_id, lines)`: Read rendered clean text from any worker terminal with version-tracked caching.
+  - `send_terminal_input(worker_id, text, press_enter)`: Send raw input/commands directly to worker stdin.
+  - `interrupt_and_inject(worker_id, sender_id, message, priority)`: Send SIGINT / Ctrl+C to pause ongoing agent actions, wait for prompt to settle, and inject formatted directives safely.
+  - `check_account_quotas(slot, as_json)`: Inspect accounts quota consumption, hourly/weekly remaining steps, and graphic progress bars.
   - `get_agent_profile(agent_id)`: Query agent role, principles, instructions, and `./agent` config.
 - **Direct Interactive Control** — Switch tabs, click into any worker terminal, and type directly into `agy` at any time.
 - **Instant Visual Feedback** — MCP-injected directives immediately trigger visual toast badges and alert banners in the TUI.

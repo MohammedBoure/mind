@@ -7,6 +7,7 @@ and exposes worker statuses to the embedded MCP server and Textual UI.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -431,6 +432,50 @@ class WorkerSession:
 
         # 2. Wait for terminal prompt to stabilize
         time.sleep(0.4)
+
+        # 3. Format injection payload
+        formatted_directive = (
+            f"\n[INTERRUPT from {sender_id} | Priority: {priority.upper()}]: {message}\n"
+            f"Directive: Prioritize this message. Adjust plan and resume previous task only if no conflict.\n"
+        )
+        self.last_interrupt_directive = formatted_directive
+
+        # 4. Inject directive into stdin
+        self.write(formatted_directive, press_enter=True)
+        self.state = WorkerProcessState.RUNNING
+
+        # 5. Increment notification counter and trigger UI listeners
+        self.unread_notifications += 1
+        with self._lock:
+            listeners = list(self._notification_listeners)
+        for listener in listeners:
+            try:
+                listener(self, formatted_directive)
+            except Exception:
+                pass
+
+        return f"Successfully interrupted {self.worker_id} and injected directive from {sender_id}."
+
+    async def interrupt_and_inject_async(
+        self,
+        sender_id: str,
+        message: str,
+        priority: str = "high",
+    ) -> str:
+        """Asynchronously send SIGINT/Ctrl+C to halt current execution, wait for prompt, and inject message."""
+        if not self.process or not self.process.is_alive():
+            if self.process is None:
+                self.start()
+                await asyncio.sleep(0.3)
+            else:
+                return f"Error: Worker {self.worker_id} process is not running."
+
+        # 1. Send interrupt signal
+        self.process.send_interrupt()
+        self.state = WorkerProcessState.PAUSED
+
+        # 2. Wait for terminal prompt to stabilize asynchronously without blocking event loop
+        await asyncio.sleep(0.4)
 
         # 3. Format injection payload
         formatted_directive = (

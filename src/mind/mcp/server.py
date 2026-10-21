@@ -1,12 +1,24 @@
-"""Embedded MCP Server implementation for the mind multi-agent system.
+"""Embedded High-Performance Async MCP Server for the mind multi-agent system.
 
-Exposes tools for the primary coordinator agent to inspect worker terminal screens,
-inject prioritized directives, control execution, and query worker profiles.
+Exposes lightweight asyncio-native orchestration tools for the primary coordinator agent:
+- `list_workers`: Inspect active workers, process states, and linked account/slot details.
+- `get_terminal_screen`: Read live rendered terminal outputs with version-tracked caching.
+- `send_terminal_input`: Write raw input and commands directly to the worker prompt.
+- `interrupt_and_inject`: Safely halt current action with SIGINT and inject priority directives.
+- `check_account_quotas`: Inspect hourly and weekly quota consumption and remaining limits.
+- `get_agent_profile`: Query agent role, principles, local configs, and instructions.
+- `notify_coordinator_worker_idle`: Coordinator notification when worker finishes.
+- `notify_coordinator_help`: Urgent assistance alarm for coordinator.
+- `check_coordinator_alarms`: Retrieve unread coordinator alarms.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import threading
+import time
 from typing import Any
 
 try:
@@ -15,56 +27,144 @@ except ImportError:
     from mcp.server.fastmcp import FastMCP  # type: ignore[no-redef]
 
 from mind.core.terminal_manager import TerminalManager, WorkerSession
+from mind.core.usage_monitor import UsageMonitor
 
 logger = logging.getLogger("mind.mcp")
 
 
+class TerminalScreenCache:
+    """High-performance thread-safe cache for rendered terminal screen lines.
+
+    Maintains version-aware and time-bounded entries to guarantee O(1) response
+    times for repetitive screen polling without incurring buffer re-scanning.
+    """
+
+    def __init__(self, ttl: float = 0.25, max_entries: int = 128) -> None:
+        self.ttl = ttl
+        self.max_entries = max_entries
+        self._cache: dict[str, tuple[int, float, str]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str, current_version: int) -> str | None:
+        """Retrieve cached screen text if the buffer version and TTL remain valid."""
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            cached_version, cached_time, text = entry
+            if cached_version == current_version and (time.time() - cached_time) < self.ttl:
+                return text
+            return None
+
+    def put(self, key: str, current_version: int, text: str) -> None:
+        """Store rendered screen text with current buffer version timestamp."""
+        with self._lock:
+            self._cache[key] = (current_version, time.time(), text)
+            if len(self._cache) > self.max_entries:
+                cutoff = time.time() - (self.ttl * 4)
+                self._cache = {
+                    k: v for k, v in self._cache.items() if v[1] > cutoff
+                }
+
+    def clear(self) -> None:
+        """Flush all cached screen lines."""
+        with self._lock:
+            self._cache.clear()
+
+
+# Module-level screen cache singleton
+_screen_cache = TerminalScreenCache(ttl=0.25)
+
+
+def _resolve_worker_account(worker: WorkerSession, usage_monitor: UsageMonitor) -> dict[str, Any]:
+    """Extract linked account identity, token status, and quota summary for a worker slot."""
+    slot_id = worker.get_slot_id() if hasattr(worker, "get_slot_id") else None
+    assigned = getattr(worker, "assigned_agent", "") or ""
+    slot_name = f"agy{slot_id}" if slot_id else (assigned or "agy1")
+
+    account_info: dict[str, Any] = {
+        "slot_id": slot_id,
+        "assigned_agent": assigned,
+        "linked_account": None,
+        "token_status": "unknown",
+        "quota_status": "unknown",
+        "hourly_remaining": None,
+        "weekly_remaining": None,
+    }
+
+    try:
+        usage = usage_monitor.get_slot_usage(slot_name)
+        account_info["linked_account"] = usage.email or usage.account
+        account_info["token_status"] = usage.token_status
+        account_info["quota_status"] = usage.status.value
+        account_info["hourly_remaining"] = usage.hourly_remaining
+        account_info["weekly_remaining"] = usage.weekly_remaining
+    except Exception as exc:
+        logger.debug("Failed resolving account for worker %s (%s): %s", worker.worker_id, slot_name, exc)
+
+    return account_info
+
+
 def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
-    """Create and configure the mind-mcp server with all orchestration tools."""
+    """Create and configure the async-native mind-mcp server with all orchestration tools."""
     server = FastMCP(
         name="mind-mcp",
         instructions=(
-            "Central MCP bridge for the mind AI Multi-Agent Orchestrator. "
+            "Central High-Performance Async MCP bridge for the mind AI Multi-Agent Orchestrator. "
             "Allows the primary coordinator agent to inspect live worker terminal screens, "
             "inject inter-agent interrupt directives, send raw inputs to worker terminals, "
-            "and inspect agent profiles."
+            "check account quota consumption, and query agent profiles."
         ),
     )
 
     mgr = manager or TerminalManager.get_instance()
+    usage_monitor = UsageMonitor()
 
     # ── Tool 1: list_workers ──────────────────────────────────────────
     @server.tool()
-    def list_workers() -> list[dict[str, Any]]:
-        """List all active worker tabs, agent IDs, and their current process state.
+    async def list_workers() -> list[dict[str, Any]]:
+        """List all active worker tabs, process states, and linked account/slot details.
 
         Returns:
-            A list of dictionaries containing worker_id, agent_id, name,
+            A list of dictionaries containing worker_id, agent_id, name, role,
             state ('running', 'paused', 'waiting_input', 'terminated'),
-            process PID, model, task description, and unread notifications.
+            process PID, model, task description, unread notifications,
+            is_alive flag, linked slot_id, assigned_agent, linked_account email,
+            token_status, quota_status, and remaining hourly/weekly quotas.
         """
         workers = mgr.list_workers()
         results: list[dict[str, Any]] = []
+
         for w in workers:
+            acc_info = _resolve_worker_account(w, usage_monitor)
             results.append({
                 "worker_id": w.worker_id,
                 "agent_id": w.agent_id,
                 "name": w.name,
+                "role": getattr(w, "role", "worker"),
                 "state": w.state.value if hasattr(w.state, "value") else str(w.state),
                 "pid": w.pid,
                 "model": w.model,
                 "task": w.task,
                 "unread_notifications": w.unread_notifications,
                 "is_alive": w.is_alive,
+                "slot_id": acc_info["slot_id"],
+                "assigned_agent": acc_info["assigned_agent"],
+                "linked_account": acc_info["linked_account"],
+                "token_status": acc_info["token_status"],
+                "quota_status": acc_info["quota_status"],
+                "hourly_remaining": acc_info["hourly_remaining"],
+                "weekly_remaining": acc_info["weekly_remaining"],
             })
         return results
 
     # ── Tool 2: get_terminal_screen ───────────────────────────────────
     @server.tool()
-    def get_terminal_screen(worker_id: str = "", lines: int = 50, target: str = "") -> str:
+    async def get_terminal_screen(worker_id: str = "", lines: int = 50, target: str = "") -> str:
         """Read the rendered clean text content from a worker's terminal screen buffer.
 
-        Inspects what the worker agent is currently viewing or outputting in its terminal.
+        Inspects what the worker agent is currently viewing or outputting in its terminal,
+        utilizing high-performance version-tracked caching.
 
         Args:
             worker_id: The identifier of the worker agent (e.g. '1', 'worker-1').
@@ -77,16 +177,32 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         actual_id = worker_id or target
         worker = mgr.get_worker(actual_id)
         if not worker:
-            return f"Error: Worker '{actual_id}' not found. Available workers: {[w.worker_id for w in mgr.list_workers()]}"
+            available = [w.worker_id for w in mgr.list_workers()]
+            return f"Error: Worker '{actual_id}' not found. Available workers: {available}"
 
-        screen_text = worker.get_screen(lines=lines)
+        req_lines = lines if lines > 0 else 50
+        cache_key = f"{actual_id}:{req_lines}"
+        current_version = worker.buffer.version
+
+        # 1. Fast cache lookup
+        cached = _screen_cache.get(cache_key, current_version)
+        if cached is not None:
+            return cached
+
+        # 2. Extract clean screen text from worker buffer
+        screen_text = worker.get_screen(lines=req_lines)
         if not screen_text.strip():
-            return f"(Terminal buffer for Worker '{actual_id}' is currently empty or initializing)"
-        return screen_text
+            result = f"(Terminal buffer for Worker '{actual_id}' is currently empty or initializing)"
+        else:
+            result = screen_text
+
+        # 3. Store in memory cache
+        _screen_cache.put(cache_key, current_version, result)
+        return result
 
     # ── Tool 3: send_terminal_input ───────────────────────────────────
     @server.tool()
-    def send_terminal_input(
+    async def send_terminal_input(
         worker_id: str = "",
         text: str = "",
         press_enter: bool = True,
@@ -111,7 +227,7 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         if not worker.is_alive:
             if worker.process is None:
                 worker.start()
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
             else:
                 return f"Error: Worker '{actual_id}' process is not alive."
 
@@ -120,17 +236,18 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
 
     # ── Tool 4: interrupt_and_inject ──────────────────────────────────
     @server.tool()
-    def interrupt_and_inject(
+    async def interrupt_and_inject(
         worker_id: str = "",
-        sender_id: str = "primary-agent",
+        sender_id: str = "primary-coordinator",
         message: str = "",
         priority: str = "high",
         target: str = "",
     ) -> str:
-        """Pause ongoing action of the target agent with an interrupt and inject a priority directive.
+        """Pause ongoing action of the target agent with an interrupt and inject a priority directive safely.
 
         Sends an immediate interrupt (Ctrl+C / SIGINT) to pause the target `agy` agent,
-        waits for the terminal prompt to settle, and injects the incoming message formatted as:
+        waits for the terminal prompt to settle without blocking the main event loop,
+        and injects the incoming message formatted as:
         [INTERRUPT from {sender_id} | Priority: {priority}]: {message}
         Directive: Prioritize this message. Adjust plan and resume previous task only if no conflict.
 
@@ -149,15 +266,85 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         if not worker:
             return f"Error: Worker '{actual_id}' not found."
 
+        if hasattr(worker, "interrupt_and_inject_async"):
+            return await worker.interrupt_and_inject_async(
+                sender_id=sender_id,
+                message=message,
+                priority=priority,
+            )
+
         return worker.interrupt_and_inject(
             sender_id=sender_id,
             message=message,
             priority=priority,
         )
 
-    # ── Tool 5: get_agent_profile ─────────────────────────────────────
+    # ── Tool 5: check_account_quotas ──────────────────────────────────
     @server.tool()
-    def get_agent_profile(
+    async def check_account_quotas(
+        slot: str = "",
+        as_json: bool = False,
+        hourly_limit: int | None = None,
+        weekly_limit: int | None = None,
+        target: str = "",
+    ) -> dict[str, Any] | str:
+        """Inspect accounts quota consumption and hourly/weekly limits for agy slots.
+
+        Args:
+            slot: Specific slot identifier (e.g. 'agy1', '1', or 'agy2'). If empty, checks all slots.
+            as_json: Whether to return the result formatted as a raw JSON string.
+            hourly_limit: Custom hourly limit override.
+            weekly_limit: Custom weekly limit override.
+            target: Alias for slot.
+
+        Returns:
+            Dictionary or JSON string containing quota consumption, remaining steps,
+            status ('normal', 'warning', 'throttled'), and visual progress bars.
+        """
+        actual_slot = slot or target
+        if actual_slot:
+            usage = usage_monitor.get_slot_usage(
+                slot=actual_slot,
+                hourly_limit=hourly_limit,
+                weekly_limit=weekly_limit,
+            )
+            data: dict[str, Any] = {
+                "slot": usage.slot,
+                "account": usage.account,
+                "email": usage.email,
+                "token_status": usage.token_status,
+                "token_expires_at": usage.token_expires_at.isoformat() if usage.token_expires_at else None,
+                "token_remaining_seconds": usage.token_remaining_seconds,
+                "hourly_used": usage.hourly_used,
+                "hourly_limit": usage.hourly_limit,
+                "hourly_remaining": usage.hourly_remaining,
+                "hourly_remaining_percent": usage.hourly_remaining_percent,
+                "weekly_used": usage.weekly_used,
+                "weekly_limit": usage.weekly_limit,
+                "weekly_remaining": usage.weekly_remaining,
+                "weekly_remaining_percent": usage.weekly_remaining_percent,
+                "status": usage.status.value,
+                "is_throttled": usage.is_throttled,
+                "throttle_reason": usage.throttle_reason,
+                "progress_bar": usage.progress_bar,
+                "colored_progress_bar": usage.colored_progress_bar,
+            }
+            if as_json:
+                return json.dumps(data, indent=2, ensure_ascii=False)
+            return data
+
+        all_usages = usage_monitor.get_all_slots_usage(
+            hourly_limit=hourly_limit,
+            weekly_limit=weekly_limit,
+        )
+        summary_dict = usage_monitor.to_dict_summary(all_usages)
+        if as_json:
+            return json.dumps(summary_dict, indent=2, ensure_ascii=False)
+        return summary_dict
+
+    # ── Tool 6: get_agent_profile ─────────────────────────────────────
+    @server.tool()
+    async def get_agent_profile(
         agent_id: str = "",
         worker_id: str = "",
         target: str = "",
@@ -177,7 +364,6 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         if worker:
             return worker.get_profile_dict()
 
-        # Check if any worker matches agent_id attribute
         for w in mgr.list_workers():
             if w.agent_id == actual_id:
                 return w.get_profile_dict()
@@ -187,9 +373,9 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             "available_agents": [w.agent_id for w in mgr.list_workers()],
         }
 
-    # ── Tool 6: notify_coordinator_worker_idle ────────────────────────
+    # ── Tool 7: notify_coordinator_worker_idle ────────────────────────
     @server.tool()
-    def notify_coordinator_worker_idle(
+    async def notify_coordinator_worker_idle(
         worker_id: str = "",
         status_summary: str = "",
         target: str = "",
@@ -207,16 +393,16 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         actual_id = worker_id or target
         if not actual_id:
             return "Error: worker_id must be provided."
-        
+
         event = mgr.notify_coordinator_worker_idle(
             worker_id=actual_id,
             status_summary=status_summary,
         )
         return f"Coordinator notified: Worker '{actual_id}' is IDLE. (Alarm: {event.get('summary')})"
 
-    # ── Tool 7: notify_coordinator_help ───────────────────────────────
+    # ── Tool 8: notify_coordinator_help ───────────────────────────────
     @server.tool()
-    def notify_coordinator_help(
+    async def notify_coordinator_help(
         worker_id: str = "",
         reason: str = "",
         priority: str = "high",
@@ -237,16 +423,16 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         if not actual_id:
             return "Error: worker_id must be provided."
 
-        event = mgr.notify_coordinator_worker_help(
+        mgr.notify_coordinator_worker_help(
             worker_id=actual_id,
             reason=reason,
             priority=priority,
         )
         return f"Coordinator assistance alarm emitted for Worker '{actual_id}' (Priority: {priority})."
 
-    # ── Tool 8: check_coordinator_alarms ──────────────────────────────
+    # ── Tool 9: check_coordinator_alarms ──────────────────────────────
     @server.tool()
-    def check_coordinator_alarms() -> list[dict[str, Any]]:
+    async def check_coordinator_alarms() -> list[dict[str, Any]]:
         """Retrieve unread alarm triggers, worker completion notices, and assistance requests.
 
         Returns:
@@ -266,3 +452,9 @@ def get_default_mcp_server() -> FastMCP:
     if _global_server is None:
         _global_server = create_mcp_server()
     return _global_server
+
+
+def reset_default_mcp_server() -> None:
+    """Reset the global default MCP server instance (primarily for test isolation)."""
+    global _global_server
+    _global_server = None
