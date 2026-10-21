@@ -88,10 +88,11 @@ mind register-mcp
 ## Architecture
 
 ```
-aze/
+mind/
 ├── docs/                       # Technical architecture & specification documents
 ├── pyproject.toml              # Build config, scripts (`mind`), dependencies
 ├── README.md                   # Project overview & documentation
+├── tasks.md                    # Detailed roadmap & executable transformation plan
 └── src/mind/
     ├── app.py                  # Root Textual App & screen lifecycle
     ├── events.py               # Custom Textual messages
