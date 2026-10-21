@@ -7,7 +7,7 @@ This directory contains all Textual-based UI widgets and screens for the `mind` 
 | File | Description |
 |---|---|
 | `__init__.py` | Package init for the UI module. |
-| `styles.tcss` | Global Textual stylesheet featuring a high-contrast Tokyo Night / Zellij palette with modal and tab bar styling. |
+| `styles.tcss` | Global Textual stylesheet featuring a high-contrast Tokyo Night palette (deep indigo/slate canvases, vibrant accents), Zellij/Helix-inspired header and status bars, soft rounded borders (`border: round`), smart visual separation between Coordinator and Worker panes, and full compatibility with developer monospace fonts, Nerd Fonts, Unicode, and Arabic characters. |
 | `session_picker.py` | Landing screen showing active sessions with selection, creation, and keyboard navigation. |
 | `new_session_modal.py` | Modal dialog for creating a new session (name, agent count, goal). |
 | `clipboard.py` | Cross-platform OS clipboard synchronization utility (`copy_to_clipboard`, `get_clipboard_text`) integrating `pyperclip` with Textual `app.copy_to_clipboard`. |

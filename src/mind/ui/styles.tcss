@@ -1,14 +1,52 @@
-/* ══════════════════════════════════════════════════════════════════
-   mind — Global Tokyo Night / Zellij Stylesheet
-   Modern, sleek terminal multiplexer styling with high-contrast accents
-   ══════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════════════
+   mind — Tokyo Night & Modern TUI Styling (Zellij & Helix Inspired)
+   High-contrast, rounded borders, smart coordinator/worker separation,
+   full support for Nerd Fonts, Developer Fonts, Unicode & Arabic characters.
+   ════════════════════════════════════════════════════════════════════════════ */
 
-/* ── Screen & Base Theme ─────────────────────────────────────────── */
+/* ── Tokyo Night Color Palette Reference ──────────────────────────────────────
+   Backgrounds:
+     - Screen / Root Canvas:        #1a1b26 (Tokyo Night deep storm)
+     - Docked Bars / Deep Surface:  #16161e (Tokyo Night Night)
+     - Coordinator Terminal Canvas: #13141f (Tokyo Night Deep Indigo)
+     - Worker Terminal Canvas:      #0f141c (Tokyo Night Deep Slate/Black)
+     - Card / Dialog Background:    #16161e
+     - Surface / Inactive Tabs:     #1f2335
+     - Surface Hover / Selected:    #24283b / #292e42 / #3b4261
+
+   Foregrounds & Accents:
+     - Primary Foreground:          #c0caf5 (Crisp Tokyo Night text)
+     - Headings / White:            #ffffff
+     - Muted / Secondary:           #7982a9 (Tokyo Night comment, readable)
+     - Subtle Dim:                  #565f89
+     - Coordinator Accent:          #bb9af7 (Tokyo Night Purple/Violet)
+     - Worker Accent:               #7aa2f7 (Tokyo Night Blue)
+     - Cyan / Secondary:            #7dcfff (Tokyo Night Cyan/Aqua)
+     - Teal / Active:               #2ac3de
+     - Normal Mode / Accent:        #e0af68 (Tokyo Night Warm Gold/Amber)
+     - Warning:                     #ff9e64 (Tokyo Night Orange)
+     - Success / Running:           #9ece6a (Tokyo Night Green)
+     - Danger / Terminated:         #f7768e (Tokyo Night Red)
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Global Screen & Base Elements ─────────────────────────────────────────── */
 Screen {
     background: #1a1b26;
     color: #c0caf5;
 }
 
+/* Scrollbar styling with Tokyo Night tones */
+Scrollbar {
+    background: #16161e;
+    color: #3b4261;
+}
+
+Scrollbar:hover {
+    background: #1f2335;
+    color: #7aa2f7;
+}
+
+/* ── Top Header Bar (Zellij Streamlined Top Ribbon) ────────────────────────── */
 HeaderBar {
     dock: top;
     height: 1;
@@ -17,14 +55,15 @@ HeaderBar {
     color: #c0caf5;
 }
 
-/* ── Header Bar (Zellij Streamlined Top Bar) ───────────────────────── */
 #header-bar {
     dock: top;
     height: 1;
+    width: 100%;
     background: #16161e;
     color: #c0caf5;
     layout: horizontal;
     padding: 0 1;
+    border-bottom: solid #24283b;
 }
 
 #brand-pill {
@@ -32,6 +71,7 @@ HeaderBar {
     text-style: bold;
     color: #7aa2f7;
     margin-right: 1;
+    padding: 0 1;
 }
 
 #session-pill {
@@ -41,6 +81,7 @@ HeaderBar {
     padding: 0 1;
     margin-right: 1;
     text-style: bold;
+    border: round #343b58;
 }
 
 #mode-badge {
@@ -52,31 +93,33 @@ HeaderBar {
     width: 1fr;
 }
 
-#mcp-indicator {
-    width: auto;
-    color: #9ece6a;
-    background: #1f2335;
-    padding: 0 1;
-    margin-right: 1;
-    text-style: bold;
-}
-
 #worker-count-pill {
     width: auto;
     color: #e0af68;
     background: #24283b;
     padding: 0 1;
+    margin-right: 1;
     text-style: bold;
+    border: round #343b58;
 }
 
-/* ── Interrupt Banner (Global Toast Alert) ───────────────────────── */
+#mcp-indicator {
+    width: auto;
+    color: #9ece6a;
+    background: #1f2335;
+    padding: 0 1;
+    text-style: bold;
+    border: round #292e42;
+}
+
+/* ── Interrupt & Toast Alerts (Global Toast & Banner) ──────────────────────── */
 #interrupt-banner {
     dock: top;
     height: auto;
     max-height: 5;
     display: none;
-    background: #292e42;
-    border-bottom: heavy #e0af68;
+    background: #24283b;
+    border: round #e0af68;
     color: #c0caf5;
     padding: 0 2;
     margin: 0;
@@ -111,10 +154,10 @@ HeaderBar {
 }
 
 .interrupt-priority-low {
-    color: #565f89;
+    color: #7982a9;
 }
 
-/* ── Workspace Split Layout ───────────────────────────────────────── */
+/* ── Main Workspace Split Layout ───────────────────────────────────────────── */
 #workspace-container {
     height: 1fr;
     width: 100%;
@@ -122,43 +165,101 @@ HeaderBar {
     background: #1a1b26;
 }
 
-/* ── Primary Agent Pane ──────────────────────────────────────────── */
+/* ── Smart Split: Coordinator Pane (Left) vs Workers Pane (Right) ──────────── */
+
+/* Coordinator Pane (#primary-pane) - Distinct Violet / Lavender Signature */
+#primary-pane {
+    height: 1fr;
+    width: 1fr;
+    min-width: 32;
+    background: #151622;
+    border-right: solid #292e42;
+    layout: vertical;
+    padding: 0;
+    margin: 0;
+}
+
+#primary-pane .terminal-header {
+    dock: top;
+    height: 1;
+    background: #1e1e2e;
+    color: #c0caf5;
+    padding: 0 1;
+    border-bottom: solid #bb9af7;
+}
+
+#primary-pane .terminal-toast {
+    dock: top;
+    height: auto;
+    max-height: 4;
+    background: #24283b;
+    border: round #bb9af7;
+    color: #c0caf5;
+    padding: 0 1;
+    display: none;
+}
+
+#primary-pane .terminal-toast.visible {
+    display: block;
+}
+
+#primary-pane .terminal-screen,
+#primary-pane TerminalScreenWidget {
+    height: 1fr;
+    width: 100%;
+    min-height: 15;
+    background: #13141f;
+    border: round #413d63;
+    padding: 0 1;
+    overflow-y: hidden;
+    overflow-x: hidden;
+}
+
+#primary-pane .terminal-screen:focus,
+#primary-pane TerminalScreenWidget:focus {
+    border: round #bb9af7;
+}
+
+#primary-pane .terminal-screen.mode-pty:focus,
+#primary-pane TerminalScreenWidget.mode-pty:focus {
+    border: round #bb9af7;
+}
+
+#primary-pane .terminal-screen.mode-normal:focus,
+#primary-pane TerminalScreenWidget.mode-normal:focus {
+    border: round #e0af68;
+}
+
+/* Legacy AgentPane fallback for mock/log streaming */
 .agent-pane {
     height: 1fr;
     width: 1fr;
-    border: round #3b4261;
+    border: round #3d3b58;
     background: #16161e;
     padding: 0;
     margin: 0;
 }
 
 .agent-pane:focus-within {
-    border: round #7aa2f7;
-}
-
-#primary-pane {
-    height: 1fr;
-    width: 1fr;
-    min-width: 30;
-    border-right: solid #3b4261;
+    border: round #bb9af7;
 }
 
 .pane-title-bar {
     dock: top;
     height: 1;
-    background: #1f2335;
-    color: #7aa2f7;
+    background: #1f1d2e;
+    color: #bb9af7;
     text-style: bold;
     padding: 0 1;
     width: 100%;
-    border-bottom: solid #3b4261;
+    border-bottom: solid #bb9af7;
 }
 
 .log-view {
     height: 1fr;
     scrollbar-size: 1 1;
     padding: 0 1;
-    background: #16161e;
+    background: #13141f;
 }
 
 .log-line {
@@ -168,7 +269,7 @@ HeaderBar {
 }
 
 .log-timestamp {
-    color: #565f89;
+    color: #7982a9;
 }
 
 .log-thought {
@@ -191,21 +292,24 @@ HeaderBar {
     color: #c0caf5;
 }
 
-/* ── Worker Terminal Panes & Tabs ────────────────────────────────── */
+/* ── Worker Windows (#workers-pane) - Distinct Sky Blue / Cyan Signature ──── */
 #workers-pane {
     height: 1fr;
     width: 1fr;
-    min-width: 30;
+    min-width: 32;
+    background: #16161e;
     layout: vertical;
 }
 
-WorkerTabBar {
+/* Zellij-inspired Tab Strip */
+WorkerTabBar, #worker-tab-bar {
     dock: top;
     height: 1;
     width: 100%;
     background: #16161e;
     color: #c0caf5;
     padding: 0 1;
+    border-bottom: solid #24283b;
 }
 
 #worker-tab-strip {
@@ -216,22 +320,25 @@ WorkerTabBar {
 
 .worker-tab-pill {
     width: auto;
-    min-width: 16;
+    min-width: 14;
     margin-right: 1;
     padding: 0 1;
     background: #1f2335;
     color: #7aa2f7;
+    border: round #292e42;
 }
 
 .worker-tab-pill.-active {
     background: #7aa2f7;
     color: #1a1b26;
     text-style: bold;
+    border: round #7aa2f7;
 }
 
 .worker-tab-pill:hover {
     background: #24283b;
-    color: #bb9af7;
+    color: #7dcfff;
+    border: round #3b4261;
 }
 
 .worker-new-pill {
@@ -240,11 +347,13 @@ WorkerTabBar {
     background: #1f2335;
     color: #9ece6a;
     text-style: bold;
+    border: round #292e42;
 }
 
 .worker-new-pill:hover {
     background: #24283b;
     color: #a6e3a1;
+    border: round #9ece6a;
 }
 
 #worker-switcher {
@@ -258,34 +367,37 @@ WorkerTabBar {
     layout: vertical;
     padding: 0;
     margin: 0;
-    background: #0f141c;
+    background: #16161e;
 }
 
-.terminal-header {
+/* Worker Tab Top Status Header */
+#workers-pane .terminal-header {
     height: 1;
     dock: top;
-    background: #1f2335;
+    background: #1a2030;
     color: #c0caf5;
     padding: 0 1;
     border-bottom: solid #3b4261;
 }
 
-.terminal-toast {
+#workers-pane .terminal-toast {
     dock: top;
     height: auto;
     max-height: 4;
-    background: #292e42;
-    border-bottom: solid #e0af68;
+    background: #24283b;
+    border: round #e0af68;
     color: #c0caf5;
     padding: 0 1;
     display: none;
 }
 
-.terminal-toast.visible {
+#workers-pane .terminal-toast.visible {
     display: block;
 }
 
-.terminal-screen {
+/* Worker Terminal Screen Canvas */
+#workers-pane .terminal-screen,
+#workers-pane TerminalScreenWidget {
     height: 1fr;
     width: 100%;
     min-height: 15;
@@ -296,15 +408,46 @@ WorkerTabBar {
     overflow-x: hidden;
 }
 
-.terminal-screen:focus {
-    border: round #e0af68;
-}
-
-.terminal-screen.mode-pty:focus {
+#workers-pane .terminal-screen:focus,
+#workers-pane TerminalScreenWidget:focus {
     border: round #7aa2f7;
 }
 
-.terminal-screen.mode-normal:focus {
+#workers-pane .terminal-screen.mode-pty:focus,
+#workers-pane TerminalScreenWidget.mode-pty:focus {
+    border: round #7aa2f7;
+}
+
+#workers-pane .terminal-screen.mode-normal:focus,
+#workers-pane TerminalScreenWidget.mode-normal:focus {
+    border: round #e0af68;
+}
+
+/* Generic Fallback for Terminal Screens & Controls */
+.terminal-screen,
+TerminalScreenWidget {
+    height: 1fr;
+    width: 100%;
+    min-height: 15;
+    background: #0f141c;
+    border: round #3b4261;
+    padding: 0 1;
+    overflow-y: hidden;
+    overflow-x: hidden;
+}
+
+.terminal-screen:focus,
+TerminalScreenWidget:focus {
+    border: round #7aa2f7;
+}
+
+.terminal-screen.mode-pty:focus,
+TerminalScreenWidget.mode-pty:focus {
+    border: round #7aa2f7;
+}
+
+.terminal-screen.mode-normal:focus,
+TerminalScreenWidget.mode-normal:focus {
     border: round #e0af68;
 }
 
@@ -312,17 +455,17 @@ WorkerTabBar {
     height: 1;
     dock: bottom;
     background: #16161e;
-    color: #565f89;
+    color: #7982a9;
     padding: 0 1;
     border-top: solid #1f2335;
 }
 
 .terminal-helper-text {
     width: 100%;
-    color: #565f89;
+    color: #7982a9;
 }
 
-/* ── Bottom Bar (Interactive Multi-Segment Status Bar) ───────────── */
+/* ── Bottom Bar (Zellij / Helix Multi-Segment Statusline) ───────────────────── */
 BottomBar {
     dock: bottom;
     height: 1;
@@ -338,6 +481,7 @@ BottomBar {
     color: #c0caf5;
     layout: horizontal;
     padding: 0 1;
+    border-top: solid #24283b;
 }
 
 #bottom-bar-container {
@@ -374,33 +518,43 @@ BottomBar {
     width: auto;
     margin-right: 1;
     padding: 0 1;
-    background: #24283b;
+    background: #1f2335;
     color: #c0caf5;
+    border: round #24283b;
 }
 
 .action-pill:hover {
-    background: #3b4261;
+    background: #2f354d;
     color: #7aa2f7;
     text-style: bold;
+    border: round #7aa2f7;
 }
 
 #bottom-status-pill {
     width: auto;
     color: #7aa2f7;
     text-style: bold;
+    padding: 0 1;
 }
 
-/* ── Directive Injection Modal ────────────────────────────────────── */
+/* ── Common Modal Screen Overlays ──────────────────────────────────────────── */
+ModalScreen {
+    align: center middle;
+    background: rgba(15, 17, 26, 0.85);
+}
+
+/* ── Directive Modal Dialog (Task Dispatcher) ──────────────────────────────── */
 #directive-modal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 17, 26, 0.85);
 }
 
 #directive-modal-dialog {
-    width: 72;
+    width: 74;
     height: auto;
-    border: thick #bb9af7;
-    background: #1a1b26;
+    max-height: 90%;
+    border: round #bb9af7;
+    background: #16161e;
     padding: 1 2;
 }
 
@@ -411,11 +565,17 @@ BottomBar {
     margin-bottom: 1;
 }
 
-.directive-field {
+#directive-subtitle {
+    text-align: center;
+    color: #7982a9;
     margin-bottom: 1;
 }
 
-.directive-label {
+.directive-field, .modal-field {
+    margin-bottom: 1;
+}
+
+.directive-label, .modal-label {
     text-style: bold;
     color: #7aa2f7;
     margin-bottom: 0;
@@ -429,31 +589,34 @@ BottomBar {
 
 #directive-buttons Button {
     margin: 0 1;
+    border: round #3b4261;
 }
 
 #btn-inject {
     background: #7aa2f7;
     color: #1a1b26;
     text-style: bold;
+    border: round #7aa2f7;
 }
 
 #btn-cancel {
     background: #24283b;
     color: #c0caf5;
+    border: round #3b4261;
 }
 
-/* ── Agent Configuration Modal ───────────────────────────────────── */
+/* ── Agent Configuration Modal (Antigravity CLI Style) ─────────────────────── */
 AgentConfigModal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 17, 26, 0.85);
 }
 
 #agent-config-dialog {
-    width: 90;
+    width: 92;
     max-width: 96%;
     height: 32;
     max-height: 92%;
-    border: thick #7aa2f7;
+    border: round #7aa2f7;
     background: #16161e;
     padding: 1 2;
 }
@@ -476,11 +639,11 @@ AgentConfigModal {
     width: 1fr;
     background: #1a1b26;
     color: #c0caf5;
-    border: tall #3b4261;
+    border: round #3b4261;
 }
 
 #config-search-input:focus {
-    border: tall #7aa2f7;
+    border: round #7aa2f7;
     background: #24283b;
     color: #ffffff;
 }
@@ -504,24 +667,24 @@ AgentConfigModal {
     height: 1;
     width: 100%;
     text-align: center;
-    color: #565f89;
+    color: #7982a9;
     background: #1a1b26;
     margin-top: 1;
 }
 
-/* ── Help Modal ──────────────────────────────────────────────────── */
+/* ── Help Modal Dialog ─────────────────────────────────────────────────────── */
 #help-modal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 17, 26, 0.85);
 }
 
 #help-dialog {
-    width: 70;
+    width: 72;
     height: auto;
     max-height: 85%;
-    border: thick #7aa2f7;
+    border: round #7aa2f7;
     padding: 1 2;
-    background: #1a1b26;
+    background: #16161e;
 }
 
 #help-title {
@@ -538,7 +701,7 @@ AgentConfigModal {
     padding: 0 1;
 }
 
-/* ── Session Picker Screen ───────────────────────────────────────── */
+/* ── Session Picker Screen ─────────────────────────────────────────────────── */
 #session-picker-container {
     width: 100%;
     height: 100%;
@@ -547,10 +710,10 @@ AgentConfigModal {
 }
 
 #picker-panel {
-    width: 72;
+    width: 74;
     height: auto;
     max-height: 80%;
-    border: thick #7aa2f7;
+    border: round #7aa2f7;
     padding: 1 2;
     background: #16161e;
 }
@@ -565,7 +728,7 @@ AgentConfigModal {
 
 #picker-subtitle {
     text-align: center;
-    color: #565f89;
+    color: #7982a9;
     margin-bottom: 1;
     width: 100%;
 }
@@ -582,25 +745,31 @@ AgentConfigModal {
     padding: 0 1;
 }
 
+#session-list > .option-list--option.-highlight {
+    background: #24283b;
+    color: #7aa2f7;
+    text-style: bold;
+}
+
 #picker-footer {
     text-align: center;
-    color: #565f89;
+    color: #7982a9;
     margin-top: 1;
     width: 100%;
 }
 
-/* ── New Session Modal ───────────────────────────────────────────── */
+/* ── New Session Modal Dialog ──────────────────────────────────────────────── */
 #new-session-modal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(15, 17, 26, 0.85);
 }
 
 #new-session-dialog {
-    width: 62;
+    width: 64;
     height: auto;
-    border: thick #7aa2f7;
+    border: round #7aa2f7;
     padding: 1 2;
-    background: #1a1b26;
+    background: #16161e;
 }
 
 #modal-title {
@@ -611,14 +780,16 @@ AgentConfigModal {
     width: 100%;
 }
 
-.modal-field {
-    margin-bottom: 1;
+#session-name-input, #agent-count-input, #session-goal-input {
+    border: round #3b4261;
+    background: #1a1b26;
+    color: #c0caf5;
 }
 
-.modal-label {
-    margin-bottom: 0;
-    color: #7aa2f7;
-    text-style: bold;
+#session-name-input:focus, #agent-count-input:focus, #session-goal-input:focus {
+    border: round #7aa2f7;
+    background: #24283b;
+    color: #ffffff;
 }
 
 #modal-buttons {
@@ -629,15 +800,23 @@ AgentConfigModal {
 
 #modal-buttons Button {
     margin: 0 1;
+    border: round #3b4261;
 }
 
-/* ── Directive Editor Modal ─────────────────────────────────────── */
+#btn-create {
+    background: #9ece6a;
+    color: #1a1b26;
+    text-style: bold;
+    border: round #9ece6a;
+}
+
+/* ── Directive Editor Modal (In-App Markdown Editor) ───────────────────────── */
 #directive-editor-dialog {
-    width: 86;
+    width: 88;
     max-width: 95%;
-    height: 24;
+    height: 26;
     max-height: 90%;
-    border: thick #bb9af7;
+    border: round #bb9af7;
     background: #16161e;
     padding: 1 2;
 }
@@ -656,6 +835,11 @@ AgentConfigModal {
     border: round #3b4261;
 }
 
+#directive-text-area:focus {
+    border: round #bb9af7;
+    background: #13141f;
+}
+
 #directive-editor-buttons {
     height: 3;
     margin-top: 1;
@@ -664,4 +848,74 @@ AgentConfigModal {
 
 #directive-editor-buttons Button {
     margin: 0 1;
+    border: round #3b4261;
+}
+
+#btn-save-directive {
+    background: #9ece6a;
+    color: #1a1b26;
+    text-style: bold;
+    border: round #9ece6a;
+}
+
+#btn-open-ext {
+    background: #7aa2f7;
+    color: #1a1b26;
+    text-style: bold;
+    border: round #7aa2f7;
+}
+
+#btn-cancel-directive {
+    background: #24283b;
+    color: #c0caf5;
+    border: round #3b4261;
+}
+
+/* ── Generic Form Controls & Textual Widgets (Rounded & Styled) ───────────── */
+Input {
+    border: round #3b4261;
+    background: #1a1b26;
+    color: #c0caf5;
+}
+
+Input:focus {
+    border: round #7aa2f7;
+    background: #24283b;
+    color: #ffffff;
+}
+
+Select {
+    border: round #3b4261;
+    background: #1f2335;
+    color: #c0caf5;
+}
+
+Select:focus {
+    border: round #7aa2f7;
+    color: #ffffff;
+}
+
+OptionList {
+    border: round #3b4261;
+    background: #1f2335;
+    color: #c0caf5;
+}
+
+OptionList:focus {
+    border: round #7aa2f7;
+}
+
+Button {
+    border: round #3b4261;
+    background: #24283b;
+    color: #c0caf5;
+}
+
+Button:focus {
+    border: round #7aa2f7;
+    color: #ffffff;
+}
+
+Button:hover {
+    background: #343b58;
 }
