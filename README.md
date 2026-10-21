@@ -20,6 +20,7 @@
   - `check_coordinator_alarms()`: Inspect queued wake-up alarms and worker completion events.
   - `get_agent_profile(agent_id)`: Query agent role, principles, instructions, and `./agent` config.
 - **Event-Driven Coordinator Alarm Pipeline** — Single-threaded debounced watcher detecting worker transitions to IDLE prompts without CPU exhaustion or continuous timer churn, displaying visual header badges (`⚡ Worker-X Finished (Idle)` or `🚨 Assistance Needed`), and injecting event summaries into coordinator terminal for immediate reasoning.
+- **Externalized Directives & Hot-Reload** — Agent rules, roles, and instructions are persisted cleanly as Markdown files (`~/.mind/directives/coordinator.md` and `~/.mind/directives/workers/agy1.md` .. `agyN.md`). Includes an event-driven background file watcher with automatic hot-reloading upon external edits and direct shortcuts (`o` / `Ctrl+O` for external editor, `d` / `Ctrl+D` for in-app modal editor).
 - **Direct Interactive Control** — Switch tabs, click into any worker terminal, and type directly into `agy` at any time.
 - **Instant Visual Feedback** — MCP-injected directives immediately trigger visual toast badges and alert banners in the TUI.
 
@@ -102,7 +103,9 @@ mind register-mcp
 | `Tab` / `Shift+Tab` | Cycle focus between panes |
 | `Click` inside terminal | Focus worker terminal and type directly |
 | `Ctrl+C` | Send interrupt signal to active terminal process |
-| `m` | Trigger mock interrupt directive injection test |
+| `m` / `Ctrl+M` | Open Directive Injection Modal |
+| `o` / `Ctrl+O` | Open directive file in system default editor |
+| `d` / `Ctrl+D` | Open in-app directive editor modal (`DirectiveEditorModal`) |
 | `s` | Toggle split layout (side-by-side ↔ stacked) |
 | `n` | Add new worker agent tab dynamically |
 | `Escape` | Go back / dismiss modals |

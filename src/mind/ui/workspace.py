@@ -31,8 +31,15 @@ from mind.state.mock_data import (
     get_random_interrupt_message,
 )
 from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, MessagePriority
+from mind.core.directives import (
+    load_directive,
+    open_directive_in_editor,
+    resolve_directive_path,
+    save_directive,
+)
 from mind.ui.agent_config_modal import AgentConfigModal
 from mind.ui.bottom_bar import BottomBar
+from mind.ui.directive_editor_modal import DirectiveEditorModal
 from mind.ui.directive_modal import DirectiveModal
 from mind.ui.header_bar import HeaderBar
 from mind.ui.interrupt_banner import InterruptBanner
@@ -68,6 +75,10 @@ class WorkspaceScreen(Screen):
         ("ctrl+shift+c", "copy_to_clipboard", "Copy"),
         ("y", "copy_to_clipboard", "Yank / Copy"),
         ("ctrl+m", "open_directive_modal", "Inject Directive"),
+        ("o", "open_directive_external", "Open Directive File"),
+        ("ctrl+o", "open_directive_external", "Open Directive File"),
+        ("d", "open_directive_editor", "Edit Directive In-App"),
+        ("ctrl+d", "open_directive_editor", "Edit Directive In-App"),
         ("e", "open_agent_config_modal", "Configure Agent"),
         ("ctrl+e", "open_agent_config_modal", "Configure Agent"),
         ("ctrl+c", "interrupt_active", "Interrupt"),
@@ -213,7 +224,23 @@ class WorkspaceScreen(Screen):
         start_background_mcp_server(host="127.0.0.1", port=8765)
         self._terminal_manager.add_notification_listener(self._on_mcp_directive_injected)
         self._terminal_manager.add_alarm_listener(self._on_coordinator_alarm_received)
+        self._terminal_manager.add_directive_listener(self._on_directive_reloaded)
         self.set_timer(0.05, self._auto_focus_terminal)
+
+    def on_unmount(self) -> None:
+        """Cleanup listeners when workspace unmounts."""
+        try:
+            self._terminal_manager.remove_directive_listener(self._on_directive_reloaded)
+        except Exception:
+            pass
+
+    def _on_directive_reloaded(self, target: str, content: str, updated_workers: list[Any]) -> None:
+        """Handle directive hot-reload notification."""
+        count = len(updated_workers)
+        msg = f"⚡ Directive hot-reloaded: {target}"
+        if count:
+            msg += f" (applied to {count} session{'s' if count > 1 else ''})"
+        self._safe_notify(msg, title="Directives Hot-Reload", severity="information", timeout=3.0)
 
     def _on_coordinator_alarm_received(self, event: dict[str, Any]) -> None:
         """Handle event-driven wake-up alarms from worker terminals."""
@@ -321,6 +348,16 @@ class WorkspaceScreen(Screen):
     def on_open_directive_requested(self, event: TerminalScreenWidget.OpenDirectiveRequested) -> None:
         """Handle directive modal request triggered while in PTY mode."""
         self.action_open_directive_modal()
+
+    @on(TerminalScreenWidget.OpenDirectiveFileRequested)
+    def on_open_directive_file_requested(self, event: TerminalScreenWidget.OpenDirectiveFileRequested) -> None:
+        """Handle opening directive in external editor triggered while in PTY mode."""
+        self.action_open_directive_external()
+
+    @on(TerminalScreenWidget.OpenDirectiveEditorRequested)
+    def on_open_directive_editor_requested(self, event: TerminalScreenWidget.OpenDirectiveEditorRequested) -> None:
+        """Handle opening in-app directive editor modal triggered while in PTY mode."""
+        self.action_open_directive_editor()
 
     @on(TerminalScreenWidget.OpenConfigRequested)
     def on_open_config_requested(self, event: TerminalScreenWidget.OpenConfigRequested) -> None:
@@ -550,6 +587,44 @@ class WorkspaceScreen(Screen):
         from mind.ui.help_modal import HelpModal
 
         self.app.push_screen(HelpModal())
+
+    def _resolve_active_directive_target(self) -> str:
+        """Resolve directive target ('coordinator', 'agy1', etc.) based on currently focused pane or tab."""
+        coord_tab = getattr(self, "_coordinator_tab", None)
+        if coord_tab and coord_tab.has_focus_within:
+            return "coordinator"
+
+        worker = self._terminal_manager.get_worker(str(self._active_worker_id))
+        if worker and worker.assigned_agent:
+            return worker.assigned_agent
+        return f"agy{self._active_worker_id}"
+
+    def action_open_directive_external(self) -> None:
+        """Open the active agent's directive Markdown file in the system default editor."""
+        target = self._resolve_active_directive_target()
+        path = open_directive_in_editor(target)
+        self._safe_notify(
+            f"📄 Opened Directive: {path.name}",
+            title="External Editor",
+            severity="information",
+            timeout=3.0,
+        )
+
+    def action_open_directive_editor(self) -> None:
+        """Open the in-app modal directive editor for the active agent."""
+        target = self._resolve_active_directive_target()
+        content = load_directive(target)
+        self.app.push_screen(
+            DirectiveEditorModal(target=target, current_content=content),
+            callback=self._on_directive_editor_closed,
+        )
+
+    def _on_directive_editor_closed(self, result: str | None) -> None:
+        """Callback when directive is saved or dismissed from DirectiveEditorModal."""
+        if result is not None:
+            target = self._resolve_active_directive_target()
+            self._terminal_manager.apply_directive_update(target, result, source="modal")
+            self._safe_notify(f"✓ Directive saved for {target}", severity="information", timeout=2.5)
 
     def action_open_directive_modal(self) -> None:
         """Open Agent Assignment & Task Dispatcher modal."""

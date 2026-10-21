@@ -573,6 +573,79 @@ class TerminalManager:
         self._global_notification_listeners: list[Callable[[WorkerSession, str], None]] = []
         from mind.core.alarm_pipeline import CoordinatorAlarmPipeline
         self._alarm_pipeline = CoordinatorAlarmPipeline(manager=self)
+        from mind.core.directives import DirectivesWatcher
+        self._directives_watcher = DirectivesWatcher(poll_interval=0.5)
+        self._directives_watcher.add_listener(self._on_directive_file_changed)
+        self._directives_watcher.start()
+        self._directive_listeners: list[Callable[[str, str, list[WorkerSession]], None]] = []
+
+    @property
+    def directives_watcher(self):
+        """Retrieve the directives watcher instance."""
+        return self._directives_watcher
+
+    def add_directive_listener(self, listener: Callable[[str, str, list[WorkerSession]], None]) -> None:
+        """Register a callback for directive updates (hot-reload or internal saves)."""
+        with self._lock:
+            if listener not in self._directive_listeners:
+                self._directive_listeners.append(listener)
+
+    def remove_directive_listener(self, listener: Callable[[str, str, list[WorkerSession]], None]) -> None:
+        """Unregister a directive update listener."""
+        with self._lock:
+            if listener in self._directive_listeners:
+                self._directive_listeners.remove(listener)
+
+    def _on_directive_file_changed(self, target: str, path: Path, content: str) -> None:
+        """Handle directive file change detected by DirectivesWatcher."""
+        self.apply_directive_update(target, content, source="external")
+
+    def apply_directive_update(
+        self,
+        target: str,
+        content: str,
+        source: str = "internal",
+    ) -> list[WorkerSession]:
+        """Apply directive content update to matching coordinator or worker sessions.
+
+        Returns list of WorkerSessions whose instructions were updated.
+        """
+        updated: list[WorkerSession] = []
+        target_norm = target.strip().lower()
+
+        with self._lock:
+            for w in self._workers.values():
+                matches = False
+                is_coord = w.role == "coordinator" or str(w.worker_id).lower() in ("coordinator", "primary")
+                if target_norm in ("coordinator", "primary", "0"):
+                    if is_coord:
+                        matches = True
+                else:
+                    if not is_coord:
+                        if w.assigned_agent and w.assigned_agent.lower() == target_norm:
+                            matches = True
+                        elif f"agy{w.worker_id}".lower() == target_norm:
+                            matches = True
+                        elif str(w.worker_id).lower() == target_norm:
+                            matches = True
+                        elif w.name and w.name.lower() == target_norm:
+                            matches = True
+
+                if matches:
+                    w.instructions = content
+                    if hasattr(w, "profile") and w.profile is not None:
+                        w.profile.instructions = content
+                    updated.append(w)
+
+            listeners = list(self._directive_listeners)
+
+        for listener in listeners:
+            try:
+                listener(target, content, updated)
+            except Exception as e:
+                pass
+
+        return updated
 
     @property
     def alarm_pipeline(self):
@@ -790,9 +863,11 @@ class TerminalManager:
         return discover_agent_slots()
 
     def stop_all(self) -> None:
-        """Terminate all worker processes and stop alarm pipeline."""
+        """Terminate all worker processes and stop alarm pipeline and directives watcher."""
         if hasattr(self, "_alarm_pipeline") and self._alarm_pipeline:
             self._alarm_pipeline.stop()
+        if hasattr(self, "_directives_watcher") and self._directives_watcher:
+            self._directives_watcher.stop()
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()

@@ -10,19 +10,26 @@ from mind.core.alarm_pipeline import (
     is_idle_prompt,
 )
 from mind.core.directives import (
+    DirectivesWatcher,
     ensure_default_directives,
+    extract_target_from_path,
     get_coordinator_directive_path,
     get_directives_dir,
+    get_directives_watcher,
     get_worker_directive_path,
     load_directive,
+    open_directive_in_editor,
     resolve_directive_path,
     save_directive,
+    start_directives_watcher,
+    stop_directives_watcher,
 )
 from mind.core.terminal_manager import TerminalManager, WorkerProcessState
 from mind.mcp.server import create_mcp_server
 from mind.state.mock_data import get_mock_agents
 from mind.ui.agent_config_modal import AgentConfigModal
-from mind.ui.terminal_tab import WorkerTerminalTab
+from mind.ui.directive_editor_modal import DirectiveEditorModal
+from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTerminalTab
 from mind.ui.workspace import WorkspaceScreen
 
 
@@ -265,4 +272,202 @@ def test_coordinator_alarm_badge_and_injection() -> None:
     assert len(injected_texts) == 2
     assert "Assistance Needed" in injected_texts[1][0]
     assert "Deadlock detected in worker 2" in injected_texts[1][0]
+    TerminalManager.reset()
+
+
+def test_extract_target_from_path() -> None:
+    """extract_target_from_path maps directive filenames to target agent identifiers."""
+    assert extract_target_from_path(Path("~/.mind/directives/coordinator.md")) == "coordinator"
+    assert extract_target_from_path(Path("~/.mind/directives/workers/agy1.md")) == "agy1"
+    assert extract_target_from_path(Path("~/.mind/directives/workers/agy2.md")) == "agy2"
+    assert extract_target_from_path(Path("~/.mind/directives/workers/worker-3.md")) == "agy3"
+    assert extract_target_from_path("coordinator.md") == "coordinator"
+    assert extract_target_from_path("agy5.md") == "agy5"
+
+
+def test_directives_watcher_external_modification_detection(tmp_path: Path) -> None:
+    """DirectivesWatcher detects external edits to coordinator and worker markdown files."""
+    import time
+
+    dirs = tmp_path / "directives"
+    workers_dir = dirs / "workers"
+    workers_dir.mkdir(parents=True)
+
+    coord_file = dirs / "coordinator.md"
+    coord_file.write_text("# Initial Coordinator Rules\nStand by.", encoding="utf-8")
+    worker1_file = workers_dir / "agy1.md"
+    worker1_file.write_text("# Initial Worker Rules\nWait for tasks.", encoding="utf-8")
+
+    watcher = DirectivesWatcher(directives_dir=dirs, poll_interval=0.1)
+
+    # Initial check: no changes detected yet
+    assert len(watcher.check_for_changes()) == 0
+
+    # 1. Simulate external edit to coordinator.md
+    time.sleep(0.05)
+    coord_file.write_text("# Updated Coordinator Rules\nDecompose tasks dynamically.", encoding="utf-8")
+
+    changes = watcher.check_for_changes()
+    assert len(changes) == 1
+    assert changes[0][0] == "coordinator"
+    assert "Decompose tasks dynamically" in changes[0][2]
+
+    # Subsequent check without changes returns empty
+    assert len(watcher.check_for_changes()) == 0
+
+    # 2. Simulate external edit to worker agy1.md
+    time.sleep(0.05)
+    worker1_file.write_text("# Updated Worker 1 Rules\nExecute build and run pytest.", encoding="utf-8")
+
+    changes2 = watcher.check_for_changes()
+    assert len(changes2) == 1
+    assert changes2[0][0] == "agy1"
+    assert "Execute build and run pytest" in changes2[0][2]
+
+    # 3. Simulate adding a brand new worker file (agy2.md) externally
+    time.sleep(0.05)
+    worker2_file = workers_dir / "agy2.md"
+    worker2_file.write_text("# Brand New Worker 2 Rules\nMonitor memory usage.", encoding="utf-8")
+
+    changes3 = watcher.check_for_changes()
+    assert len(changes3) == 1
+    assert changes3[0][0] == "agy2"
+    assert "Monitor memory usage" in changes3[0][2]
+
+    # Stop watcher
+    watcher.stop()
+
+
+def test_terminal_manager_hot_reload_and_directive_listeners(tmp_path: Path, monkeypatch) -> None:
+    """TerminalManager updates session instructions on directive change and notifies listeners."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    TerminalManager.reset()
+    mgr = TerminalManager.get_instance()
+
+    # Create coordinator and worker
+    coord = mgr.create_worker("coordinator", role="coordinator", autostart=False)
+    worker1 = mgr.create_worker("1", assigned_agent="agy1", autostart=False)
+
+    listener_events = []
+    def on_directive_updated(target: str, content: str, updated_sessions: list):
+        listener_events.append((target, content, updated_sessions))
+
+    mgr.add_directive_listener(on_directive_updated)
+
+    # Apply directive update to coordinator
+    new_coord_text = "# Hot-Reloaded Coordinator Directive\nActively orchestrate workers."
+    updated_c = mgr.apply_directive_update("coordinator", new_coord_text, source="external")
+    assert len(updated_c) == 1
+    assert updated_c[0] is coord
+    assert coord.instructions == new_coord_text
+    assert coord.profile.instructions == new_coord_text
+
+    # Apply directive update to agy1
+    new_worker_text = "# Hot-Reloaded Worker 1 Directive\nExecute deterministic git commits."
+    updated_w = mgr.apply_directive_update("agy1", new_worker_text, source="external")
+    assert len(updated_w) == 1
+    assert updated_w[0] is worker1
+    assert worker1.instructions == new_worker_text
+    assert worker1.profile.instructions == new_worker_text
+
+    # Verify listener was called for both
+    assert len(listener_events) == 2
+    assert listener_events[0][0] == "coordinator"
+    assert listener_events[1][0] == "agy1"
+
+    # Clean up
+    mgr.remove_directive_listener(on_directive_updated)
+    TerminalManager.reset()
+
+
+def test_directive_editor_modal_lifecycle(tmp_path: Path, monkeypatch) -> None:
+    """DirectiveEditorModal displays current content, allows edits, and saves to disk."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    modal = DirectiveEditorModal(target="agy3", current_content="# Original agy3 Directive")
+    assert modal.target == "agy3"
+    assert "Original agy3 Directive" in modal.current_content
+
+    # Simulate user typing new text
+    modal.text_area = type("DummyTextArea", (), {"text": "# Modified agy3 Rules via Modal\nKeep tests green."})()
+
+    dismiss_results = []
+    modal.dismiss = lambda res: dismiss_results.append(res)
+
+    modal.action_save_directive_content()
+    assert len(dismiss_results) == 1
+    assert "Modified agy3 Rules via Modal" in dismiss_results[0]
+
+    # Verify disk persistence
+    saved_text = load_directive("agy3")
+    assert "Keep tests green." in saved_text
+
+
+def test_open_directive_in_editor(tmp_path: Path, monkeypatch) -> None:
+    """open_directive_in_editor correctly resolves path and launches system editor."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    ensure_default_directives()
+
+    opened_paths = []
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda p: opened_paths.append(str(p)))
+    else:
+        import subprocess
+        monkeypatch.setattr(subprocess, "Popen", lambda cmd: opened_paths.append(str(cmd[-1])))
+
+    res_path = open_directive_in_editor("agy1")
+    assert res_path.exists()
+    assert "agy1.md" in res_path.name
+    assert len(opened_paths) == 1
+    assert "agy1.md" in opened_paths[0]
+
+
+def test_workspace_directive_shortcuts_and_messages(tmp_path: Path, monkeypatch) -> None:
+    """WorkspaceScreen defines directive shortcuts ('o', 'Ctrl+O', 'd', 'Ctrl+D') and message reactions."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    ws = WorkspaceScreen(session_name="test-shortcuts-session", agent_count=2, goal="")
+
+    # Verify bindings include directive actions
+    binding_keys = [b[0] for b in ws.BINDINGS]
+    assert "o" in binding_keys
+    assert "ctrl+o" in binding_keys
+    assert "d" in binding_keys
+    assert "ctrl+d" in binding_keys
+
+    # Verify active directive target resolution
+    target = ws._resolve_active_directive_target()
+    assert target in ("agy1", "1")
+
+    # Simulate terminal screen key events
+    dummy_session = TerminalManager.get_instance().create_worker("test-w", autostart=False)
+    screen_widget = TerminalScreenWidget(worker_session=dummy_session, mode="PTY")
+
+    emitted_messages = []
+    screen_widget.post_message = lambda msg: emitted_messages.append(msg)
+
+    # Test Ctrl+O emission
+    class DummyKeyEvent:
+        def __init__(self, key: str):
+            self.key = key
+            self.character = ""
+        def stop(self):
+            pass
+        def prevent_default(self):
+            pass
+
+    screen_widget.on_key(DummyKeyEvent("ctrl+o"))
+    assert len(emitted_messages) == 1
+    assert isinstance(emitted_messages[0], TerminalScreenWidget.OpenDirectiveFileRequested)
+
+    # Test Ctrl+D emission
+    screen_widget.on_key(DummyKeyEvent("ctrl+d"))
+    assert len(emitted_messages) == 2
+    assert isinstance(emitted_messages[1], TerminalScreenWidget.OpenDirectiveEditorRequested)
     TerminalManager.reset()

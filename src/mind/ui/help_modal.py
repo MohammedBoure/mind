@@ -33,8 +33,9 @@ _HELP_TEXT = """\
 [bold #7aa2f7]Tab[/]              Toggle focus between Primary Agent coordinator & Worker PTY
 
 [bold underline #bb9af7]Inter-Agent & Directive Injection[/]
-[bold #7aa2f7]m[/]                Open Directive Injection Modal (NORMAL mode)
-[bold #7aa2f7]Ctrl+M[/]           Open Directive Injection Modal (Any mode)
+[bold #7aa2f7]m / Ctrl+M[/]       Open Directive Injection Modal (NORMAL / Any mode)
+[bold #7aa2f7]d / Ctrl+D[/]       Open In-App Directive Modal Editor (NORMAL / Any mode)
+[bold #7aa2f7]o / Ctrl+O[/]       Open Directive in System Default Editor (NORMAL / Any mode)
 [bold #7aa2f7]Ctrl+C[/]           Send immediate interrupt signal (SIGINT) to active Worker
 
 [bold underline #bb9af7]Agent Configuration & Tuning[/]

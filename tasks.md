@@ -60,7 +60,7 @@
 - إرسال تنبيه فوري للمنسق عبر أدوات MCP وتوليد شارة بصرية مميزة في ترويسة نافذة المنسق (`⚡ Worker-X Finished (Idle)` أو `🚨 Assistance Needed`).
 - حقن ملخص الحدث في طرفية المنسق ليقوم بالاستنتاج والخطوة التالية فقط عند اكتمال العمل.
 
-# 9 : medium
+# 9 : medium [COMPLETED]
 إدارة التوجيهات والقواعد السلوكية الخارجية وتحديثها المباشر (Externalized Directives & Hot-Reload).
 - تطوير وحدة `src/mind/core/directives.py` لحفظ القواعد وسلوك الوكلاء في ملفات Markdown واضحة في مسارات يسهل الوصول إليها:
   * المنسق: `~/.mind/directives/coordinator.md`

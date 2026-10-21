@@ -98,6 +98,14 @@ class TerminalScreenWidget(Widget):
         """Emitted when user triggers directive modal (e.g. via Ctrl+M) from PTY mode."""
         pass
 
+    class OpenDirectiveFileRequested(Message):
+        """Emitted when user triggers opening directive in external editor (e.g. via Ctrl+O) from PTY mode."""
+        pass
+
+    class OpenDirectiveEditorRequested(Message):
+        """Emitted when user triggers in-app directive modal editor (e.g. via Ctrl+D) from PTY mode."""
+        pass
+
     class OpenConfigRequested(Message):
         """Emitted when user triggers agent config modal (e.g. via Ctrl+E) from PTY mode."""
         pass
@@ -469,7 +477,21 @@ class TerminalScreenWidget(Widget):
             self.post_message(self.OpenDirectiveRequested())
             return
 
-        # 4. Ctrl+E: Open Agent Configuration Modal directly
+        # 4. Ctrl+O: Open Directive File in External Editor
+        if key_name == "ctrl+o":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.OpenDirectiveFileRequested())
+            return
+
+        # 5. Ctrl+D: Open In-App Directive Modal Editor
+        if key_name == "ctrl+d":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.OpenDirectiveEditorRequested())
+            return
+
+        # 6. Ctrl+E: Open Agent Configuration Modal directly
         if key_name == "ctrl+e":
             event.stop()
             event.prevent_default()
