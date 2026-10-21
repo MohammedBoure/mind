@@ -136,7 +136,7 @@ mind/
 | [`src/mind/app.py`](file:///C:/Users/moham/Desktop/mind/src/mind/app.py) | Main application class (`MindApp`) managing screens and top-level lifecycle. |
 | [`src/mind/events.py`](file:///C:/Users/moham/Desktop/mind/src/mind/events.py) | Decoupled Textual event definitions for UI messaging. |
 | [`src/mind/cli/`](file:///C:/Users/moham/Desktop/mind/src/mind/cli/) | Click-based CLI entrypoints implementing `mind`, `mind new`, `mind mcp`, and `mind register-mcp`. |
-| [`src/mind/core/`](file:///C:/Users/moham/Desktop/mind/src/mind/core/) | Core infrastructure including pseudoterminal abstraction (`BasePtyProcess`), virtual terminal buffer (`TerminalBuffer`), agent discovery, directives hot-reloading, and terminal manager orchestrator. |
+| [`src/mind/core/`](file:///C:/Users/moham/Desktop/mind/src/mind/core/) | Core infrastructure including pseudoterminal abstraction (`BasePtyProcess`), virtual terminal buffer (`TerminalBuffer`), dynamic agent discovery and slot isolation engine (`agent_discovery.py`), directives hot-reloading, account quota monitor (`usage_monitor.py`), and terminal manager orchestrator. |
 | [`src/mind/core/auth/`](file:///C:/Users/moham/Desktop/mind/src/mind/core/auth/) | Modular authentication system: BOM sanitization, token claim extraction, Windows Credential Manager & POSIX keyrings, mutex synchronization, and slot isolation. |
 | [`src/mind/mcp/`](file:///C:/Users/moham/Desktop/mind/src/mind/mcp/) | Embedded Model Context Protocol (MCP) server providing coordinator agent control tools via SSE and Stdio transports. |
 | [`src/mind/state/`](file:///C:/Users/moham/Desktop/mind/src/mind/state/) | Operational domain models, agent metadata, and state definitions. |

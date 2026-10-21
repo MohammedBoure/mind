@@ -1,6 +1,18 @@
 """Core terminal management and process multiplexing primitives."""
 
-from mind.core.agent_discovery import discover_system_agents, get_agent_preset_config
+from mind.core.agent_discovery import (
+    SlotInfo,
+    build_slot_isolation_env,
+    detect_agys_installed,
+    discover_agent_slots,
+    discover_system_agents,
+    generate_agys_command,
+    get_agent_preset_config,
+    get_real_user_home,
+    initialize_slot_instance,
+    parse_slot_id,
+    verify_agys_compatibility,
+)
 from mind.core.credentials import (
     CrossProcessCredentialLock,
     extract_email_from_token,
@@ -39,6 +51,7 @@ __all__ = [
     "BasePtyProcess",
     "CrossProcessCredentialLock",
     "QuotaStatus",
+    "SlotInfo",
     "SlotQuotaUsage",
     "TerminalBuffer",
     "TerminalManager",
@@ -46,11 +59,18 @@ __all__ = [
     "WindowsInputSanitizer",
     "WorkerProcessState",
     "WorkerSession",
+    "build_slot_isolation_env",
+    "detect_agys_installed",
+    "discover_agent_slots",
     "discover_system_agents",
     "extract_email_from_token",
+    "generate_agys_command",
     "get_agent_preset_config",
     "get_quota_color_tag",
+    "get_real_user_home",
     "get_slot_token_path",
+    "initialize_slot_instance",
+    "parse_slot_id",
     "print_usage_cli",
     "read_credential",
     "reap_process_tree",
@@ -61,5 +81,6 @@ __all__ = [
     "setup_slot_env",
     "spawn_pty",
     "strip_ansi",
+    "verify_agys_compatibility",
     "write_credential",
 ]

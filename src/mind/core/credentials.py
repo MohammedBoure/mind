@@ -10,6 +10,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from mind.core.agent_discovery import (
+    SlotInfo,
+    build_slot_isolation_env,
+    get_real_user_home,
+    initialize_slot_instance,
+    parse_slot_id,
+)
 from mind.core.auth import (
     AuthValidator,
     CrossProcessCredentialLock,
@@ -74,12 +81,17 @@ __all__ = [
     "CrossProcessCredentialLock",
     "LinuxFileVaultBackend",
     "LinuxKeyringBackend",
+    "SlotInfo",
     "WindowsCredentialBackend",
     "advapi32",
+    "build_slot_isolation_env",
     "extract_email_from_token",
     "get_default_backend",
+    "get_real_user_home",
     "get_slot_token_path",
+    "initialize_slot_instance",
     "kernel32",
+    "parse_slot_id",
     "read_credential",
     "restore_slot_credential",
     "setup_slot_env",

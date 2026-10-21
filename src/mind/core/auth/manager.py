@@ -255,20 +255,12 @@ class TokenManager:
         base_env: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Construct sanitized environment variables for worker slot with instance isolation."""
-        env = dict(os.environ if base_env is None else base_env)
-        env["AGY_SLOT"] = str(slot)
+        from mind.core.agent_discovery import build_slot_isolation_env
 
-        token_file = self.get_slot_path(slot)
-        env["AGY_TOKEN_FILE"] = str(token_file)
-
-        # Multi-instance directory isolation
-        inst_dir = self.get_instance_dir(slot)
-        if inst_dir.exists():
-            env["USERPROFILE"] = str(inst_dir)
-            env["HOME"] = str(inst_dir)
-            env["AGY_INSTANCE_DIR"] = str(inst_dir)
-
-        # Clean any directory overrides that prevent agy from reading global config and credentials
-        env.pop("ANTIGRAVITY_GEMINI_DIR", None)
-        env.pop("ANTIGRAVITY_APP_DATA_DIR", None)
-        return env
+        return build_slot_isolation_env(
+            slot=slot,
+            base_env=base_env,
+            instances_root=self.instances_dir,
+            tokens_root=self.tokens_dir,
+            auto_init=True,
+        )

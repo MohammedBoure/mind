@@ -748,6 +748,11 @@ class TerminalManager:
         from mind.core.agent_discovery import discover_system_agents
         return discover_system_agents()
 
+    def discover_agent_slots(self) -> list[Any]:
+        """Discover all available agy agents and their slot isolation metadata."""
+        from mind.core.agent_discovery import discover_agent_slots
+        return discover_agent_slots()
+
     def stop_all(self) -> None:
         """Terminate all worker processes."""
         with self._lock:
