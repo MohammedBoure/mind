@@ -39,6 +39,8 @@ if sys.platform == "win32":
             ("TargetAlias", wintypes.LPWSTR),
             ("UserName", wintypes.LPWSTR),
         ]
+else:
+    CREDENTIAL = None
 
 
 class WindowsCredentialBackend:

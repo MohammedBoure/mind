@@ -279,9 +279,11 @@ def discover_system_agents() -> list[str]:
             if res.returncode == 0 and res.stdout:
                 for line in res.stdout.splitlines():
                     cleaned = line.strip()
-                    if not cleaned or cleaned.startswith(("#", "-", "=", "*", "+", "|")):
+                    if not cleaned or re.match(r"^[-=]+$", cleaned):
                         continue
-                    cleaned = re.sub(r"^[•\*\-\>\s]+", "", cleaned)
+                    if ":" in cleaned and not any(cleaned.startswith(p) for p in ("•", "*", "-", "|", ">")):
+                        continue
+                    cleaned = re.sub(r"^[•\*\-\>\s\|]+", "", cleaned).strip()
                     name = cleaned.split()[0] if cleaned else ""
                     if re.match(r"^[a-zA-Z0-9_\-]+$", name):
                         discovered.add(name)

@@ -228,6 +228,8 @@ def test_coordinator_alarm_badge_and_injection() -> None:
     """Coordinator pane receives badges ('⚡ Worker-X Finished (Idle)' or '🚨 Assistance Needed') and terminal injection."""
     TerminalManager.reset()
     mgr = TerminalManager.get_instance()
+    if mgr.directives_watcher:
+        mgr.directives_watcher.stop()
     mgr.clear_coordinator_alarms()
 
     coord = mgr.create_worker("coordinator", role="coordinator", autostart=False)
@@ -345,6 +347,8 @@ def test_terminal_manager_hot_reload_and_directive_listeners(tmp_path: Path, mon
 
     TerminalManager.reset()
     mgr = TerminalManager.get_instance()
+    if mgr.directives_watcher:
+        mgr.directives_watcher.stop()
 
     # Create coordinator and worker
     coord = mgr.create_worker("coordinator", role="coordinator", autostart=False)
