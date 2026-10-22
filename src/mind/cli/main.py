@@ -153,5 +153,111 @@ def register_mcp(transport: str, port: int) -> None:
         click.echo(result.stderr or result.stdout)
 
 
+@main.command("doctor")
+@click.option(
+    "--json",
+    "-j",
+    "as_json",
+    is_flag=True,
+    help="Output diagnostics in structured JSON format.",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Display detailed error logs and inspection traces.",
+)
+def doctor_cmd(as_json: bool, verbose: bool) -> None:
+    """Inspect system compatibility, PTY engine, account tokens, and MCP health."""
+    from mind.cli.doctor import print_doctor_cli
+
+    exit_code = print_doctor_cli(as_json=as_json, verbose=verbose)
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
+@main.command("sessions")
+@click.option(
+    "--clean",
+    "-c",
+    is_flag=True,
+    help="Clean up stale or archived temporary sessions.",
+)
+@click.option(
+    "--clean-all",
+    is_flag=True,
+    help="Clean up all non-default sessions.",
+)
+@click.option(
+    "--days",
+    type=int,
+    default=7,
+    help="Inactivity threshold in days for cleanup (default: 7).",
+)
+@click.option(
+    "--delete",
+    "-d",
+    default=None,
+    help="Delete a specific session by name.",
+)
+@click.option(
+    "--new",
+    "-n",
+    default=None,
+    help="Create a new persistent session with specified name.",
+)
+@click.option(
+    "--agents",
+    "-a",
+    type=int,
+    default=3,
+    help="Number of worker agents for the new session (default: 3).",
+)
+@click.option(
+    "--goal",
+    "-g",
+    default="",
+    help="Optional session goal description.",
+)
+@click.option(
+    "--json",
+    "-j",
+    "as_json",
+    is_flag=True,
+    help="Output session data in structured JSON format.",
+)
+def sessions_cmd(
+    clean: bool,
+    clean_all: bool,
+    days: int,
+    delete: str | None,
+    new: str | None,
+    agents: int,
+    goal: str,
+    as_json: bool,
+) -> None:
+    """Manage and clean up temporary multi-agent orchestration sessions."""
+    from mind.cli.sessions import (
+        clean_sessions_cli,
+        create_session_cli,
+        delete_session_cli,
+        list_sessions_cli,
+    )
+
+    if delete:
+        delete_session_cli(delete)
+        return
+
+    if new:
+        create_session_cli(name=new, agent_count=agents, goal=goal)
+        return
+
+    if clean or clean_all:
+        clean_sessions_cli(older_than_days=days, clean_all=clean_all, as_json=as_json)
+        return
+
+    list_sessions_cli(as_json=as_json)
+
+
 if __name__ == "__main__":
     main()
