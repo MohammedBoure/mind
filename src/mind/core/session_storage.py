@@ -37,6 +37,7 @@ class SessionRecord:
     total_steps: int = 0
     total_interactions: int = 0
     status: str = "active"
+    working_dir: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize session record to JSON-safe dictionary."""
@@ -50,6 +51,7 @@ class SessionRecord:
             "total_steps": self.total_steps,
             "total_interactions": self.total_interactions,
             "status": self.status,
+            "working_dir": self.working_dir,
         }
 
     @classmethod
@@ -72,6 +74,7 @@ class SessionRecord:
             total_steps=int(data.get("total_steps", 0)),
             total_interactions=int(data.get("total_interactions", 0)),
             status=str(data.get("status", "active")),
+            working_dir=str(data.get("working_dir", "")),
         )
 
     def to_session_info(self) -> SessionInfo:

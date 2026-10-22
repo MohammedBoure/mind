@@ -97,12 +97,15 @@ class WorkspaceScreen(Screen):
         session_name: str = "default",
         agent_count: int = 3,
         goal: str = "",
+        working_dir: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._session_name = session_name
         self._agent_count = max(agent_count, 1)
         self._goal = goal
+        self._working_dir = working_dir or TerminalManager.get_launch_cwd() or os.path.abspath(os.getcwd())
+        TerminalManager.set_launch_cwd(self._working_dir)
         self._agents: list[AgentInfo] = []
         self._coordinator_tab: WorkerTerminalTab | None = None
         self._worker_tabs: dict[str, WorkerTerminalTab] = {}
@@ -138,18 +141,8 @@ class WorkspaceScreen(Screen):
 
         target_bin = agy_bin or agy1_launcher
         if target_bin:
-            cmd = [target_bin, "--mode", "auto"]
-            # Only inject prompt if user explicitly provided a non-empty session goal
-            if self._goal:
-                prompt = (
-                    "You are the Primary Coordinator agent for mind. "
-                    "Active worker agent terminals are running in the right pane. "
-                    "Actively use mind-bridge MCP tools (list_workers, get_terminal_screen, send_terminal_input, interrupt_and_inject) "
-                    "to inspect worker screens, delegate sub-tasks, and orchestrate their execution."
-                    f" Overall Session Goal: {self._goal}."
-                )
-                cmd.extend(["--prompt-interactive", prompt])
-            return cmd
+            # Primary Coordinator launches in a clean, idle interactive state without initial prompt
+            return [target_bin, "--mode", "auto"]
 
         # 3. Fallback for test/offline environments
         if sys.platform == "win32":
@@ -183,6 +176,7 @@ class WorkspaceScreen(Screen):
             model="gemini-3.8-flash-high",
             task=coordinator_task,
             command=coordinator_cmd,
+            cwd=self._working_dir,
             autostart=True,
         )
         self._coordinator_tab = WorkerTerminalTab(
@@ -221,6 +215,7 @@ class WorkspaceScreen(Screen):
                                 model=agent.model,
                                 task=agent.task,
                                 assigned_agent=f"agy{int(worker_id) + 1}" if worker_id.isdigit() else "",
+                                cwd=self._working_dir,
                                 autostart=is_initial,
                             )
                             tab_widget = WorkerTerminalTab(
@@ -902,6 +897,7 @@ class WorkspaceScreen(Screen):
             model=new_agent.model,
             task=new_agent.task,
             assigned_agent=f"agy{int(new_id) + 1}" if new_id.isdigit() else "",
+            cwd=self._working_dir,
             autostart=True,
         )
         tab_widget = WorkerTerminalTab(

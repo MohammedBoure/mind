@@ -78,6 +78,7 @@ class WorkerSession:
         extra_flags: str = "",
         instructions: str = "",
         assigned_agent: str = "",
+        cwd: str | None = None,
         columns: int = 80,
         lines: int = 24,
     ) -> None:
@@ -127,7 +128,7 @@ class WorkerSession:
         self.unread_notifications = 0
         self.last_interrupt_directive: str | None = None
         self.custom_command: str | list[str] | None = None
-        self.last_cwd: str | None = None
+        self.last_cwd: str = cwd or TerminalManager.get_launch_cwd() or os.path.abspath(os.getcwd())
         self.last_env: dict[str, str] | None = None
 
         self.profile = AgentProfile(
@@ -261,7 +262,7 @@ class WorkerSession:
             return
 
         self.custom_command = command
-        self.last_cwd = cwd or self.last_cwd or os.getcwd()
+        self.last_cwd = cwd or self.last_cwd or TerminalManager.get_launch_cwd() or os.path.abspath(os.getcwd())
 
         # Set up isolated environment variables and verify token persistence
         slot = self.get_slot_id()
@@ -269,6 +270,9 @@ class WorkerSession:
         worker_env = dict(base)
         if slot:
             worker_env = setup_slot_env(slot, base_env=worker_env)
+
+        if self.last_cwd:
+            worker_env["PWD"] = str(self.last_cwd)
 
         self.last_env = worker_env
         resolved_command = self._resolve_command(command)
@@ -566,6 +570,17 @@ class TerminalManager:
 
     _instance: TerminalManager | None = None
     _singleton_lock = threading.Lock()
+    _launch_cwd: str = os.path.abspath(os.getcwd())
+
+    @classmethod
+    def get_launch_cwd(cls) -> str:
+        """Return the root path where mind was launched."""
+        return cls._launch_cwd
+
+    @classmethod
+    def set_launch_cwd(cls, path: str | Path) -> None:
+        """Set the root project path where mind was launched."""
+        cls._launch_cwd = str(Path(path).resolve())
 
     def __init__(self) -> None:
         self._workers: dict[str, WorkerSession] = {}
@@ -741,6 +756,7 @@ class TerminalManager:
         autostart: bool = True,
     ) -> WorkerSession:
         """Create, register, and optionally start a new worker terminal session."""
+        effective_cwd = cwd or self._launch_cwd or os.path.abspath(os.getcwd())
         with self._lock:
             if worker_id in self._workers:
                 return self._workers[worker_id]
@@ -770,6 +786,7 @@ class TerminalManager:
                 extra_flags=extra_flags,
                 instructions=instructions,
                 assigned_agent=assigned_agent,
+                cwd=effective_cwd,
                 columns=columns,
                 lines=lines,
             )
@@ -779,7 +796,7 @@ class TerminalManager:
             self._workers[worker_id] = session
 
         if autostart:
-            session.start(command=command, cwd=cwd)
+            session.start(command=command, cwd=effective_cwd)
 
         return session
 

@@ -200,6 +200,26 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         _screen_cache.put(cache_key, current_version, result)
         return result
 
+    # ── Tool 2.5: restart_worker ──────────────────────────────────────
+    @server.tool()
+    async def restart_worker(worker_id: str = "", target: str = "") -> str:
+        """Restart a stopped or dead worker session process.
+
+        Args:
+            worker_id: Identifier of the worker agent (e.g. '1', '2').
+            target: Alias for worker_id.
+
+        Returns:
+            Status message.
+        """
+        actual_id = worker_id or target
+        worker = mgr.get_worker(actual_id)
+        if not worker:
+            return f"Error: Worker '{actual_id}' not found."
+        worker.restart()
+        await asyncio.sleep(0.5)
+        return f"Successfully restarted worker '{actual_id}'."
+
     # ── Tool 3: send_terminal_input ───────────────────────────────────
     @server.tool()
     async def send_terminal_input(
@@ -225,11 +245,8 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             return f"Error: Worker '{actual_id}' not found."
 
         if not worker.is_alive:
-            if worker.process is None:
-                worker.start()
-                await asyncio.sleep(0.3)
-            else:
-                return f"Error: Worker '{actual_id}' process is not alive."
+            worker.restart()
+            await asyncio.sleep(0.5)
 
         worker.write(text, press_enter=press_enter)
         return f"Input sent to worker '{actual_id}' ({len(text)} chars, enter={press_enter})."

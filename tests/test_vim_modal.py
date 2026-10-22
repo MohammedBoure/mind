@@ -467,7 +467,7 @@ def test_agent_config_modal_discovered_agents() -> None:
 
 
 def test_coordinator_command_resolution_and_prompt() -> None:
-    """WorkspaceScreen resolves agy1.cmd with coordinator prompt and MCP tools."""
+    """WorkspaceScreen resolves agy in clean idle state without initial prompt."""
     from mind.ui.workspace import WorkspaceScreen
 
     ws = WorkspaceScreen(session_name="test-coord", agent_count=2, goal="Build payment API")
@@ -475,21 +475,48 @@ def test_coordinator_command_resolution_and_prompt() -> None:
     assert isinstance(cmd, list)
     assert len(cmd) >= 3
 
-    # Must include mode auto and interactive prompt
+    # Must include mode auto and NO initial interactive prompt
     assert "--mode" in cmd
     assert "auto" in cmd
-    assert "--prompt-interactive" in cmd
+    assert "--prompt-interactive" not in cmd
+    assert "--prompt" not in cmd
 
-    # Prompt must instruct the Coordinator to use mind-bridge MCP tools
-    prompt_idx = cmd.index("--prompt-interactive") + 1
-    prompt_str = cmd[prompt_idx]
-    assert "Primary Coordinator" in prompt_str
-    assert "mind-bridge" in prompt_str
-    assert "list_workers" in prompt_str
-    assert "get_terminal_screen" in prompt_str
-    assert "send_terminal_input" in prompt_str
-    assert "interrupt_and_inject" in prompt_str
-    assert "Build payment API" in prompt_str
+
+@pytest.mark.anyio
+async def test_coordinator_and_workers_open_on_same_launch_path(tmp_path: Path) -> None:
+    """Coordinator and all worker agents open on the exact launch path of mind."""
+    import os
+    from pathlib import Path
+    from textual.app import App
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.workspace import WorkspaceScreen
+
+    TerminalManager.reset()
+    project_dir = str(tmp_path / "target_project")
+    os.makedirs(project_dir, exist_ok=True)
+
+    TerminalManager.set_launch_cwd(project_dir)
+    assert TerminalManager.get_launch_cwd() == str(Path(project_dir).resolve())
+
+    class TestPathApp(App):
+        def on_mount(self) -> None:
+            self.push_screen(WorkspaceScreen(session_name="test-path", agent_count=3, working_dir=project_dir))
+
+    app = TestPathApp()
+    async with app.run_test() as pilot:
+        ws = app.screen
+        assert isinstance(ws, WorkspaceScreen)
+        assert ws._working_dir == str(Path(project_dir).resolve())
+
+        # Verify coordinator session cwd
+        coord = ws._terminal_manager.get_worker("coordinator")
+        assert coord is not None
+        assert coord.last_cwd == str(Path(project_dir).resolve())
+
+        # Verify worker session cwd
+        worker = ws._terminal_manager.get_worker("1")
+        assert worker is not None
+        assert worker.last_cwd == str(Path(project_dir).resolve())
 
 
 @pytest.mark.anyio

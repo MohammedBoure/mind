@@ -42,9 +42,12 @@ class MindApp(App):
         ("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, initial_session: str | None = None, **kwargs) -> None:
+    def __init__(self, initial_session: str | None = None, launch_cwd: str | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._initial_session = initial_session
+        from mind.core.terminal_manager import TerminalManager
+        self._launch_cwd = launch_cwd or TerminalManager.get_launch_cwd() or str(Path.cwd().resolve())
+        TerminalManager.set_launch_cwd(self._launch_cwd)
 
     def on_mount(self) -> None:
         """Route to the correct screen on startup."""
@@ -94,6 +97,7 @@ class MindApp(App):
                     agent_count=event.agent_count,
                     goal=event.goal,
                     active=True,
+                    working_dir=self._launch_cwd,
                 )
             )
         except Exception:
@@ -116,6 +120,7 @@ class MindApp(App):
             session_name=session_name,
             agent_count=agent_count,
             goal=goal,
+            working_dir=self._launch_cwd,
         )
         if len(self.screen_stack) > 1:
             self.switch_screen(workspace)
