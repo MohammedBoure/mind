@@ -728,16 +728,48 @@ class WorkerTabBar(Widget):
         self.active_worker_id = str(active_worker_id)
         self.tab_items = list(workers)
 
-    @staticmethod
-    def _format_tab_title(worker_id: str, name: str, is_active: bool) -> str:
-        """Format clean, unclipped tab title supporting Unicode and non-ASCII names."""
+    @classmethod
+    def _get_activity_icon(cls, worker_id: str) -> str:
+        """Get activity icon for worker reflecting live execution status."""
+        try:
+            from mind.core.terminal_manager import TerminalManager, WorkerProcessState
+            session = TerminalManager.get_instance().get_worker(str(worker_id))
+            if session:
+                if session.unread_notifications > 0:
+                    return "🔔"
+                if session.is_alive:
+                    if session.state == WorkerProcessState.WAITING_INPUT:
+                        return "⏳"
+                    if session.state == WorkerProcessState.PAUSED:
+                        return "⏸"
+                    return "●"
+                if session.process is not None:
+                    return "❌"
+                return "○"
+        except Exception:
+            pass
+        return "●"
+
+    @classmethod
+    def _format_tab_title(
+        cls,
+        worker_id: str,
+        name: str,
+        is_active: bool,
+        activity_icon: str | None = None,
+    ) -> str:
+        """Format clean, unclipped tab title supporting Unicode, non-ASCII names, and activity icons."""
         clean_name = str(name).strip()
         if clean_name in (f"Worker-{worker_id}", f"Worker {worker_id}", ""):
-            title = f"[{worker_id}] agy{worker_id} (Worker-{worker_id})"
+            base_label = f"[{worker_id}] agy{worker_id} (Worker-{worker_id})"
         elif clean_name.startswith("agy"):
-            title = f"[{worker_id}] {clean_name} (Worker-{worker_id})"
+            base_label = f"[{worker_id}] {clean_name} (Worker-{worker_id})"
         else:
-            title = f"[{worker_id}] {clean_name} · Worker-{worker_id}"
+            base_label = f"[{worker_id}] {clean_name} · Worker-{worker_id}"
+
+        icon = activity_icon if activity_icon is not None else cls._get_activity_icon(worker_id)
+        icon_str = f"{icon} " if icon else ""
+        title = f"{icon_str}{base_label}"
 
         if is_active:
             return f"[bold #1a1b26 on #7aa2f7] {title} [/]"
@@ -755,6 +787,39 @@ class WorkerTabBar(Widget):
                     id=f"tab-pill-{worker_id}",
                 )
             yield WorkerNewTabPill(id="tab-pill-new")
+
+    def on_mount(self) -> None:
+        """Register periodic refresh of tab activity icons."""
+        self.set_interval(2.0, self._refresh_tab_statuses)
+
+    def _refresh_tab_statuses(self) -> None:
+        """Refresh activity icons and titles of all worker tabs."""
+        for worker_id, name in self.tab_items:
+            try:
+                pill = self.query_one(f"#tab-pill-{worker_id}", WorkerTabPill)
+                is_active = (str(worker_id) == str(self.active_worker_id))
+                pill.update(self._format_tab_title(str(worker_id), name, is_active))
+            except Exception:
+                pass
+
+    def update_tab_title(
+        self,
+        worker_id: str,
+        name: str | None = None,
+        activity_icon: str | None = None,
+    ) -> None:
+        """Update a specific tab's title and activity status."""
+        for i, (w_id, w_name) in enumerate(self.tab_items):
+            if str(w_id) == str(worker_id):
+                final_name = name if name is not None else w_name
+                self.tab_items[i] = (str(w_id), final_name)
+                try:
+                    pill = self.query_one(f"#tab-pill-{w_id}", WorkerTabPill)
+                    is_active = (str(w_id) == str(self.active_worker_id))
+                    pill.update(self._format_tab_title(str(w_id), final_name, is_active, activity_icon=activity_icon))
+                except Exception:
+                    pass
+                break
 
     def set_active(self, worker_id: str) -> None:
         """Update active tab highlight."""

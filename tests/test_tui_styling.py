@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from rich.text import Text
 from textual.app import App
+from textual.widgets import Static
 
 from mind.app import MindApp, _CSS_PATH
 from mind.core.terminal_manager import WorkerProcessState, WorkerSession
@@ -137,3 +138,168 @@ async def test_app_mounts_with_tokyo_night_stylesheet() -> None:
         assert app.is_running
         # Global stylesheet must be applied
         assert app.stylesheet is not None
+
+
+def test_interactive_tab_bar_activity_icons_and_formatting() -> None:
+    """Test WorkerTabBar activity icons, unclipped tab formatting, and dynamic updates."""
+    from mind.core.terminal_manager import TerminalManager, WorkerProcessState
+
+    TerminalManager.reset()
+    mgr = TerminalManager.get_instance()
+
+    # Create worker sessions with varying operational states
+    w1 = mgr.create_worker("1", name="Worker-1", autostart=False)
+    w2 = mgr.create_worker("2", name="agy2", autostart=False)
+    w3 = mgr.create_worker("3", name="مهندس البرمجيات", autostart=False)
+
+    # 1. Standby / Unstarted worker -> '○'
+    icon_standby = WorkerTabBar._get_activity_icon("1")
+    assert icon_standby == "○"
+
+    # 2. Simulate running state -> '●'
+    w1.process = type("MockProcess", (), {"is_alive": lambda self: True})()
+    w1.state = WorkerProcessState.RUNNING
+    icon_running = WorkerTabBar._get_activity_icon("1")
+    assert icon_running == "●"
+
+    # 3. Simulate waiting input state -> '⏳'
+    w2.process = type("MockProcess", (), {"is_alive": lambda self: True})()
+    w2.state = WorkerProcessState.WAITING_INPUT
+    icon_waiting = WorkerTabBar._get_activity_icon("2")
+    assert icon_waiting == "⏳"
+
+    # 4. Simulate unread notification state -> '🔔'
+    w3.unread_notifications = 2
+    icon_unread = WorkerTabBar._get_activity_icon("3")
+    assert icon_unread == "🔔"
+
+    # 5. Formatted titles include activity icons and full unclipped names
+    tab_bar = WorkerTabBar(
+        active_worker_id="1",
+        workers=[("1", "Worker-1"), ("2", "agy2"), ("3", "مهندس البرمجيات")],
+    )
+    t1 = tab_bar._format_tab_title("1", "Worker-1", is_active=True)
+    assert "●" in t1
+    assert "[1] agy1 (Worker-1)" in t1
+
+    t3 = tab_bar._format_tab_title("3", "مهندس البرمجيات", is_active=False)
+    assert "🔔" in t3
+    assert "مهندس البرمجيات · Worker-3" in t3
+
+    # 6. Test update_tab_title
+    tab_bar.update_tab_title("2", name="Worker-Custom", activity_icon="⚡")
+    matching = [name for wid, name in tab_bar.tab_items if wid == "2"]
+    assert matching == ["Worker-Custom"]
+
+
+@pytest.mark.anyio
+async def test_header_bar_branding_telemetry_and_live_quota_badge() -> None:
+    """Test HeaderBar branding, session info, worker telemetry, MCP status, and Live Quota Badge."""
+    from textual.app import App
+
+    class HeaderTestApp(App):
+        def compose(self):
+            yield HeaderBar(
+                session_name="production-run",
+                worker_count=4,
+                mode="NORMAL",
+            )
+
+    app = HeaderTestApp()
+    async with app.run_test() as pilot:
+        header = app.query_one(HeaderBar)
+        assert header.session_name == "production-run"
+        assert header.worker_count == 4
+        assert header.mcp_port == 8765
+
+        # Brand and session pills
+        brand = app.query_one("#brand-pill", Static)
+        assert "mind" in str(brand.render())
+
+        session = app.query_one("#session-pill", Static)
+        assert "production-run" in str(session.render())
+
+        # Worker count pill
+        workers = app.query_one("#worker-count-pill", Static)
+        assert "4" in str(workers.render())
+        assert "active workers" in str(workers.render())
+
+        # MCP status indicator
+        mcp = app.query_one("#mcp-indicator", Static)
+        assert "MCP" in str(mcp.render())
+        assert ":8765" in str(mcp.render())
+
+        # Live Quota Badge
+        quota_pill = app.query_one("#quota-pill", Static)
+        assert quota_pill is not None
+        assert "Quota:" in str(quota_pill.render())
+
+        # Test updating quota badge dynamically
+        header.update_quota(remaining_percent=75.0, status="normal")
+        await pilot.pause()
+        assert "75%" in str(quota_pill.render())
+
+        # Warning status
+        header.update_quota(remaining_percent=20.0, status="warning")
+        await pilot.pause()
+        assert "20%" in str(quota_pill.render())
+
+
+@pytest.mark.anyio
+async def test_bottom_bar_action_pills_modal_and_architecture() -> None:
+    """Test BottomBar mode indicator, clickable ActionPills, and PTY architecture badge."""
+    from textual.app import App
+
+    triggered_actions = []
+
+    class BottomTestApp(App):
+        def compose(self):
+            yield BottomBar(worker_count=3, mode="NORMAL", pty_backend="POSIX PTY")
+
+        def action_enter_pty(self):
+            triggered_actions.append("enter_pty")
+
+        def action_open_directive_modal(self):
+            triggered_actions.append("open_directive_modal")
+
+    app = BottomTestApp()
+    async with app.run_test() as pilot:
+        bottom = app.query_one(BottomBar)
+
+        # 1. Mode indicator in NORMAL mode
+        mode_pill = app.query_one("#bottom-mode-pill", Static)
+        assert "NORMAL MODE" in str(mode_pill.render())
+        assert "Press 'i' to type in agy" in str(mode_pill.render())
+
+        # 2. PTY platform architecture badge
+        status_pill = app.query_one("#bottom-status-pill", Static)
+        assert "POSIX PTY" in str(status_pill.render())
+        assert "UTF-8" in str(status_pill.render())
+
+        # Dynamic backend update
+        bottom.pty_backend = "ConPTY"
+        await pilot.pause()
+        assert "ConPTY" in str(status_pill.render())
+
+        # 3. ActionPills clickable trigger
+        pill_insert = app.query_one("#pill-insert", Static)
+        await pill_insert.on_click()
+        await pilot.pause()
+        assert "enter_pty" in triggered_actions
+
+        pill_inject = app.query_one("#pill-inject", Static)
+        await pill_inject.on_click()
+        await pilot.pause()
+        assert "open_directive_modal" in triggered_actions
+
+        # 4. Mode switch to PTY_INTERACT updates indicator and toggles action boxes
+        bottom.mode = "PTY_INTERACT"
+        await pilot.pause()
+        assert "PTY INTERACT" in str(mode_pill.render())
+        assert "Press Esc Esc or Ctrl+B for Outer Normal" in str(mode_pill.render())
+
+        normal_box = app.query_one("#bottom-normal-actions")
+        pty_box = app.query_one("#bottom-pty-actions")
+        assert normal_box.styles.display == "none"
+        assert pty_box.styles.display == "block"
+

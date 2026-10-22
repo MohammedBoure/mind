@@ -21,10 +21,30 @@ class ActionPill(Static):
         text = f"[bold #7aa2f7]{key}[/] [dim]{label}[/]"
         super().__init__(text, classes="action-pill", **kwargs)
 
-    def on_click(self) -> None:
+    async def on_click(self) -> None:
         """Execute corresponding action on click."""
-        if self.action_name:
-            self.run_action(self.action_name)
+        if not self.action_name:
+            return
+
+        action_method_name = f"action_{self.action_name}"
+        screen = getattr(self, "screen", None)
+        app = getattr(self, "app", None)
+
+        if screen and hasattr(screen, action_method_name):
+            res = getattr(screen, action_method_name)()
+            if hasattr(res, "__await__"):
+                await res
+            return
+
+        if app and hasattr(app, action_method_name):
+            res = getattr(app, action_method_name)()
+            if hasattr(res, "__await__"):
+                await res
+            return
+
+        res = self.run_action(self.action_name)
+        if hasattr(res, "__await__"):
+            await res
 
 
 class BottomBar(Widget):
@@ -42,16 +62,20 @@ class BottomBar(Widget):
 
     mode: reactive[str] = reactive("NORMAL")
     worker_count: reactive[int] = reactive(2)
+    pty_backend: reactive[str] = reactive("ConPTY" if sys.platform == "win32" else "POSIX PTY")
 
     def __init__(
         self,
         worker_count: int = 2,
         mode: str = "NORMAL",
+        pty_backend: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(id="bottom-bar", **kwargs)
         self.worker_count = worker_count
         self.mode = mode
+        if pty_backend:
+            self.pty_backend = pty_backend
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="bottom-bar-container"):
@@ -86,7 +110,7 @@ class BottomBar(Widget):
                     yield ActionPill("?", "Help", "show_help", id="pill-pty-help")
 
             # 3. Right Segment: PTY Platform / Encoding Status
-            backend_info = "ConPTY" if sys.platform == "win32" else "pty"
+            backend_info = self.pty_backend or ("ConPTY" if sys.platform == "win32" else "POSIX PTY")
             yield Static(f"⚡ {backend_info} · UTF-8", id="bottom-status-pill")
 
     def _build_mode_indicator(self) -> str:
@@ -111,5 +135,12 @@ class BottomBar(Widget):
             else:
                 normal_box.styles.display = "block"
                 pty_box.styles.display = "none"
+        except Exception:
+            pass
+
+    def watch_pty_backend(self, value: str) -> None:
+        """Update PTY architecture indicator when backend changes."""
+        try:
+            self.query_one("#bottom-status-pill", Static).update(f"⚡ {value} · UTF-8")
         except Exception:
             pass
