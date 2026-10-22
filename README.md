@@ -71,6 +71,13 @@ mind -u
 
 # Export quota usage statistics as JSON
 mind usage --json
+
+# Run comprehensive system diagnostics
+mind doctor
+
+# Manage active and saved agent sessions
+mind sessions
+mind sessions --clean
 ```
 
 ---

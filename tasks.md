@@ -1,4 +1,4 @@
-# 1 : high [COMPLETED]
+﻿# 1 : high [COMPLETED]
 إعادة هيكلة المشروع وتحديث ملفات التكوين وحزم التبعيات العابرة للمنصات (Windows & Linux).
 - مراجعة وتحديث `pyproject.toml` لضبط بيانات التعريف، وإضافة التبعيات اللازمة للعمل بسلاسة على ويندوز ولينكس (`textual`, `rich`, `pyte`, `mcp`, `psutil`, `pywinpty` لويندوز فقط، و`ptyprocess`/`termios` على لينكس).
 - ضبط التثبيت في وضع التطوير (Editable Mode) وتحديد مدخلات سطر الأوامر `project.scripts` (`mind = "mind.cli.main:main"`).
@@ -123,7 +123,7 @@
   * اختبارات وحدة فحص الاستهلاك وشريط التقدم (`test_usage_monitor.py`).
 - ضمان تنفيذ الاختبارات في وضع Headless فائق السرعة عبر محاكي Textual Test Pilot.
 
-# 17 : low
+# 17 : low [COMPLETED]
 التوثيق الفني المتكامل وأدلة الاستخدام (Documentation & Migration Architecture).
 - إنشاء وتحديث ملفات `README.md` لكل مجلد فرعي داخل المشروع تشرح غرض كل ملف ودوره البرمجي بدقة وفقاً لمعايير المشروع.
 - كتابة دليل التحول والترقية (Architecture & Migration Guide) يشرح الفروقات المعمارية وكيفية الاستفادة القصوى من النظام الجديد على ويندوز ولينكس.
