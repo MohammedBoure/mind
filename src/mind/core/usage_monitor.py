@@ -30,7 +30,12 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from mind.core.agent_discovery import discover_system_agents
+from mind.core.agent_discovery import (
+    discover_system_agents,
+    get_agys_instances_dir,
+    get_slot_instance_dir,
+    get_slot_instance_token_path,
+)
 from mind.core.auth.models import TokenStatus
 from mind.core.auth.validator import AuthValidator
 
@@ -263,23 +268,53 @@ class UsageMonitor:
             return f"agy{s}"
         return s
 
+    def _is_custom_environment(self) -> bool:
+        """Check if monitor was initialized with custom test or non-default directories."""
+        default_instances = Path(os.path.expanduser("~/.gemini/instances"))
+        default_tokens = Path(os.path.expanduser("~/.gemini/tokens"))
+        try:
+            return (
+                self.instances_dir.resolve() != default_instances.resolve()
+                or self.tokens_dir.resolve() != default_tokens.resolve()
+            )
+        except Exception:
+            return (
+                self.instances_dir != default_instances
+                or self.tokens_dir != default_tokens
+            )
+
     def _find_token_data(self, slot_name: str) -> bytes | None:
         """Locate and read raw token bytes for a slot from central or instance storage."""
-        # 1. Check central token path: ~/.gemini/tokens/<slot>.token
+        # 1. Check central token path: self.tokens_dir / f"{slot_name}.token"
         central_token = self.tokens_dir / f"{slot_name}.token"
-        if central_token.exists():
+        if central_token.exists() and central_token.stat().st_size > 0:
             try:
-                return central_token.read_bytes()
+                raw = central_token.read_bytes()
+                if raw.strip():
+                    return raw
             except Exception as err:
                 logger.debug("Failed reading central token %s: %s", central_token, err)
 
-        # 2. Check instance token path: ~/.gemini/instances/<slot>/token.json
-        instance_token = self.instances_dir / slot_name / "token.json"
-        if instance_token.exists():
+        # 2. Check instance token paths in self.instances_dir
+        for inst_tok in [
+            self.instances_dir / slot_name / "token.json",
+            self.instances_dir / slot_name / ".gemini" / "antigravity-cli" / "antigravity-oauth-token",
+            self.instances_dir / slot_name / "antigravity-cli" / "antigravity-oauth-token",
+        ]:
+            if inst_tok.exists() and inst_tok.stat().st_size > 0:
+                try:
+                    return inst_tok.read_bytes()
+                except Exception as err:
+                    logger.debug("Failed reading instance token %s: %s", inst_tok, err)
+
+        # 3. If running in default host environment, inspect agys multi-instance storage
+        if not self._is_custom_environment():
             try:
-                return instance_token.read_bytes()
-            except Exception as err:
-                logger.debug("Failed reading instance token %s: %s", instance_token, err)
+                slot_inst_tok = get_slot_instance_token_path(slot_name)
+                if slot_inst_tok.exists() and slot_inst_tok.stat().st_size > 0:
+                    return slot_inst_tok.read_bytes()
+            except Exception:
+                pass
 
         return None
 
@@ -292,8 +327,20 @@ class UsageMonitor:
             instance_base,
         ]
 
+        if not self._is_custom_environment():
+            try:
+                inst_dir = get_slot_instance_dir(slot_name)
+                if inst_dir.exists() and inst_dir != instance_base:
+                    candidates.extend([
+                        inst_dir / ".gemini" / "antigravity-cli",
+                        inst_dir / "antigravity-cli",
+                        inst_dir,
+                    ])
+            except Exception:
+                pass
+
         # For primary slot agy1, also check system central ~/.gemini/antigravity-cli as fallback
-        if slot_name == "agy1":
+        if slot_name == "agy1" and not self._is_custom_environment():
             system_app_data = Path(os.path.expanduser("~/.gemini/antigravity-cli"))
             if system_app_data.exists():
                 candidates.append(system_app_data)
@@ -642,19 +689,31 @@ class UsageMonitor:
         # 1. Discover via system agent discovery (if permitted)
         if should_include_system:
             for agent in discover_system_agents():
-                slots_found.add(self._normalize_slot_name(agent))
+                norm = self._normalize_slot_name(agent)
+                if norm.lower() not in ("agy", "agys"):
+                    slots_found.add(norm)
 
-        # 2. Discover via instances directory
+            # Discover via agys multi-instance base directory
+            agys_base = get_agys_instances_dir()
+            if agys_base.exists():
+                for p in agys_base.iterdir():
+                    if p.is_dir() and re.match(r"^agy\d+$", p.name, re.IGNORECASE):
+                        slots_found.add(p.name.lower())
+
+        # 3. Discover via instances directory
         if self.instances_dir.exists():
             for p in self.instances_dir.iterdir():
-                if p.is_dir() and p.name.startswith("agy"):
-                    slots_found.add(p.name)
+                if p.is_dir() and re.match(r"^agy\d+$", p.name, re.IGNORECASE):
+                    slots_found.add(p.name.lower())
 
-        # 3. Discover via central tokens directory
+        # 4. Discover via central tokens directory
         if self.tokens_dir.exists():
             for p in self.tokens_dir.glob("*.token"):
-                if p.stem.startswith("agy"):
-                    slots_found.add(p.stem)
+                if re.match(r"^agy\d+$", p.stem, re.IGNORECASE):
+                    slots_found.add(p.stem.lower())
+
+        # Filter out non-agent tools
+        slots_found = {s for s in slots_found if s.lower() not in ("agy", "agys")}
 
         if not slots_found:
             slots_found = {"agy1", "agy2", "agy3", "agy4"}

@@ -31,6 +31,7 @@ from mind.state.mock_data import (
     get_random_interrupt_message,
 )
 from mind.state.models import AgentInfo, AgentRole, AgentStatus, InterAgentMessage, MessagePriority
+from mind.core.agent_discovery import discover_system_agents
 from mind.core.directives import (
     load_directive,
     open_directive_in_editor,
@@ -44,6 +45,7 @@ from mind.ui.directive_editor_modal import DirectiveEditorModal
 from mind.ui.directive_modal import DirectiveModal
 from mind.ui.header_bar import HeaderBar
 from mind.ui.interrupt_banner import InterruptBanner
+from mind.ui.select_worker_modal import SelectWorkerModal
 from mind.ui.terminal_tab import TerminalScreenWidget, WorkerTabBar, WorkerTerminalTab
 
 
@@ -195,6 +197,15 @@ class WorkspaceScreen(Screen):
                 workers_pane.styles.width = "1fr"
                 with workers_pane:
                     initial_worker_id = str(self._agents[1].id)
+                    discovered = discover_system_agents()
+                    available_slots = [a for a in discovered if a != "agy1"]
+                    if not available_slots:
+                        available_slots = ["agy2", "agy3", "agy4"]
+
+                    for idx, agent in enumerate(self._agents[1:]):
+                        worker_id = str(agent.id)
+                        assigned_slot = available_slots[idx % len(available_slots)]
+                        agent.name = f"Worker-{worker_id}"
 
                     # Visible Tab Bar at top showing all active workers
                     yield WorkerTabBar(
@@ -205,16 +216,17 @@ class WorkspaceScreen(Screen):
 
                     # ContentSwitcher holding the active interactive terminal view
                     with ContentSwitcher(id="worker-switcher", initial=f"worker-view-{initial_worker_id}"):
-                        for agent in self._agents[1:]:
+                        for idx, agent in enumerate(self._agents[1:]):
                             worker_id = str(agent.id)
                             # Start only the active worker at boot; others spawn lazily upon activation
                             is_initial = (worker_id == initial_worker_id)
+                            assigned_slot = available_slots[idx % len(available_slots)]
                             session = self._terminal_manager.create_worker(
                                 worker_id=worker_id,
                                 name=agent.name,
                                 model=agent.model,
                                 task=agent.task,
-                                assigned_agent=f"agy{int(worker_id) + 1}" if worker_id.isdigit() else "",
+                                assigned_agent=assigned_slot,
                                 cwd=self._working_dir,
                                 autostart=is_initial,
                             )
@@ -876,17 +888,62 @@ class WorkspaceScreen(Screen):
             coord_screen.focus()
             self._safe_notify("Focused: Primary Coordinator", timeout=1.0)
 
-    def action_new_tab(self) -> None:
-        """Add a new worker agent tab dynamically ('c' in NORMAL mode)."""
+    def action_new_tab(self, chosen_agent: str | None = None) -> None:
+        """Add a new worker agent tab dynamically ('c' in NORMAL mode).
+        
+        When running interactively, presents a modal listing all installed agys instances
+        allowing the user to choose which instance should back this worker.
+        """
+        if chosen_agent is not None:
+            self._create_worker_tab(assigned_agent=chosen_agent)
+            return
+
+        if self.is_mounted and hasattr(self, "app") and getattr(self.app, "_running", False):
+            currently_assigned = [
+                w.assigned_agent for w in self._terminal_manager.list_workers() if w.assigned_agent
+            ]
+
+            def _on_slot_selected(chosen: str | None) -> None:
+                if chosen:
+                    self._create_worker_tab(assigned_agent=chosen)
+
+            try:
+                self.app.push_screen(
+                    SelectWorkerModal(current_assigned=currently_assigned),
+                    _on_slot_selected,
+                )
+                return
+            except Exception:
+                pass
+
+        # Headless or non-interactive fallback
+        self._create_worker_tab()
+
+    def _create_worker_tab(self, assigned_agent: str | None = None) -> str:
+        """Create, mount, and activate a worker tab backed by the specified agys instance."""
         existing_ids = {a.id for a in self._agents}
         next_id_int = max(existing_ids, default=0) + 1
         new_id = str(next_id_int)
+
+        if not assigned_agent:
+            system_agents = discover_system_agents()
+            used_agents = {
+                w.assigned_agent for w in self._terminal_manager.list_workers() if w.assigned_agent
+            }
+            unassigned = [a for a in system_agents if a != "agy1" and a not in used_agents]
+            assigned_agent = unassigned[0] if unassigned else (
+                system_agents[next_id_int % len(system_agents)]
+                if system_agents
+                else f"agy{next_id_int + 1}"
+            )
+
+        agent_name = f"Worker-{new_id}"
         new_agent = AgentInfo(
             id=next_id_int,
-            name=f"Worker-{new_id}",
+            name=agent_name,
             role=AgentRole.WORKER,
             status=AgentStatus.RUNNING,
-            model="gpt-4o-mini",
+            model="gemini-3.8-flash-high",
             task="General tasks",
         )
         self._agents.append(new_agent)
@@ -896,7 +953,7 @@ class WorkspaceScreen(Screen):
             name=new_agent.name,
             model=new_agent.model,
             task=new_agent.task,
-            assigned_agent=f"agy{int(new_id) + 1}" if new_id.isdigit() else "",
+            assigned_agent=assigned_agent,
             cwd=self._working_dir,
             autostart=True,
         )
@@ -931,6 +988,7 @@ class WorkspaceScreen(Screen):
 
         self.action_switch_worker(new_id)
         self._safe_notify(f"Spawned {new_agent.name} with live PTY session.")
+        return new_id
 
     def action_toggle_split(self) -> None:
         """Toggle between single-agent full-screen view and split-screen view ('s' in NORMAL mode)."""

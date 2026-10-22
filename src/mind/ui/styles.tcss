@@ -923,3 +923,35 @@ Button:focus {
 Button:hover {
     background: #343b58;
 }
+
+#select-worker-dialog {
+    width: 76;
+    height: 24;
+    border: round #7aa2f7;
+    padding: 1 2;
+    background: #16161e;
+}
+
+#worker-options-list {
+    height: 1fr;
+    border: round #3b4261;
+    background: #1a1b26;
+    margin: 1 0;
+}
+
+#worker-options-list:focus {
+    border: round #7aa2f7;
+}
+
+#worker-search-input {
+    border: round #3b4261;
+    background: #1a1b26;
+    color: #c0caf5;
+    height: 3;
+}
+
+#worker-search-input:focus {
+    border: round #7aa2f7;
+    background: #24283b;
+    color: #ffffff;
+}

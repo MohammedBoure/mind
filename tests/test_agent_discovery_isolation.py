@@ -301,3 +301,76 @@ def test_agys_powershell_helpers() -> None:
             assert report["has_instance_token"] is True
             assert report["has_central_token"] is True
             assert report["tokens_synchronized"] is True
+
+
+def test_discover_system_agents_agys_registry_and_isolation() -> None:
+    """Verify dynamic discovery from agys -l output and ~/.local/share/agy-instances."""
+    mock_agys_l = """
+==========================================================================================
+                              AGY Multi-Instance Registry                                 
+==========================================================================================
+INSTANCE   | AUTH STATUS  | ACCOUNT / EMAIL              | STORAGE  | LOCATION
+------------------------------------------------------------------------------------------
+agy1       | Logged In    | user1@gmail.com              | 20M      | /path/agy1
+agy2       | Logged In    | user2@gmail.com              | 22M      | /path/agy2
+agy3       | Logged In    | user3@gmail.com              | 118M     | /path/agy3
+agy11      | Logged In    | user1@gmail.com              | 17M      | /path/agy11
+agy51      | Logged In    | user1@gmail.com              | 17M      | /path/agy51
+agy100     | Logged In    | user1@gmail.com              | 17M      | /path/agy100
+agy151     | Logged In    | user1@gmail.com              | 17M      | /path/agy151
+==========================================================================================
+"""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_home = Path(tmp_dir)
+        agys_instances = fake_home / ".local" / "share" / "agy-instances"
+        agys_instances.mkdir(parents=True, exist_ok=True)
+        for slot in ["agy1", "agy2", "agy3", "agy11", "agy51", "agy100", "agy151"]:
+            (agys_instances / slot).mkdir()
+
+        # Posix bin containing agys orchestrator binary itself (should NOT be included as an agent!)
+        local_bin = fake_home / ".local" / "bin"
+        local_bin.mkdir(parents=True, exist_ok=True)
+        (local_bin / "agys").write_text("#!/bin/bash", encoding="utf-8")
+
+        with patch("mind.core.agent_discovery.get_real_user_home", return_value=fake_home):
+            with patch("shutil.which", side_effect=lambda cmd: str(local_bin / "agys") if cmd == "agys" else None):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0, stdout=mock_agys_l)
+                    with patch.dict(os.environ, {"AGY_INSTANCES_DIR": str(agys_instances)}):
+                        agents = discover_system_agents()
+
+                        # Must discover all agys instances
+                        assert "agy1" in agents
+                        assert "agy2" in agents
+                        assert "agy3" in agents
+                        assert "agy11" in agents
+                        assert "agy51" in agents
+                        assert "agy100" in agents
+                        assert "agy151" in agents
+
+                        # Tool name "agys" must NOT be treated as an agent
+                        assert "agys" not in agents
+                        assert "agy" not in agents
+
+                        # Must be naturally sorted
+                        expected = ["agy1", "agy2", "agy3", "agy11", "agy51", "agy100", "agy151"]
+                        assert agents == expected
+
+
+@pytest.mark.asyncio
+async def test_select_worker_modal_lifecycle() -> None:
+    """Verify SelectWorkerModal displays options and filters properly."""
+    from mind.ui.select_worker_modal import SelectWorkerModal
+    from textual.app import App
+
+    class TestApp(App):
+        def compose(self):
+            yield SelectWorkerModal(current_assigned=["agy1", "agy2"])
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        modal = app.query_one(SelectWorkerModal)
+        assert modal is not None
+        opt_list = modal.query_one("#worker-options-list")
+        assert opt_list is not None
+        assert opt_list.option_count >= 1

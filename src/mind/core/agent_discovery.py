@@ -113,11 +113,32 @@ def get_real_user_home() -> Path:
     return Path.home()
 
 
+def get_agys_instances_dir(real_home: Path | None = None) -> Path:
+    """Return the base directory where multi-instance agys environments live."""
+    env_base = os.environ.get("AGY_INSTANCES_DIR")
+    if env_base:
+        return Path(env_base)
+    home = real_home or get_real_user_home()
+    return home / ".local" / "share" / "agy-instances"
+
+
 def get_slot_instance_dir(slot: int | str, real_home: Path | None = None) -> Path:
-    """Return the isolated instance directory path (~/.gemini/instances/agy<N>)."""
+    """Return the isolated instance directory path.
+
+    Prioritizes the multi-instance agys directory (~/.local/share/agy-instances/agy<N>)
+    if it exists or is the primary manager, falling back to (~/.gemini/instances/agy<N>).
+    """
     slot_id = parse_slot_id(slot)
     home = real_home or get_real_user_home()
-    return home / ".gemini" / "instances" / f"agy{slot_id}"
+    agys_slot_dir = get_agys_instances_dir(home) / f"agy{slot_id}"
+    if agys_slot_dir.exists():
+        return agys_slot_dir
+    gemini_slot_dir = home / ".gemini" / "instances" / f"agy{slot_id}"
+    if gemini_slot_dir.exists():
+        return gemini_slot_dir
+    if get_agys_instances_dir(home).exists():
+        return agys_slot_dir
+    return gemini_slot_dir
 
 
 def get_slot_token_path(slot: int | str, real_home: Path | None = None) -> Path:
@@ -128,8 +149,21 @@ def get_slot_token_path(slot: int | str, real_home: Path | None = None) -> Path:
 
 
 def get_slot_instance_token_path(slot: int | str, real_home: Path | None = None) -> Path:
-    """Return the slot's instance-local token path (~/.gemini/instances/agy<N>/token.json)."""
-    return get_slot_instance_dir(slot, real_home) / "token.json"
+    """Return the slot's instance-local token path.
+
+    Checks both the POSIX agys layout (~/antigravity-cli/antigravity-oauth-token)
+    and the Windows/PowerShell layout (~/token.json).
+    """
+    inst_dir = get_slot_instance_dir(slot, real_home)
+    agys_tok = inst_dir / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    if agys_tok.exists():
+        return agys_tok
+    inst_tok = inst_dir / "token.json"
+    if inst_tok.exists():
+        return inst_tok
+    if (inst_dir / ".gemini").exists():
+        return agys_tok
+    return inst_tok
 
 
 def initialize_slot_instance(
@@ -259,12 +293,14 @@ def discover_system_agents() -> list[str]:
     """Discover all available agy agents registered on the host system.
 
     Discovers registered agents by:
-    1. Querying `agy agents` and `agy agent` subcommands via CLI.
-    2. Inspecting local multi-account slot executables (%LOCALAPPDATA%\\agy\\bin on Windows).
-    3. Inspecting Linux/POSIX executable directories (/usr/local/bin, /usr/bin, ~/.local/bin).
-    4. Scanning Antigravity instance directories (~/.gemini/instances).
-    5. Scanning credential tokens (~/.gemini/tokens).
-    6. Checking standard PATH candidates (agy1..agy30).
+    0. Querying `agys -l` CLI registry table if `agys` multi-instance manager is present.
+    1. Inspecting multi-instance storage directory (~/.local/share/agy-instances or $AGY_INSTANCES_DIR).
+    2. Querying `agy agents` and `agy agent` subcommands via CLI.
+    3. Inspecting local multi-account slot executables (%LOCALAPPDATA%\\agy\\bin on Windows).
+    4. Inspecting Linux/POSIX executable directories (/usr/local/bin, /usr/bin, ~/.local/bin).
+    5. Scanning Antigravity instance directories (~/.gemini/instances).
+    6. Scanning credential tokens (~/.gemini/tokens).
+    7. Checking standard PATH candidates (agy1..agy30).
 
     Returns:
         Naturally sorted, deduplicated list of agent identifiers (e.g. ['agy1', 'agy2', ...]).
@@ -272,7 +308,35 @@ def discover_system_agents() -> list[str]:
     discovered: set[str] = set()
     home = get_real_user_home()
 
-    # 1. Try running `agy agents` or `agy agent` via subprocess
+    # 0. Query `agys -l` or `agys list` if agys multi-instance orchestrator is installed
+    agys_bin = shutil.which("agys")
+    if agys_bin:
+        try:
+            res = subprocess.run([agys_bin, "-l"], capture_output=True, text=True, timeout=2.0)
+            if res.returncode == 0 and res.stdout:
+                for line in res.stdout.splitlines():
+                    cleaned = line.strip()
+                    if not cleaned or cleaned.startswith("=") or cleaned.startswith("-") or "INSTANCE" in cleaned:
+                        continue
+                    parts = cleaned.split("|")
+                    if parts:
+                        inst_name = parts[0].strip()
+                        if re.match(r"^agy\d+$", inst_name, re.IGNORECASE):
+                            discovered.add(inst_name.lower())
+        except Exception:
+            pass
+
+    # 1. Inspect multi-instance storage directory (~/.local/share/agy-instances or $AGY_INSTANCES_DIR)
+    agys_base = get_agys_instances_dir(home)
+    if agys_base.exists():
+        try:
+            for item in agys_base.iterdir():
+                if item.is_dir() and re.match(r"^agy\d+$", item.name, re.IGNORECASE):
+                    discovered.add(item.name.lower())
+        except Exception:
+            pass
+
+    # 2. Try running `agy agents` or `agy agent` via subprocess
     for cmd in [["agy", "agents"], ["agy", "agent"]]:
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=1.5)
@@ -285,30 +349,36 @@ def discover_system_agents() -> list[str]:
                         continue
                     cleaned = re.sub(r"^[•\*\-\>\s\|]+", "", cleaned).strip()
                     name = cleaned.split()[0] if cleaned else ""
-                    if re.match(r"^[a-zA-Z0-9_\-]+$", name):
+                    if (
+                        re.match(r"^[a-zA-Z0-9_\-]+$", name)
+                        and name.lower() not in ("agy", "agys", "instance", "status", "account", "registered", "total")
+                    ):
                         discovered.add(name)
         except Exception:
             pass
 
-    # 2. Inspect %LOCALAPPDATA%\agy\bin on Windows for slot launchers (agy1.cmd, agy2.cmd, etc.)
+    # 3. Inspect %LOCALAPPDATA%\agy\bin on Windows for slot launchers (agy1.cmd, agy2.cmd, etc.)
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if local_app_data:
         local_bin = Path(local_app_data) / "agy" / "bin"
         if local_bin.exists():
             try:
                 for f in local_bin.glob("agy*.cmd"):
-                    discovered.add(f.stem)
+                    if f.stem.lower() not in ("agy", "agys"):
+                        discovered.add(f.stem)
                 for f in local_bin.glob("agy*.bat"):
-                    discovered.add(f.stem)
+                    if f.stem.lower() not in ("agy", "agys"):
+                        discovered.add(f.stem)
                 for f in local_bin.glob("agy*.ps1"):
-                    discovered.add(f.stem)
+                    if f.stem.lower() not in ("agy", "agys"):
+                        discovered.add(f.stem)
                 for f in local_bin.glob("agy*.exe"):
-                    if f.stem.lower() != "agy":
+                    if f.stem.lower() not in ("agy", "agys"):
                         discovered.add(f.stem)
             except Exception:
                 pass
 
-    # 3. Inspect Linux/POSIX binary directories (/usr/local/bin, /usr/bin, ~/.local/bin)
+    # 4. Inspect Linux/POSIX binary directories (/usr/local/bin, /usr/bin, ~/.local/bin)
     posix_bin_dirs = [
         Path("/usr/local/bin"),
         Path("/usr/bin"),
@@ -318,41 +388,45 @@ def discover_system_agents() -> list[str]:
         if bin_dir.exists():
             try:
                 for item in bin_dir.glob("agy*"):
-                    if item.is_file() and item.name.lower() != "agy":
-                        discovered.add(item.name)
+                    if item.is_file() and re.match(r"^agy\d+$", item.name, re.IGNORECASE):
+                        discovered.add(item.name.lower())
             except Exception:
                 pass
 
-    # 4. Inspect ~/.gemini/instances/ for multi-account instance folders
+    # 5. Inspect ~/.gemini/instances/ for multi-account instance folders
     instances_dir = home / ".gemini" / "instances"
     if instances_dir.exists():
         try:
             for item in instances_dir.iterdir():
-                if item.is_dir() and item.name.startswith("agy"):
-                    discovered.add(item.name)
+                if item.is_dir() and re.match(r"^agy\d+$", item.name, re.IGNORECASE):
+                    discovered.add(item.name.lower())
         except Exception:
             pass
 
-    # 5. Inspect ~/.gemini/tokens/ for slot token files
+    # 6. Inspect ~/.gemini/tokens/ for slot token files
     tokens_dir = home / ".gemini" / "tokens"
     if tokens_dir.exists():
         try:
             for f in tokens_dir.glob("*.token"):
-                discovered.add(f.stem)
+                if re.match(r"^agy\d+$", f.stem, re.IGNORECASE):
+                    discovered.add(f.stem.lower())
         except Exception:
             pass
 
-    # 6. Check PATH for standard slot executables (agy1..agy30)
+    # 7. Check PATH for standard slot executables (agy1..agy30)
     for i in range(1, 31):
         candidate = f"agy{i}"
         if shutil.which(candidate):
             discovered.add(candidate)
 
-    # 7. Fallback defaults if no external agents discovered
+    # Filter out multi-instance orchestrator tool and core binary names
+    discovered = {a for a in discovered if a.lower() not in ("agy", "agys")}
+
+    # Fallback defaults if no external agents discovered
     if not discovered:
         discovered.update(["agy1", "agy2", "agy3", "agy4"])
 
-    # Natural sorting (agy1, agy2, ..., agy10)
+    # Natural sorting (agy1, agy2, ..., agy10, agy51, agy100)
     def _sort_key(name: str) -> tuple[int, str]:
         num_match = re.search(r"\d+", name)
         num = int(num_match.group()) if num_match else 9999
@@ -388,12 +462,15 @@ def discover_agent_slots() -> list[SlotInfo]:
 
         has_tok = central_tok.exists() or inst_tok.exists()
         email: str | None = None
-        target_tok = central_tok if central_tok.exists() else inst_tok
-        if target_tok.exists():
-            try:
-                email = validator.extract_email(target_tok.read_bytes())
-            except Exception:
-                pass
+        for cand in [inst_tok, central_tok]:
+            if cand.exists():
+                try:
+                    extracted = validator.extract_email(cand.read_bytes())
+                    if extracted:
+                        email = extracted
+                        break
+                except Exception:
+                    pass
 
         slots.append(
             SlotInfo(
@@ -426,22 +503,23 @@ def get_agent_preset_config(agent_name: str) -> dict[str, Any]:
 
 
 def detect_agys_installed() -> bool:
-    """Check if the PowerShell agys function or command is registered on the host."""
-    if sys.platform != "win32":
-        return False
-    for shell in ["powershell", "pwsh"]:
-        if shutil.which(shell):
-            try:
-                res = subprocess.run(
-                    [shell, "-NoProfile", "-Command", "Get-Command agys -ErrorAction SilentlyContinue"],
-                    capture_output=True,
-                    text=True,
-                    timeout=2.0,
-                )
-                if res.returncode == 0 and "agys" in res.stdout:
-                    return True
-            except Exception:
-                pass
+    """Check if the agys CLI script or PowerShell agys function is registered on the host."""
+    if shutil.which("agys"):
+        return True
+    if sys.platform == "win32":
+        for shell in ["powershell", "pwsh"]:
+            if shutil.which(shell):
+                try:
+                    res = subprocess.run(
+                        [shell, "-NoProfile", "-Command", "Get-Command agys -ErrorAction SilentlyContinue"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2.0,
+                    )
+                    if res.returncode == 0 and "agys" in res.stdout:
+                        return True
+                except Exception:
+                    pass
     return False
 
 
