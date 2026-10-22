@@ -303,3 +303,48 @@ async def test_bottom_bar_action_pills_modal_and_architecture() -> None:
         assert normal_box.styles.display == "none"
         assert pty_box.styles.display == "block"
 
+
+@pytest.mark.asyncio
+async def test_worker_tab_bar_rebuild_persistence() -> None:
+    """Verify WorkerTabBar.rebuild preserves tab pills without disappearing or DuplicateIds."""
+    from mind.ui.terminal_tab import WorkerTabBar, WorkerTabPill, WorkerNewTabPill
+
+    class TabBarApp(App):
+        def compose(self):
+            yield WorkerTabBar(
+                active_worker_id="1",
+                workers=[("1", "agy2")],
+                id="test-tab-bar",
+            )
+
+    app = TabBarApp()
+    async with app.run_test() as pilot:
+        tab_bar = app.query_one("#test-tab-bar", WorkerTabBar)
+        assert len(tab_bar.query(WorkerTabPill)) == 1
+        assert app.query_one("#tab-pill-1", WorkerTabPill) is not None
+        assert app.query_one("#tab-pill-new", WorkerNewTabPill) is not None
+
+        # 1. Add Tab 2 (e.g. agy11)
+        tab_bar.rebuild(workers=[("1", "agy2"), ("2", "agy11")], active_worker_id="2")
+        await pilot.pause()
+        pills = list(tab_bar.query(WorkerTabPill))
+        assert len(pills) == 2
+        assert app.query_one("#tab-pill-1", WorkerTabPill) is not None
+        assert app.query_one("#tab-pill-2", WorkerTabPill) is not None
+        assert app.query_one("#tab-pill-new", WorkerNewTabPill) is not None
+        assert app.query_one("#tab-pill-2", WorkerTabPill).is_active is True
+
+        # 2. Add Tab 3
+        tab_bar.rebuild(workers=[("1", "agy2"), ("2", "agy11"), ("3", "agy51")], active_worker_id="3")
+        await pilot.pause()
+        assert len(tab_bar.query(WorkerTabPill)) == 3
+        assert app.query_one("#tab-pill-3", WorkerTabPill) is not None
+
+        # 3. Close Tab 2
+        tab_bar.rebuild(workers=[("1", "agy2"), ("3", "agy51")], active_worker_id="1")
+        await pilot.pause()
+        assert len(tab_bar.query(WorkerTabPill)) == 2
+        assert app.query_one("#tab-pill-1", WorkerTabPill).is_active is True
+        assert len(tab_bar.query("#tab-pill-2")) == 0
+
+

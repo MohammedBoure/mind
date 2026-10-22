@@ -982,24 +982,66 @@ class WorkerTabBar(Widget):
                 pass
 
     def rebuild(self, workers: list[tuple[str, str]], active_worker_id: str) -> None:
-        """Re-render the tab bar when workers are added or removed."""
+        """Re-render or update the tab bar in-place when workers are added, removed, or changed."""
         self.tab_items = list(workers)
         self.active_worker_id = str(active_worker_id)
         try:
             strip = self.query_one("#worker-tab-strip", Horizontal)
-            strip.remove_children()
-            for worker_id, name in self.tab_items:
-                is_active = (str(worker_id) == str(self.active_worker_id))
-                label = self._format_tab_title(str(worker_id), name, is_active)
-                strip.mount(
-                    WorkerTabPill(
-                        worker_id=str(worker_id),
-                        label=label,
-                        is_active=is_active,
-                        id=f"tab-pill-{worker_id}",
-                    )
-                )
-            strip.mount(WorkerNewTabPill(id="tab-pill-new"))
+        except Exception:
+            return
+
+        existing_pills = {pill.worker_id: pill for pill in strip.query(WorkerTabPill)}
+        target_ids = {str(w_id) for w_id, _ in self.tab_items}
+
+        # 1. Remove pills that no longer exist in target workers
+        for w_id, pill in list(existing_pills.items()):
+            if w_id not in target_ids:
+                try:
+                    pill.remove()
+                except Exception:
+                    pass
+
+        # 2. Find '+ New (c)' anchor pill
+        new_tab_btn = None
+        try:
+            new_tab_btn = strip.query_one("#tab-pill-new", WorkerNewTabPill)
         except Exception:
             pass
+
+        # 3. Update existing pills or mount new ones in order
+        for worker_id, name in self.tab_items:
+            w_id_str = str(worker_id)
+            is_active = (w_id_str == str(self.active_worker_id))
+            label = self._format_tab_title(w_id_str, name, is_active)
+
+            if w_id_str in existing_pills:
+                pill = existing_pills[w_id_str]
+                pill.is_active = is_active
+                if is_active:
+                    pill.remove_class("-active")
+                    pill.add_class("-active")
+                else:
+                    pill.remove_class("-active")
+                pill.update(label)
+            else:
+                new_pill = WorkerTabPill(
+                    worker_id=w_id_str,
+                    label=label,
+                    is_active=is_active,
+                    id=f"tab-pill-{w_id_str}",
+                )
+                try:
+                    if new_tab_btn:
+                        strip.mount(new_pill, before=new_tab_btn)
+                    else:
+                        strip.mount(new_pill)
+                except Exception:
+                    pass
+
+        # 4. Ensure '+ New (c)' anchor exists at the end
+        if not new_tab_btn and not strip.query(WorkerNewTabPill):
+            try:
+                strip.mount(WorkerNewTabPill(id="tab-pill-new"))
+            except Exception:
+                pass
 

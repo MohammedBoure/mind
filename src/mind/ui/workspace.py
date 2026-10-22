@@ -953,7 +953,7 @@ class WorkspaceScreen(Screen):
                 else f"agy{next_id_int + 1}"
             )
 
-        agent_name = f"Worker-{new_id}"
+        agent_name = assigned_agent or f"Worker-{new_id}"
         new_agent = AgentInfo(
             id=next_id_int,
             name=agent_name,
