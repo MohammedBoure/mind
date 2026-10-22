@@ -20,7 +20,7 @@ class NewSessionModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="new-session-dialog"):
-            yield Static("✨  [bold]Create New Session[/bold]", id="modal-title")
+            yield Static("  [bold]Create New Session[/bold]", id="modal-title")
 
             with Vertical(classes="modal-field"):
                 yield Label("Session Name:", classes="modal-label")

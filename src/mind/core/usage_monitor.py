@@ -702,9 +702,9 @@ class UsageMonitor:
         for s in slots:
             # Status badge
             if s.status == QuotaStatus.THROTTLED:
-                status_badge = "[bold red]✖ Throttled[/bold red]"
+                status_badge = "[bold red]x Throttled[/bold red]"
             elif s.status == QuotaStatus.WARNING:
-                status_badge = "[bold yellow]▲ Warning[/bold yellow]"
+                status_badge = "[bold yellow]! Warning[/bold yellow]"
             else:
                 status_badge = "[bold green]● Normal[/bold green]"
 

@@ -224,7 +224,7 @@ class TerminalScreenWidget(Widget):
 
         if text:
             copy_to_clipboard(text, app=self._get_safe_app())
-            self._safe_notify(f"📋 Copied {desc} to clipboard", timeout=1.5)
+            self._safe_notify(f"Copied {desc} to clipboard", timeout=1.5)
         else:
             self._safe_notify("Buffer is empty", severity="warning", timeout=1.0)
         return text
@@ -363,11 +363,11 @@ class TerminalScreenWidget(Widget):
         t.append("\n")
         t.append("   ╭────────────────────────────────────────────────────────────────────────╮\n", style="#3b4261")
         t.append("   │  ", style="#3b4261")
-        t.append("🧠  mind ", style="bold #7aa2f7")
+        t.append("mind ", style="bold #7aa2f7")
         t.append("· ", style="#565f89")
         t.append(f"{tab_title} ", style="bold #bb9af7")
         t.append(f"({s.name})", style="bold #7dcfff")
-        fill_spaces = max(1, 44 - len(s.name) - (len(tab_title) - 27))
+        fill_spaces = max(1, 47 - len(s.name) - (len(tab_title) - 27))
         t.append(" " * fill_spaces)
         t.append("│\n", style="#3b4261")
         t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
@@ -382,10 +382,10 @@ class TerminalScreenWidget(Widget):
         t.append("   ├────────────────────────────────────────────────────────────────────────┤\n", style="#3b4261")
 
         if self.is_pty_mode:
-            focus_hint = "[ ⌨ PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) ]"
+            focus_hint = "[ PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) ]"
             focus_style = "bold #7aa2f7"
         else:
-            focus_hint = "[ 🔍 NORMAL MODE (Press 'i' to type in agy) ]"
+            focus_hint = "[ NORMAL MODE (Press 'i' to type in agy) ]"
             focus_style = "bold #e0af68"
 
         t.append("   │  ", style="#3b4261")
@@ -451,7 +451,7 @@ class TerminalScreenWidget(Widget):
                 selected = self.get_selected_text()
                 if selected:
                     copy_to_clipboard(selected, app=self._get_safe_app())
-                    self._safe_notify(f"📋 Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
+                    self._safe_notify(f"Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
                 self.clear_selection()
             else:
                 self.copy_selection_or_buffer()
@@ -473,7 +473,7 @@ class TerminalScreenWidget(Widget):
                 text = self.get_selected_text()
                 if text:
                     copy_to_clipboard(text, app=self._get_safe_app())
-                    self._safe_notify(f"📋 Copied selection to clipboard ({len(text)} chars)", timeout=1.5)
+                    self._safe_notify(f"Copied selection to clipboard ({len(text)} chars)", timeout=1.5)
             self.refresh()
         elif event.button == 3:
             # Right-click on MouseUp fallback
@@ -481,7 +481,7 @@ class TerminalScreenWidget(Widget):
                 selected = self.get_selected_text()
                 if selected:
                     copy_to_clipboard(selected, app=self._get_safe_app())
-                    self._safe_notify(f"📋 Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
+                    self._safe_notify(f"Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
                 self.clear_selection()
             else:
                 self.copy_selection_or_buffer()
@@ -712,11 +712,11 @@ class WorkerTerminalTab(Widget):
         if state == WorkerProcessState.RUNNING:
             state_str = "[bold #9ece6a]● RUNNING[/]"
         elif state == WorkerProcessState.PAUSED:
-            state_str = "[bold #e0af68]⏸ PAUSED[/]"
+            state_str = "[bold #e0af68]|| PAUSED[/]"
         elif state == WorkerProcessState.WAITING_INPUT:
-            state_str = "[bold #7dcfff]⏳ WAITING INPUT[/]"
+            state_str = "[bold #7dcfff]… WAITING INPUT[/]"
         else:
-            state_str = "[bold #f7768e]❌ TERMINATED[/]"
+            state_str = "[bold #f7768e]x TERMINATED[/]"
 
         pid_info = f"PID: {self.worker_session.pid}" if self.worker_session.pid else "PID: -"
         instance_name = self.worker_session.assigned_agent or self.worker_session.name or f"agy{self.worker_session.worker_id}"
@@ -724,7 +724,7 @@ class WorkerTerminalTab(Widget):
         # Directive badge
         directive_badge = ""
         if self.worker_session.unread_notifications > 0:
-            directive_badge = f" [bold #1a1b26 on #e0af68] 🔔 {self.worker_session.unread_notifications} DIRECTIVE [/]"
+            directive_badge = f" [bold #1a1b26 on #e0af68] [{self.worker_session.unread_notifications}] DIRECTIVE [/]"
 
         # Runtime Warning badge (e.g. --effort fallback, model unsupported, etc.)
         warning_badge = ""
@@ -736,19 +736,19 @@ class WorkerTerminalTab(Widget):
                 warn_label = "unknown agent"
             else:
                 warn_label = latest_warn[:24]
-            warning_badge = f" [bold #1a1b26 on #f7768e] ⚠ Warning: {warn_label} [/]"
+            warning_badge = f" [bold #1a1b26 on #f7768e] Warning: {warn_label} [/]"
 
-        # Alarm badge (e.g. ⚡ Worker-X Finished (Idle) or 🚨 Assistance Needed)
+        # Alarm badge (e.g. Worker-X Finished (Idle) or Assistance Needed)
         alarm_badge = ""
         if getattr(self, "_alarm_badge", ""):
-            if "🚨" in self._alarm_badge:
+            if "Assistance Needed" in self._alarm_badge:
                 alarm_badge = f" [bold #1a1b26 on #f7768e] {self._alarm_badge} [/]"
             else:
                 alarm_badge = f" [bold #1a1b26 on #e0af68] {self._alarm_badge} [/]"
 
         if self.worker_session.role == "coordinator" or str(self.worker_session.worker_id) == "coordinator":
             return (
-                f" [bold #1a1b26 on #bb9af7] 🧠 PRIMARY COORDINATOR [/] "
+                f" [bold #1a1b26 on #bb9af7] PRIMARY COORDINATOR [/] "
                 f"[dim]Instance:[/] [bold #bb9af7]{instance_name}[/] "
                 f"[dim]({self.worker_session.model} · {pid_info})[/] "
                 f"{state_str}{directive_badge}{warning_badge}{alarm_badge} "
@@ -799,7 +799,7 @@ class WorkerTerminalTab(Widget):
         try:
             toast_box = self.query_one(f"#toast-{self.worker_session.worker_id}", Vertical)
             toast_text = self.query_one(f"#toast-text-{self.worker_session.worker_id}", Static)
-            toast_text.update(f"[bold #e0af68]⚡ INCOMING DIRECTIVE INJECTED VIA MCP:[/]\n{message.strip()}")
+            toast_text.update(f"[bold #e0af68]INCOMING DIRECTIVE INJECTED VIA MCP:[/]\n{message.strip()}")
             toast_box.add_class("visible")
 
             if self._toast_timer:
@@ -879,15 +879,15 @@ class WorkerTabBar(Widget):
             session = TerminalManager.get_instance().get_worker(str(worker_id))
             if session:
                 if session.unread_notifications > 0:
-                    return "🔔"
+                    return "!"
                 if session.is_alive:
                     if session.state == WorkerProcessState.WAITING_INPUT:
-                        return "⏳"
+                        return "…"
                     if session.state == WorkerProcessState.PAUSED:
-                        return "⏸"
+                        return "||"
                     return "●"
                 if session.process is not None:
-                    return "❌"
+                    return "x"
                 return "○"
         except Exception:
             pass

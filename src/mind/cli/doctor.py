@@ -440,7 +440,7 @@ def print_doctor_cli(as_json: bool = False, verbose: bool = False) -> int:
     console = Console()
 
     table = Table(
-        title="🧠  mind doctor — System Health & Compatibility Report",
+        title="mind doctor — System Health & Compatibility Report",
         header_style="bold #7aa2f7",
         border_style="#3b4261",
         box=None,
@@ -457,13 +457,13 @@ def print_doctor_cli(as_json: bool = False, verbose: bool = False) -> int:
 
     for chk in results:
         if chk.status == CheckStatus.PASS:
-            status_markup = "[bold #9ece6a]✓ PASS[/]"
+            status_markup = "[bold #9ece6a]PASS[/]"
             pass_count += 1
         elif chk.status == CheckStatus.WARN:
-            status_markup = "[bold #e0af68]! WARN[/]"
+            status_markup = "[bold #e0af68]WARN[/]"
             warn_count += 1
         else:
-            status_markup = "[bold #f7768e]✗ FAIL[/]"
+            status_markup = "[bold #f7768e]FAIL[/]"
             fail_count += 1
 
         details = chk.message
@@ -479,21 +479,21 @@ def print_doctor_cli(as_json: bool = False, verbose: bool = False) -> int:
     # Summary Panel
     if fail_count > 0:
         summary_color = "red"
-        summary_title = "🚨 Issues Detected"
+        summary_title = "Issues Detected"
         summary_text = (
             f"Found [bold red]{fail_count} failed checks[/] and [bold yellow]{warn_count} warnings[/]. "
             "Please review failed items above before launching multi-agent orchestration."
         )
     elif warn_count > 0:
         summary_color = "yellow"
-        summary_title = "⚡ System Ready (With Warnings)"
+        summary_title = "System Ready (With Warnings)"
         summary_text = (
             f"Passed [bold green]{pass_count} checks[/] with [bold yellow]{warn_count} minor warnings[/]. "
             "All core functions are ready to run."
         )
     else:
         summary_color = "green"
-        summary_title = "✓ All Systems Operational"
+        summary_title = "All Systems Operational"
         summary_text = (
             f"All [bold green]{pass_count} diagnostic checks passed successfully[/]! "
             "PTY engine, authentication, slots, and MCP server are in pristine health."

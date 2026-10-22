@@ -12,10 +12,10 @@ from mind.state.models import InterAgentMessage, MessagePriority
 
 # Priority display configuration
 _PRIORITY_STYLES: dict[MessagePriority, tuple[str, str]] = {
-    MessagePriority.CRITICAL: ("🔴 CRITICAL", "interrupt-priority-critical"),
-    MessagePriority.HIGH: ("🟠 HIGH", "interrupt-priority-high"),
-    MessagePriority.NORMAL: ("🟢 NORMAL", "interrupt-priority-normal"),
-    MessagePriority.LOW: ("⚪ LOW", "interrupt-priority-low"),
+    MessagePriority.CRITICAL: ("[CRITICAL]", "interrupt-priority-critical"),
+    MessagePriority.HIGH: ("[HIGH]", "interrupt-priority-high"),
+    MessagePriority.NORMAL: ("[NORMAL]", "interrupt-priority-normal"),
+    MessagePriority.LOW: ("[LOW]", "interrupt-priority-low"),
 }
 
 
@@ -43,7 +43,7 @@ class InterruptBanner(Widget):
         )
 
         content = (
-            f"[bold yellow]⚡ INTERRUPT[/]  │  "
+            f"[bold yellow]INTERRUPT[/]  │  "
             f"[bold cyan]{message.sender}[/] → {message.receiver}  │  "
             f"[{priority_class}]{priority_label}[/]\n"
             f"   {message.directive}"

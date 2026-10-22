@@ -252,7 +252,7 @@ class WorkspaceScreen(Screen):
     def _on_directive_reloaded(self, target: str, content: str, updated_workers: list[Any]) -> None:
         """Handle directive hot-reload notification."""
         count = len(updated_workers)
-        msg = f"⚡ Directive hot-reloaded: {target}"
+        msg = f"Directive hot-reloaded: {target}"
         if count:
             msg += f" (applied to {count} session{'s' if count > 1 else ''})"
         self._safe_notify(msg, title="Directives Hot-Reload", severity="information", timeout=3.0)
@@ -263,9 +263,9 @@ class WorkspaceScreen(Screen):
         worker_id = event.get("worker_id", "")
         summary = event.get("summary") or event.get("reason") or "Worker event received"
         badge = event.get("badge") or (
-            f"⚡ Worker-{worker_id} Finished (Idle)"
+            f"Worker-{worker_id} Finished (Idle)"
             if event_type == "worker_idle"
-            else "🚨 Assistance Needed"
+            else "Assistance Needed"
         )
 
         # 1. Update Coordinator pane header badge subtly
@@ -281,7 +281,7 @@ class WorkspaceScreen(Screen):
 
         # 2. Only show toast if user explicitly requests help, preventing repetitive idle toast spam
         if event_type != "worker_idle":
-            self._safe_notify(f"🔔 {badge}: {summary}", severity="warning", timeout=3.0)
+            self._safe_notify(f"{badge}: {summary}", severity="warning", timeout=3.0)
 
         # 3. For critical assistance requests only, forward a directive to Coordinator PTY.
         # Routine idle transitions are logged in MCP check_coordinator_alarms() to prevent Echo Loop flood.
@@ -289,7 +289,7 @@ class WorkspaceScreen(Screen):
         if coord_session and coord_session.is_alive and event_type != "worker_idle":
             priority = event.get("priority", "high")
             status_line = (
-                f"\n[🚨 Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
+                f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
                 f"Coordinator Directive: Intervene to resolve roadblock.\n"
             )
             coord_session.write(status_line, press_enter=True)
@@ -339,13 +339,13 @@ class WorkspaceScreen(Screen):
         """Switch to PTY_INTERACT (Insert) mode and focus active terminal."""
         self.mode = "PTY_INTERACT"
         self._auto_focus_terminal()
-        self._safe_notify("⌨ PTY Mode Active (Press Esc Esc or Ctrl+B for Outer Normal)", timeout=1.5)
+        self._safe_notify("PTY Mode Active (Press Esc Esc or Ctrl+B for Outer Normal)", timeout=1.5)
 
     def action_enter_normal(self) -> None:
         """Switch to NORMAL (Vim Command) mode."""
         self.mode = "NORMAL"
         self._auto_focus_terminal()
-        self._safe_notify("🔍 Normal Mode Active (Press 'i' to type in agy)", timeout=1.5)
+        self._safe_notify("Normal Mode Active (Press 'i' to type in agy)", timeout=1.5)
 
     @on(TerminalScreenWidget.ModeChangeRequested)
     def on_mode_change_requested(self, event: TerminalScreenWidget.ModeChangeRequested) -> None:
@@ -629,7 +629,7 @@ class WorkspaceScreen(Screen):
         target = self._resolve_active_directive_target()
         path = open_directive_in_editor(target)
         self._safe_notify(
-            f"📄 Opened Directive: {path.name}",
+            f"Opened Directive: {path.name}",
             title="External Editor",
             severity="information",
             timeout=3.0,
@@ -649,7 +649,7 @@ class WorkspaceScreen(Screen):
         if result is not None:
             target = self._resolve_active_directive_target()
             self._terminal_manager.apply_directive_update(target, result, source="modal")
-            self._safe_notify(f"✓ Directive saved for {target}", severity="information", timeout=2.5)
+            self._safe_notify(f"Directive saved for {target}", severity="information", timeout=2.5)
 
     def action_open_directive_modal(self) -> None:
         """Open Agent Assignment & Task Dispatcher modal."""
@@ -722,13 +722,13 @@ class WorkspaceScreen(Screen):
         worker = self._terminal_manager.get_worker(str(self._active_worker_id))
         if worker:
             worker.interrupt()
-            self._safe_notify(f"⚡ Interrupted Worker-{self._active_worker_id}", severity="warning")
+            self._safe_notify(f"Interrupted Worker-{self._active_worker_id}", severity="warning")
             return
 
         workers = self._terminal_manager.list_workers()
         if workers:
             workers[0].interrupt()
-            self._safe_notify(f"⚡ Interrupted {workers[0].name}", severity="warning")
+            self._safe_notify(f"Interrupted {workers[0].name}", severity="warning")
 
     def action_next_worker(self) -> None:
         """Switch to next worker tab ('l' in NORMAL mode)."""

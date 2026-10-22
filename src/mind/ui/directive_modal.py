@@ -24,15 +24,15 @@ _ROLE_OPTIONS = [
 ]
 
 _DISPATCH_MODES = [
-    ("⚡ Interrupt & Inject (SIGINT + Prompt)", "interrupt"),
-    ("⌨ Direct Stdin Stream (Type + Enter)", "direct"),
+    ("Interrupt & Inject (SIGINT + Prompt)", "interrupt"),
+    ("Direct Stdin Stream (Type + Enter)", "direct"),
 ]
 
 _PRIORITY_OPTIONS = [
-    ("⚡ High Priority (Default Interruption)", "high"),
-    ("🚨 Critical Priority (Immediate Preempt)", "critical"),
-    ("🔹 Normal Priority (Standard Dispatch)", "normal"),
-    ("💤 Low Priority (Background Task)", "low"),
+    ("High Priority (Default Interruption)", "high"),
+    ("Critical Priority (Immediate Preempt)", "critical"),
+    ("Normal Priority (Standard Dispatch)", "normal"),
+    ("Low Priority (Background Task)", "low"),
 ]
 
 
@@ -54,20 +54,20 @@ class DirectiveModal(ModalScreen[None]):
         has_primary = False
         for w in workers:
             if w.role == "coordinator" or str(w.worker_id) in ("coordinator", "primary"):
-                target_options.insert(0, (f"🧠 Primary Coordinator (PID: {w.pid or '-'})", str(w.worker_id)))
+                target_options.insert(0, (f"Primary Coordinator (PID: {w.pid or '-'})", str(w.worker_id)))
                 has_primary = True
             else:
-                target_options.append((f"⚡ {w.name} (PID: {w.pid or '-'})", str(w.worker_id)))
+                target_options.append((f"{w.name} (PID: {w.pid or '-'})", str(w.worker_id)))
         if not has_primary:
-            target_options.insert(0, ("🧠 Primary Agent (Coordinator)", "primary"))
+            target_options.insert(0, ("Primary Agent (Coordinator)", "primary"))
         if len(target_options) == 1:
-            target_options.append(("⚡ Worker-1 (Default)", "1"))
-            target_options.append(("⚡ Worker-2 (Default)", "2"))
+            target_options.append(("Worker-1 (Default)", "1"))
+            target_options.append(("Worker-2 (Default)", "2"))
 
         default_val = self._default_target or (target_options[1][1] if len(target_options) > 1 else "primary")
 
         with Vertical(id="directive-modal-dialog"):
-            yield Static("⚡ [bold #e0af68]Agent Assignment & Task Dispatcher[/]", id="directive-title")
+            yield Static("[bold #e0af68]Agent Assignment & Task Dispatcher[/]", id="directive-title")
             yield Static(
                 "[dim]Assign role, specify task prompt, and dispatch directly to running agy instance.[/]",
                 id="directive-subtitle",
@@ -117,7 +117,7 @@ class DirectiveModal(ModalScreen[None]):
                 )
 
             with Horizontal(id="directive-buttons"):
-                yield Button("⚡ Dispatch Task", variant="warning", id="btn-inject-submit")
+                yield Button("Dispatch Task", variant="warning", id="btn-inject-submit")
                 yield Button("Cancel", variant="default", id="btn-inject-cancel")
 
     def on_mount(self) -> None:
@@ -166,9 +166,9 @@ class DirectiveModal(ModalScreen[None]):
                 else:
                     newline = "\r\n" if sys.platform == "win32" else "\n"
                     coord.write(prompt_text + newline)
-                self._safe_notify(f"✓ Directive dispatched to Primary Coordinator (Priority: {priority_val})!", severity="warning")
+                self._safe_notify(f"Directive dispatched to Primary Coordinator (Priority: {priority_val})!", severity="warning")
             else:
-                self._safe_notify(f"✓ Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
+                self._safe_notify(f"Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
             self.dismiss(None)
             return
 
@@ -195,7 +195,7 @@ class DirectiveModal(ModalScreen[None]):
             newline = "\r\n" if sys.platform == "win32" else "\n"
             worker.write(prompt_text + newline)
 
-        self._safe_notify(f"✓ Task dispatched to {worker.name} ({role_val}, Priority: {priority_val})!", severity="warning")
+        self._safe_notify(f"Task dispatched to {worker.name} ({role_val}, Priority: {priority_val})!", severity="warning")
         self.dismiss(None)
 
     def _safe_notify(self, message: str, severity: str = "information") -> None:

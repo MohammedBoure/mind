@@ -111,12 +111,12 @@ class BottomBar(Widget):
 
             # 3. Right Segment: PTY Platform / Encoding Status
             backend_info = self.pty_backend or ("ConPTY" if sys.platform == "win32" else "POSIX PTY")
-            yield Static(f"⚡ {backend_info} · UTF-8", id="bottom-status-pill")
+            yield Static(f"{backend_info} · UTF-8", id="bottom-status-pill")
 
     def _build_mode_indicator(self) -> str:
         if self.mode in ("PTY_INTERACT", "PTY"):
-            return "[bold #1a1b26 on #7aa2f7] ⌨ PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) [/]"
-        return "[bold #1a1b26 on #e0af68] 🔍 NORMAL MODE (Press 'i' to type in agy) [/]"
+            return "[bold #1a1b26 on #7aa2f7] PTY INTERACT (Press Esc Esc or Ctrl+B for Outer Normal) [/]"
+        return "[bold #1a1b26 on #e0af68] NORMAL MODE (Press 'i' to type in agy) [/]"
 
     def watch_mode(self, value: str) -> None:
         """Toggle visible action pills and update mode indicator when mode changes."""
@@ -141,6 +141,6 @@ class BottomBar(Widget):
     def watch_pty_backend(self, value: str) -> None:
         """Update PTY architecture indicator when backend changes."""
         try:
-            self.query_one("#bottom-status-pill", Static).update(f"⚡ {value} · UTF-8")
+            self.query_one("#bottom-status-pill", Static).update(f"{value} · UTF-8")
         except Exception:
             pass

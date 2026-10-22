@@ -125,7 +125,7 @@ def test_nerd_fonts_and_unicode_symbols_in_bars_and_banners() -> None:
     # Verify rounded Unicode box borders
     assert "╭" in plain_text
     assert "╰" in plain_text
-    assert "🧠" in plain_text
+    assert "mind" in plain_text
     assert "المنسق العام" in plain_text
 
 
@@ -162,16 +162,16 @@ def test_interactive_tab_bar_activity_icons_and_formatting() -> None:
     icon_running = WorkerTabBar._get_activity_icon("1")
     assert icon_running == "●"
 
-    # 3. Simulate waiting input state -> '⏳'
+    # 3. Simulate waiting input state -> '…'
     w2.process = type("MockProcess", (), {"is_alive": lambda self: True})()
     w2.state = WorkerProcessState.WAITING_INPUT
     icon_waiting = WorkerTabBar._get_activity_icon("2")
-    assert icon_waiting == "⏳"
+    assert icon_waiting == "…"
 
-    # 4. Simulate unread notification state -> '🔔'
+    # 4. Simulate unread notification state -> '!'
     w3.unread_notifications = 2
     icon_unread = WorkerTabBar._get_activity_icon("3")
-    assert icon_unread == "🔔"
+    assert icon_unread == "!"
 
     # 5. Formatted titles include activity icons and full unclipped names
     tab_bar = WorkerTabBar(
@@ -183,11 +183,11 @@ def test_interactive_tab_bar_activity_icons_and_formatting() -> None:
     assert "[1] agy1 (Worker-1)" in t1
 
     t3 = tab_bar._format_tab_title("3", "مهندس البرمجيات", is_active=False)
-    assert "🔔" in t3
+    assert "!" in t3
     assert "مهندس البرمجيات · Worker-3" in t3
 
     # 6. Test update_tab_title
-    tab_bar.update_tab_title("2", name="Worker-Custom", activity_icon="⚡")
+    tab_bar.update_tab_title("2", name="Worker-Custom", activity_icon="*")
     matching = [name for wid, name in tab_bar.tab_items if wid == "2"]
     assert matching == ["Worker-Custom"]
 

@@ -145,7 +145,7 @@ def register_mcp(transport: str, port: int) -> None:
     click.echo(f"Registering mind-mcp with agy: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
-        click.secho("✓ Successfully registered mind-mcp with agy!", fg="green")
+        click.secho("Successfully registered mind-mcp with agy!", fg="green")
         if result.stdout.strip():
             click.echo(result.stdout.strip())
     else:

@@ -26,7 +26,7 @@ class HeaderBar(Widget):
     mode: reactive[str] = reactive("NORMAL")
     mcp_port: reactive[int] = reactive(8765)
     worker_count: reactive[int] = reactive(2)
-    quota_text: reactive[str] = reactive("📊 [dim]Quota:[/] [bold #9ece6a][██████████] 100%[/]")
+    quota_text: reactive[str] = reactive("[dim]Quota:[/] [bold #9ece6a][██████████] 100%[/]")
 
     def __init__(
         self,
@@ -46,22 +46,22 @@ class HeaderBar(Widget):
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-bar"):
             # Brand logo pill
-            yield Static("🧠 [bold #7aa2f7]mind[/]", id="brand-pill")
+            yield Static("[bold #7aa2f7]mind[/]", id="brand-pill")
 
             # Active session pill
-            yield Static(f"📂 [dim]{self.session_name}[/]", id="session-pill")
+            yield Static(f"[dim]{self.session_name}[/]", id="session-pill")
 
             # Center spacer
             yield Static("", id="header-spacer")
 
             # Active worker telemetry
-            yield Static(f"⚡ [bold #e0af68]{self.worker_count}[/] [dim]active workers[/]", id="worker-count-pill")
+            yield Static(f"[bold #e0af68]{self.worker_count}[/] [dim]active workers[/]", id="worker-count-pill")
 
             # Live Quota Badge
             yield Static(self.quota_text, id="quota-pill")
 
             # MCP Health status indicator
-            yield Static(f"⚡ [bold #9ece6a]MCP[/] [dim]:{self.mcp_port}[/]", id="mcp-indicator")
+            yield Static(f"[bold #9ece6a]MCP[/] [dim]:{self.mcp_port}[/]", id="mcp-indicator")
 
     def on_mount(self) -> None:
         """Initialize live quota telemetry and register recurring check."""
@@ -76,7 +76,7 @@ class HeaderBar(Widget):
             usage = monitor.get_slot_usage("agy1")
             bar = usage.hourly_bar or usage.colored_progress_bar
             if bar:
-                self.quota_text = f"📊 [dim]Quota:[/] {bar}"
+                self.quota_text = f"[dim]Quota:[/] {bar}"
             else:
                 self.update_quota(usage.hourly_remaining_percent, usage.status.value)
         except Exception:
@@ -97,19 +97,19 @@ class HeaderBar(Widget):
             from mind.core.usage_monitor import render_colored_bar, QuotaStatus
             q_status = QuotaStatus(status) if status in ("normal", "warning", "throttled") else QuotaStatus.NORMAL
             bar = render_colored_bar(remaining_percent, q_status, width=10)
-            self.quota_text = f"📊 [dim]Quota:[/] {bar}"
+            self.quota_text = f"[dim]Quota:[/] {bar}"
         except Exception:
-            self.quota_text = f"📊 [dim]Quota:[/] [bold #9ece6a][██████████] {int(remaining_percent)}%[/]"
+            self.quota_text = f"[dim]Quota:[/] [bold #9ece6a][██████████] {int(remaining_percent)}%[/]"
 
     def watch_session_name(self, value: str) -> None:
         try:
-            self.query_one("#session-pill", Static).update(f"📂 [dim]{value}[/]")
+            self.query_one("#session-pill", Static).update(f"[dim]{value}[/]")
         except Exception:
             pass
 
     def watch_worker_count(self, value: int) -> None:
         try:
-            self.query_one("#worker-count-pill", Static).update(f"⚡ [bold #e0af68]{value}[/] [dim]active workers[/]")
+            self.query_one("#worker-count-pill", Static).update(f"[bold #e0af68]{value}[/] [dim]active workers[/]")
         except Exception:
             pass
 

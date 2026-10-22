@@ -119,13 +119,13 @@ def test_coordinator_pane_alarm_badge() -> None:
     worker = mgr.create_worker("coordinator", role="coordinator", autostart=False)
     tab = WorkerTerminalTab(worker_session=worker)
 
-    tab.set_alarm_badge("⚡ Worker-1 Finished (Idle)")
+    tab.set_alarm_badge("Worker-1 Finished (Idle)")
     header = tab._build_header_text()
-    assert "⚡ Worker-1 Finished (Idle)" in header
+    assert "Worker-1 Finished (Idle)" in header
 
     tab.clear_alarm_badge()
     header_cleared = tab._build_header_text()
-    assert "⚡ Worker-1 Finished (Idle)" not in header_cleared
+    assert "Worker-1 Finished (Idle)" not in header_cleared
 
 
 def test_agent_config_modal_directive_editing(tmp_path: Path, monkeypatch) -> None:
@@ -246,12 +246,12 @@ def test_coordinator_alarm_badge_and_injection() -> None:
 
     # 1. Test idle alarm formatting and badge
     idle_event = mgr.notify_coordinator_worker_idle("1", "Build succeeded")
-    assert idle_event["badge"] == "⚡ Worker-1 Finished (Idle)"
+    assert idle_event["badge"] == "Worker-1 Finished (Idle)"
     assert idle_event["type"] == "worker_idle"
 
     tab = WorkerTerminalTab(worker_session=coord)
     tab.set_alarm_badge(idle_event["badge"])
-    assert "⚡ Worker-1 Finished (Idle)" in tab._build_header_text()
+    assert "Worker-1 Finished (Idle)" in tab._build_header_text()
 
     # Test injection into coordinator terminal
     injected = mgr.alarm_pipeline.inject_event_to_coordinator(idle_event, press_enter=True)
@@ -262,12 +262,12 @@ def test_coordinator_alarm_badge_and_injection() -> None:
 
     # 2. Test assistance needed alarm formatting and badge
     help_event = mgr.notify_coordinator_worker_help("2", "Deadlock detected in worker 2", priority="critical")
-    assert help_event["badge"] == "🚨 Assistance Needed"
+    assert help_event["badge"] == "Assistance Needed"
     assert help_event["type"] == "worker_help"
 
     tab.set_alarm_badge(help_event["badge"])
     header_text = tab._build_header_text()
-    assert "🚨 Assistance Needed" in header_text
+    assert "Assistance Needed" in header_text
 
     injected_help = mgr.alarm_pipeline.inject_event_to_coordinator(help_event, press_enter=True)
     assert injected_help is True

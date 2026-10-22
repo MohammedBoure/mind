@@ -54,7 +54,7 @@ def list_sessions_cli(as_json: bool = False) -> None:
 
     console = Console()
     table = Table(
-        title="🧠  mind sessions — Persisted Multi-Agent Orchestration Sessions",
+        title="mind sessions — Persisted Multi-Agent Orchestration Sessions",
         header_style="bold #7aa2f7",
         border_style="#3b4261",
         box=None,
@@ -136,7 +136,7 @@ def clean_sessions_cli(
 
     console = Console()
     if cleaned_names:
-        console.print(f"[bold green]✓ Successfully cleaned {len(cleaned_names)} sessions:[/]")
+        console.print(f"[bold green]Successfully cleaned {len(cleaned_names)} sessions:[/]")
         for name in cleaned_names:
             console.print(f"  [dim]- {name}[/dim]")
     else:
@@ -155,7 +155,7 @@ def delete_session_cli(name: str) -> bool:
 
     success = delete_session(name)
     if success:
-        console.print(f"[bold green]✓ Session '{name}' deleted successfully.[/]")
+        console.print(f"[bold green]Session '{name}' deleted successfully.[/]")
     else:
         console.print(f"[bold red]Error:[/] Could not delete session '{name}'.")
     return success
@@ -177,5 +177,5 @@ def create_session_cli(name: str, agent_count: int = 3, goal: str = "") -> Sessi
         active=True,
     )
     saved = save_session(record)
-    console.print(f"[bold green]✓ Session '{saved.name}' created with {saved.agent_count} agents.[/]")
+    console.print(f"[bold green]Session '{saved.name}' created with {saved.agent_count} agents.[/]")
     return saved

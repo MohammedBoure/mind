@@ -251,7 +251,7 @@ class CoordinatorAlarmPipeline:
             else:
                 summary = f"{name} finished execution and is IDLE at terminal prompt."
 
-        badge = f"⚡ Worker-{worker_id} Finished (Idle)"
+        badge = f"Worker-{worker_id} Finished (Idle)"
         event = {
             "type": "worker_idle",
             "worker_id": str(worker_id),
@@ -274,7 +274,7 @@ class CoordinatorAlarmPipeline:
         worker = self._get_worker(worker_id)
         name = worker.name if worker else f"Worker-{worker_id}"
 
-        badge = "🚨 Assistance Needed"
+        badge = "Assistance Needed"
         event = {
             "type": "worker_help",
             "worker_id": str(worker_id),
@@ -311,13 +311,13 @@ class CoordinatorAlarmPipeline:
 
         if event_type == "worker_idle":
             status_line = (
-                f"\n[⚡ Worker-{worker_id} Finished (Idle)]: {summary}\n"
+                f"\n[Worker-{worker_id} Finished (Idle)]: {summary}\n"
                 f"Coordinator Directive: Worker task is complete. Deduce next workflow step and dispatch new task.\n"
             )
         else:
             priority = event.get("priority", "high")
             status_line = (
-                f"\n[🚨 Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
+                f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
                 f"Coordinator Directive: Intervene immediately to resolve roadblock.\n"
             )
 

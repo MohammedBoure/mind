@@ -47,7 +47,7 @@ class SessionPickerScreen(Screen):
         with Vertical(id="session-picker-container"):
             with Vertical(id="picker-panel"):
                 yield Static(
-                    "🧠  [bold #7aa2f7]mind[/bold #7aa2f7]",
+                    "  [bold #7aa2f7]mind[/bold #7aa2f7]",
                     id="picker-title",
                 )
                 yield Static(
@@ -89,7 +89,7 @@ class SessionPickerScreen(Screen):
             active_ago = _relative_time(session.last_activity)
             status_badge = "[bold #9ece6a]● Active[/]" if session.active else "[dim #565f89]○ Archived[/]"
 
-            stats_info = f"⚡ {session.total_steps} steps · {session.total_interactions} tasks"
+            stats_info = f"{session.total_steps} steps · {session.total_interactions} tasks"
             timing_info = f"Created: {created_ago} · Active: {active_ago}"
 
             label = (
@@ -180,7 +180,7 @@ class SessionPickerScreen(Screen):
             if deleted:
                 self.refresh_sessions()
                 try:
-                    self.notify(f"🗑 Session '{target.name}' deleted.", severity="warning", timeout=2.0)
+                    self.notify(f"Session '{target.name}' deleted.", severity="warning", timeout=2.0)
                 except Exception:
                     pass
         except Exception as e:

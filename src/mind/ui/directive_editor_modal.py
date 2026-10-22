@@ -32,14 +32,14 @@ class DirectiveEditorModal(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="directive-editor-dialog"):
             yield Static(
-                f"📝 [bold #bb9af7]Edit Directive: {self.target}[/] [dim]({self.file_path})[/]",
+                f"[bold #bb9af7]Edit Directive: {self.target}[/] [dim]({self.file_path})[/]",
                 id="directive-editor-title",
             )
             self.text_area = TextArea(self.current_content, id="directive-text-area")
             yield self.text_area
             with Horizontal(id="directive-editor-buttons"):
-                yield Button("💾 Save Directive (Ctrl+S)", variant="success", id="btn-save-directive")
-                yield Button("📄 Open in External Editor (Ctrl+O)", variant="primary", id="btn-open-ext")
+                yield Button("Save Directive (Ctrl+S)", variant="success", id="btn-save-directive")
+                yield Button("Open in External Editor (Ctrl+O)", variant="primary", id="btn-open-ext")
                 yield Button("Cancel (Esc)", variant="default", id="btn-cancel-directive")
 
     def on_mount(self) -> None:

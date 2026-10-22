@@ -25,12 +25,12 @@ _TYPE_CLASSES: dict[str, str] = {
 
 # Status indicators
 _STATUS_ICONS: dict[AgentStatus, str] = {
-    AgentStatus.IDLE: "[dim]⏸ IDLE[/]",
-    AgentStatus.THINKING: "[bold #a78bfa]🧠 THINKING[/]",
-    AgentStatus.EXECUTING: "[bold #38bdf8]⚡ EXECUTING[/]",
+    AgentStatus.IDLE: "[dim]IDLE[/]",
+    AgentStatus.THINKING: "[bold #a78bfa]THINKING[/]",
+    AgentStatus.EXECUTING: "[bold #38bdf8]EXECUTING[/]",
     AgentStatus.RUNNING: "[bold #9ece6a]● RUNNING[/]",
-    AgentStatus.WAITING: "[bold #fbbf24]⏳ WAITING[/]",
-    AgentStatus.ERROR: "[bold #f87171]❌ ERROR[/]",
+    AgentStatus.WAITING: "[bold #fbbf24]WAITING[/]",
+    AgentStatus.ERROR: "[bold #f87171]ERROR[/]",
 }
 
 
@@ -120,7 +120,7 @@ class AgentLogPane(Widget):
 
         text = "\n".join(plain_lines)
         copy_to_clipboard(text, app=self._get_safe_app())
-        self._safe_notify(f"📋 Copied {len(self._logs)} log lines to clipboard", timeout=1.5)
+        self._safe_notify(f"Copied {len(self._logs)} log lines to clipboard", timeout=1.5)
         return text
 
     def _safe_notify(self, message: str, severity: str = "information", timeout: float = 1.5) -> None:

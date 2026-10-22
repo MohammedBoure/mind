@@ -755,7 +755,7 @@ class AgentConfigModal(ModalScreen[None]):
         path = open_directive_in_editor(target_id)
         try:
             if hasattr(self, "app") and hasattr(self.app, "notify"):
-                self.app.notify(f"📄 Directives File: {path}", title="Directives Open", severity="information", timeout=3.0)
+                self.app.notify(f"Directives File: {path}", title="Directives Open", severity="information", timeout=3.0)
         except Exception:
             pass
 
@@ -786,7 +786,7 @@ class AgentConfigModal(ModalScreen[None]):
                 worker.profile.instructions = new_text
             try:
                 if hasattr(self, "app") and hasattr(self.app, "notify"):
-                    self.app.notify("✓ Directive updated & saved to disk", severity="information", timeout=2.0)
+                    self.app.notify("Directive updated & saved to disk", severity="information", timeout=2.0)
             except Exception:
                 pass
 
@@ -879,7 +879,7 @@ class AgentConfigModal(ModalScreen[None]):
             self._terminal_manager.restart_worker(target_id, new_config)
             try:
                 if hasattr(self, "app") and hasattr(self.app, "notify"):
-                    self.app.notify(f"⚡ Config applied & Worker {target_id} restarted", severity="information", timeout=2.0)
+                    self.app.notify(f"Config applied & Worker {target_id} restarted", severity="information", timeout=2.0)
             except Exception:
                 pass
         except Exception as e:
