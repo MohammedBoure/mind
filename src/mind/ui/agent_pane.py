@@ -129,6 +129,13 @@ class AgentLogPane(Widget):
         except Exception:
             pass
 
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """Right-click copies log lines to OS clipboard."""
+        if event.button == 3:
+            self.copy_content()
+            event.stop()
+            event.prevent_default()
+
     def on_mouse_up(self, event: events.MouseUp) -> None:
         """Right-click copies log lines to OS clipboard."""
         if event.button == 3:

@@ -249,13 +249,61 @@ class TerminalScreenWidget(Widget):
     def render(self) -> Text:
         """Render virtual screen buffer or placeholder banner if still initializing."""
         if self.worker_session.buffer.has_content:
-            return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            text = self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            if self.has_selection:
+                self._apply_selection_styling(text)
+            return text
 
         visible_lines = self.worker_session.buffer.get_visible_lines()
         if any(line.strip() for line in visible_lines):
-            return self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            text = self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            if self.has_selection:
+                self._apply_selection_styling(text)
+            return text
 
         return self._render_placeholder_banner()
+
+    def _apply_selection_styling(self, text: Text) -> None:
+        """Apply visual highlight styling to the selected character region."""
+        if not self.has_selection or not self._select_start or not self._select_end:
+            return
+
+        sx, sy = self._select_start
+        ex, ey = self._select_end
+
+        if (sy, sx) > (ey, ex):
+            y1, x1, y2, x2 = ey, ex, sy, sx
+        else:
+            y1, x1, y2, x2 = sy, sx, ey, ex
+
+        from rich.style import Style
+        highlight_style = Style(bgcolor="#364a82", color="#ffffff", bold=True)
+
+        lines = text.plain.split("\n")
+        current_offset = 0
+
+        for line_idx, line in enumerate(lines):
+            line_len = len(line)
+            if y1 <= line_idx <= y2:
+                if y1 == y2:
+                    start_char = max(0, min(x1, line_len))
+                    end_char = max(0, min(x2, line_len))
+                elif line_idx == y1:
+                    start_char = max(0, min(x1, line_len))
+                    end_char = line_len
+                elif line_idx == y2:
+                    start_char = 0
+                    end_char = max(0, min(x2, line_len))
+                else:
+                    start_char = 0
+                    end_char = line_len
+
+                if start_char < end_char:
+                    abs_start = current_offset + start_char
+                    abs_end = current_offset + end_char
+                    text.stylize(highlight_style, abs_start, abs_end)
+
+            current_offset += line_len + 1
 
     def _render_placeholder_banner(self) -> Text:
         """Render an elegant Tokyo Night placeholder banner while buffer initializes."""
@@ -354,6 +402,7 @@ class TerminalScreenWidget(Widget):
             self._is_dragging = True
             self._select_start = (event.x, event.y)
             self._select_end = (event.x, event.y)
+            self.refresh()
         elif event.button == 3:
             # Right-click: Copy active selection or entire screen buffer to OS clipboard
             if self.has_selection:
@@ -371,6 +420,7 @@ class TerminalScreenWidget(Widget):
         """Update selection boundary during mouse drag."""
         if self._is_dragging:
             self._select_end = (event.x, event.y)
+            self.refresh()
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
         """Finalize mouse selection and automatically synchronize to clipboard."""
@@ -382,12 +432,25 @@ class TerminalScreenWidget(Widget):
                 if text:
                     copy_to_clipboard(text, app=self._get_safe_app())
                     self._safe_notify(f"📋 Copied selection to clipboard ({len(text)} chars)", timeout=1.5)
+            self.refresh()
+        elif event.button == 3:
+            # Right-click on MouseUp fallback
+            if self.has_selection:
+                selected = self.get_selected_text()
+                if selected:
+                    copy_to_clipboard(selected, app=self._get_safe_app())
+                    self._safe_notify(f"📋 Copied selection to clipboard ({len(selected)} chars)", timeout=1.5)
+                self.clear_selection()
+            else:
+                self.copy_selection_or_buffer()
+            event.stop()
+            event.prevent_default()
 
     def on_key(self, event: events.Key) -> None:
         """Handle keystrokes based on current modal state.
 
         In NORMAL mode: Does not consume keys, allowing single-key navigation commands
-        to bubble up to WorkspaceScreen.
+        to bubble up to WorkspaceScreen (with direct support for 'y' Yank).
 
         In PTY_INTERACT mode:
         - Dedicated leader keys (Ctrl+B, F12, Ctrl+]) and double Escape (Esc Esc within 350ms)
@@ -406,8 +469,13 @@ class TerminalScreenWidget(Widget):
             event.prevent_default()
             return
 
-        # In NORMAL mode: do not consume keys; allow bubbling to WorkspaceScreen.on_key()
+        # In NORMAL mode: handle 'y' Yank directly, otherwise bubble to WorkspaceScreen
         if not self.is_pty_mode:
+            if key_name == "y":
+                self.copy_selection_or_buffer()
+                event.stop()
+                event.prevent_default()
+                return
             return
 
         # 0.1 Explicit Clipboard Paste: Ctrl+V or Shift+Insert
