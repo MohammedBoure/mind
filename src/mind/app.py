@@ -10,6 +10,12 @@ from pathlib import Path
 
 from textual.app import App
 
+from mind.core.session_storage import (
+    SessionRecord,
+    get_session,
+    record_session_activity,
+    save_session,
+)
 from mind.events import NewSessionRequested, SessionSelected
 from mind.state.mock_data import MOCK_SESSIONS
 from mind.ui.session_picker import SessionPickerScreen
@@ -55,14 +61,22 @@ class MindApp(App):
 
     def on_session_selected(self, event: SessionSelected) -> None:
         """Handle session selection from the picker."""
-        # Look up agent count from mock data
         agent_count = 3
         goal = ""
-        for session in MOCK_SESSIONS:
-            if session.name == event.session_name:
-                agent_count = session.agent_count
-                goal = session.goal
-                break
+
+        # Lookup session from persistent storage first
+        stored = get_session(event.session_name)
+        if stored:
+            agent_count = stored.agent_count
+            goal = stored.goal
+            record_session_activity(event.session_name, steps=1, status="active")
+        else:
+            # Fallback to mock data for compatibility
+            for session in MOCK_SESSIONS:
+                if session.name == event.session_name:
+                    agent_count = session.agent_count
+                    goal = session.goal
+                    break
 
         self._enter_workspace(
             session_name=event.session_name,
@@ -72,6 +86,19 @@ class MindApp(App):
 
     def on_new_session_requested(self, event: NewSessionRequested) -> None:
         """Handle new session creation request."""
+        # Ensure session is saved to persistent storage
+        try:
+            save_session(
+                SessionRecord(
+                    name=event.session_name,
+                    agent_count=event.agent_count,
+                    goal=event.goal,
+                    active=True,
+                )
+            )
+        except Exception:
+            pass
+
         self._enter_workspace(
             session_name=event.session_name,
             agent_count=event.agent_count,

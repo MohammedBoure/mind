@@ -37,6 +37,7 @@ from mind.core.directives import (
     resolve_directive_path,
     save_directive,
 )
+from mind.core.session_storage import record_session_activity
 from mind.ui.agent_config_modal import AgentConfigModal
 from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_editor_modal import DirectiveEditorModal
@@ -646,7 +647,17 @@ class WorkspaceScreen(Screen):
 
     def action_open_directive_modal(self) -> None:
         """Open Agent Assignment & Task Dispatcher modal."""
-        self.app.push_screen(DirectiveModal(default_target=self._active_worker_id))
+        self.app.push_screen(
+            DirectiveModal(default_target=self._active_worker_id),
+            callback=lambda _: self._on_directive_modal_closed(),
+        )
+
+    def _on_directive_modal_closed(self) -> None:
+        """Record session activity upon directive modal closure."""
+        try:
+            record_session_activity(self.session_name, steps=1)
+        except Exception:
+            pass
 
     def action_open_agent_config_modal(self) -> None:
         """Open Agent Configuration & CLI Tuning modal."""

@@ -28,6 +28,13 @@ _DISPATCH_MODES = [
     ("⌨ Direct Stdin Stream (Type + Enter)", "direct"),
 ]
 
+_PRIORITY_OPTIONS = [
+    ("⚡ High Priority (Default Interruption)", "high"),
+    ("🚨 Critical Priority (Immediate Preempt)", "critical"),
+    ("🔹 Normal Priority (Standard Dispatch)", "normal"),
+    ("💤 Low Priority (Background Task)", "low"),
+]
+
 
 class DirectiveModal(ModalScreen[None]):
     """Modal overlay allowing agent assignment and direct task dispatch."""
@@ -92,6 +99,15 @@ class DirectiveModal(ModalScreen[None]):
                 )
 
             with Vertical(classes="modal-field"):
+                yield Label("Task Priority:", classes="modal-label")
+                yield Select(
+                    options=_PRIORITY_OPTIONS,
+                    value="high",
+                    id="priority-select",
+                    allow_blank=False,
+                )
+
+            with Vertical(classes="modal-field"):
                 yield Label("Execution Dispatch Mode:", classes="modal-label")
                 yield Select(
                     options=_DISPATCH_MODES,
@@ -121,11 +137,13 @@ class DirectiveModal(ModalScreen[None]):
         target_select = self.query_one("#target-agent-select", Select)
         role_select = self.query_one("#role-select", Select)
         prompt_input = self.query_one("#task-prompt-input", Input)
+        priority_select = self.query_one("#priority-select", Select)
         dispatch_select = self.query_one("#dispatch-mode-select", Select)
 
         target_id = str(target_select.value) if target_select.value else "1"
         role_val = str(role_select.value) if role_select.value else "worker"
         prompt_text = prompt_input.value.strip()
+        priority_val = str(priority_select.value) if priority_select.value else "high"
         dispatch_mode = str(dispatch_select.value) if dispatch_select.value else "interrupt"
 
         if not prompt_text:
@@ -143,12 +161,12 @@ class DirectiveModal(ModalScreen[None]):
                     coord.interrupt_and_inject(
                         sender_id="User / Mind UI",
                         message=prompt_text,
-                        priority="high",
+                        priority=priority_val,
                     )
                 else:
                     newline = "\r\n" if sys.platform == "win32" else "\n"
                     coord.write(prompt_text + newline)
-                self._safe_notify("✓ Directive dispatched to Primary Coordinator!", severity="warning")
+                self._safe_notify(f"✓ Directive dispatched to Primary Coordinator (Priority: {priority_val})!", severity="warning")
             else:
                 self._safe_notify(f"✓ Task assigned to Primary Agent ({role_val}): '{prompt_text}'", severity="information")
             self.dismiss(None)
@@ -171,13 +189,13 @@ class DirectiveModal(ModalScreen[None]):
             worker.interrupt_and_inject(
                 sender_id="Primary Coordinator",
                 message=prompt_text,
-                priority="high",
+                priority=priority_val,
             )
         else:
             newline = "\r\n" if sys.platform == "win32" else "\n"
             worker.write(prompt_text + newline)
 
-        self._safe_notify(f"✓ Task dispatched to {worker.name} ({role_val})!", severity="warning")
+        self._safe_notify(f"✓ Task dispatched to {worker.name} ({role_val}, Priority: {priority_val})!", severity="warning")
         self.dismiss(None)
 
     def _safe_notify(self, message: str, severity: str = "information") -> None:

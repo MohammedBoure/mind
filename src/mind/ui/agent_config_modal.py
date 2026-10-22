@@ -662,9 +662,9 @@ class AgentConfigModal(ModalScreen[None]):
 
     def on_key(self, event: events.Key) -> None:
         """Global key interceptor for dialog navigation and shortcuts."""
-        # If user presses Down or Enter while in search input, shift focus to settings list
+        # If user presses Down, Enter, or Tab while in search input, shift focus to settings list
         if self.focused and getattr(self.focused, "id", "") == "config-search-input":
-            if event.key in ("down", "enter"):
+            if event.key in ("down", "enter", "tab"):
                 self.settings_list.focus()
                 event.stop()
                 event.prevent_default()
