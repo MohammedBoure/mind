@@ -308,9 +308,9 @@ class AgentConfigModal(ModalScreen[None]):
     """Modal overlay presenting the sleek Antigravity CLI configuration layout."""
 
     BINDINGS = [
-        ("escape", "save_and_close", "Save & Close"),
+        ("escape", "cancel", "Cancel"),
+        ("ctrl+s", "save_and_close", "Save & Close"),
         ("ctrl+r", "save_and_restart", "Save & Restart Worker"),
-        ("ctrl+s", "save_and_close", "Save"),
         ("o", "open_directive_file", "Open Directive File"),
         ("ctrl+o", "open_directive_file", "Open Directive File"),
         ("e", "edit_directive_inline", "Edit Directive In-App"),
@@ -327,6 +327,8 @@ class AgentConfigModal(ModalScreen[None]):
         self._on_save_callback = on_save_callback
         self._terminal_manager = TerminalManager.get_instance()
         self._discovered_agents = discover_system_agents()
+        self._worker_drafts: dict[str, dict[str, Any]] = {}
+        self._last_selected_worker_id: str = ""
         self.options: list[ConfigOption] = []
         self._init_options()
 
@@ -349,10 +351,23 @@ class AgentConfigModal(ModalScreen[None]):
         # Default tab selection
         target_tab_idx = 0
         if self._default_target:
-            for i, opt in enumerate(tab_options):
-                if str(self._default_target).lower() in opt.lower():
-                    target_tab_idx = i
-                    break
+            tgt = str(self._default_target).strip().lower()
+            if tgt in ("coordinator", "primary", "0"):
+                for i, opt in enumerate(tab_options):
+                    if "coordinator" in opt.lower():
+                        target_tab_idx = i
+                        break
+            else:
+                pattern = re.compile(rf"^tab\s*{re.escape(tgt)}\b", re.IGNORECASE)
+                for i, opt in enumerate(tab_options):
+                    if pattern.search(opt.strip()):
+                        target_tab_idx = i
+                        break
+                else:
+                    for i, opt in enumerate(tab_options):
+                        if f"tab {tgt}:" in opt.lower() or f"tab {tgt} " in opt.lower():
+                            target_tab_idx = i
+                            break
 
         # Discovered agents
         agent_names = list(self._discovered_agents) if self._discovered_agents else ["agy1", "agy2"]
@@ -361,16 +376,26 @@ class AgentConfigModal(ModalScreen[None]):
         if "agy2" not in agent_names:
             agent_names.insert(1, "agy2")
 
-        # Get current worker settings
+        # Get current worker settings matching target_tab_idx
         current_worker = None
-        if workers:
-            if self._default_target:
-                for w in workers:
-                    if str(w.worker_id) == str(self._default_target):
-                        current_worker = w
-                        break
-            if not current_worker:
-                current_worker = workers[0]
+        selected_worker_id = None
+        if tab_options and 0 <= target_tab_idx < len(tab_options):
+            sel_opt = tab_options[target_tab_idx]
+            if "coordinator" in sel_opt.lower():
+                selected_worker_id = "coordinator"
+            else:
+                m = re.search(r"tab\s*([^\s:]+)", sel_opt, re.IGNORECASE)
+                if m:
+                    selected_worker_id = m.group(1)
+
+        if selected_worker_id:
+            current_worker = self._terminal_manager.get_worker(selected_worker_id)
+        if not current_worker and self._default_target:
+            current_worker = self._terminal_manager.get_worker(str(self._default_target))
+        if not current_worker and workers:
+            current_worker = workers[0]
+
+        self._last_selected_worker_id = selected_worker_id or (str(current_worker.worker_id) if current_worker else "1")
 
         cur_mode = current_worker.cli_mode if current_worker else "accept-edits"
         cur_model = current_worker.model if current_worker else "gemini-3.8-flash-high"
@@ -637,9 +662,15 @@ class AgentConfigModal(ModalScreen[None]):
             desc = initial_entry.description if initial_entry else ""
             yield Static(desc, id="config-description-view")
 
-            # 4. Action Hints Bar
+            # 4. Action Buttons (Save & Restart, Save & Close, Cancel)
+            with Horizontal(id="config-action-buttons"):
+                yield Button("Save & Restart", variant="primary", id="btn-save-restart")
+                yield Button("Save & Close", variant="success", id="btn-save-close")
+                yield Button("Cancel", variant="default", id="btn-cancel")
+
+            # 5. Action Hints Bar
             yield Static(
-                "[bold #7aa2f7]↑↓/jk[/] Navigate  [bold #7aa2f7]←→/Space/Enter[/] Change  [bold #7aa2f7]o[/] Open Directive  [bold #7aa2f7]e[/] Edit In-App  [bold #e0af68]Ctrl+R[/] Restart  [bold #bb9af7]Esc[/] Close",
+                "[bold #7aa2f7]↑↓/jk[/] Navigate  [bold #7aa2f7]←→/Space/Enter[/] Change  [bold #7aa2f7]o[/] Open Directive  [bold #7aa2f7]e[/] Edit Directive  [bold #e0af68]Ctrl+R[/] Restart  [bold #9ece6a]Ctrl+S[/] Save  [bold #f7768e]Esc[/] Cancel",
                 id="config-footer-hints",
             )
 
@@ -678,14 +709,14 @@ class AgentConfigModal(ModalScreen[None]):
                     event.prevent_default()
                     return
                 else:
-                    self.action_save_and_close()
+                    self.action_cancel()
                     event.stop()
                     event.prevent_default()
                     return
 
         # 'q' in list exits dialog
         if event.key == "q" and self.focused == self.settings_list:
-            self.action_save_and_close()
+            self.action_cancel()
             event.stop()
             event.prevent_default()
             return
@@ -701,6 +732,23 @@ class AgentConfigModal(ModalScreen[None]):
             event.stop()
             event.prevent_default()
             return
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle click events on modal action buttons."""
+        button_id = event.button.id
+        if button_id == "btn-save-restart":
+            self.action_save_and_restart()
+        elif button_id == "btn-save-close":
+            self.action_save_and_close()
+        elif button_id == "btn-cancel":
+            self.action_cancel()
+
+    def action_cancel(self) -> None:
+        """Dismiss configuration modal without saving any changes."""
+        try:
+            self.dismiss(None)
+        except Exception:
+            pass
 
     def _on_selection_changed(self, entry: ConfigOption | None) -> None:
         """Update description bar when active setting changes."""
@@ -720,23 +768,46 @@ class AgentConfigModal(ModalScreen[None]):
 
         # If Target Worker Tab was changed, synchronize agent-specific values
         if entry.key == "target_worker":
+            # Save current option values for previous tab into drafts
+            if self._last_selected_worker_id:
+                self._worker_drafts[self._last_selected_worker_id] = self._gather_config_dict()
+
             selected_worker_id = self._resolve_selected_worker_id()
-            worker = self._terminal_manager.get_worker(selected_worker_id)
-            if worker:
+            self._last_selected_worker_id = selected_worker_id
+
+            # Restore from drafts if present, otherwise load from terminal manager
+            if selected_worker_id in self._worker_drafts:
+                draft = self._worker_drafts[selected_worker_id]
                 for opt in self.options:
-                    if opt.key == "agent_mode" and worker.cli_mode:
-                        opt.set_value(worker.cli_mode)
-                    elif opt.key == "model_selection" and worker.model:
-                        opt.set_value(worker.model)
-                    elif opt.key == "reasoning_effort" and worker.reasoning_effort:
-                        opt.set_value(worker.reasoning_effort)
-                    elif opt.key == "system_agent" and worker.assigned_agent:
-                        opt.set_value(worker.assigned_agent)
-                    elif opt.key == "extra_flags" and worker.extra_flags:
-                        opt.set_value(worker.extra_flags)
-                    elif opt.key == "open_directive":
-                        opt.description = f"Directives file: {resolve_directive_path(selected_worker_id)}. Press Enter or 'o' to open in editor."
-                self.settings_list.refresh()
+                    if opt.key == "agent_mode" and draft.get("cli_mode"):
+                        opt.set_value(draft["cli_mode"])
+                    elif opt.key == "model_selection" and draft.get("model"):
+                        opt.set_value(draft["model"])
+                    elif opt.key == "reasoning_effort" and draft.get("reasoning_effort"):
+                        opt.set_value(draft["reasoning_effort"])
+                    elif opt.key == "system_agent" and draft.get("assigned_agent"):
+                        opt.set_value(draft["assigned_agent"])
+                    elif opt.key == "extra_flags" and draft.get("extra_flags"):
+                        opt.set_value(draft["extra_flags"])
+            else:
+                worker = self._terminal_manager.get_worker(selected_worker_id)
+                if worker:
+                    for opt in self.options:
+                        if opt.key == "agent_mode" and worker.cli_mode:
+                            opt.set_value(worker.cli_mode)
+                        elif opt.key == "model_selection" and worker.model:
+                            opt.set_value(worker.model)
+                        elif opt.key == "reasoning_effort" and worker.reasoning_effort:
+                            opt.set_value(worker.reasoning_effort)
+                        elif opt.key == "system_agent" and worker.assigned_agent:
+                            opt.set_value(worker.assigned_agent)
+                        elif opt.key == "extra_flags" and worker.extra_flags:
+                            opt.set_value(worker.extra_flags)
+
+            for opt in self.options:
+                if opt.key == "open_directive":
+                    opt.description = f"Directives file: {resolve_directive_path(selected_worker_id)}. Press Enter or 'o' to open in editor."
+            self.settings_list.refresh()
 
     def _resolve_directive_target(self) -> str:
         """Resolve the target agent slot / identifier for directive persistence."""
@@ -809,7 +880,7 @@ class AgentConfigModal(ModalScreen[None]):
                 val = opt.value
                 if "coordinator" in val.lower():
                     return "coordinator"
-                m = re.search(r"tab\s*(\d+)", val, re.IGNORECASE)
+                m = re.search(r"tab\s*([^\s:]+)", val, re.IGNORECASE)
                 if m:
                     return m.group(1)
         return self._default_target or "1"
@@ -827,7 +898,8 @@ class AgentConfigModal(ModalScreen[None]):
             cli_mode = "auto"
 
         assigned_agent = config_map.get("system_agent", "")
-        name = assigned_agent or f"Worker-{self._resolve_selected_worker_id()}"
+        target_id = self._resolve_selected_worker_id()
+        name = assigned_agent or f"Worker-{target_id}"
 
         return {
             "name": name,
@@ -844,22 +916,32 @@ class AgentConfigModal(ModalScreen[None]):
             "color_scheme": config_map.get("color_scheme", "colorblind-friendly dark"),
         }
 
+    def _apply_saved_configs(self) -> None:
+        """Apply all pending draft configurations to TerminalManager workers."""
+        if self._last_selected_worker_id:
+            self._worker_drafts[self._last_selected_worker_id] = self._gather_config_dict()
+
+        for w_id, cfg in self._worker_drafts.items():
+            worker = self._terminal_manager.get_worker(w_id)
+            if worker:
+                worker.cli_mode = cfg["cli_mode"]
+                worker.model = cfg["model"]
+                worker.reasoning_effort = cfg["reasoning_effort"]
+                worker.extra_flags = cfg["extra_flags"]
+                worker.assigned_agent = cfg["assigned_agent"]
+                worker.name = cfg["name"]
+                worker.profile.cli_mode = cfg["cli_mode"]
+                worker.profile.model = cfg["model"]
+                worker.profile.reasoning_effort = cfg["reasoning_effort"]
+                worker.profile.extra_flags = cfg["extra_flags"]
+                worker.profile.assigned_agent = cfg["assigned_agent"]
+                worker.profile.name = cfg["name"]
+
     def action_save_and_close(self) -> None:
         """Save configuration without restarting worker process and dismiss modal."""
         target_id = self._resolve_selected_worker_id()
         new_config = self._gather_config_dict()
-
-        # Update worker in TerminalManager
-        worker = self._terminal_manager.get_worker(target_id)
-        if worker:
-            worker.cli_mode = new_config["cli_mode"]
-            worker.model = new_config["model"]
-            worker.reasoning_effort = new_config["reasoning_effort"]
-            worker.extra_flags = new_config["extra_flags"]
-            worker.profile.cli_mode = new_config["cli_mode"]
-            worker.profile.model = new_config["model"]
-            worker.profile.reasoning_effort = new_config["reasoning_effort"]
-            worker.profile.extra_flags = new_config["extra_flags"]
+        self._apply_saved_configs()
 
         if self._on_save_callback:
             try:
@@ -867,19 +949,31 @@ class AgentConfigModal(ModalScreen[None]):
             except Exception:
                 pass
 
-        self.dismiss(None)
+        try:
+            if hasattr(self, "app") and hasattr(self.app, "notify"):
+                agent_lbl = new_config.get("assigned_agent") or new_config.get("name", "")
+                self.app.notify(f"Settings saved for Tab {target_id} ({agent_lbl})", severity="information", timeout=2.5)
+        except Exception:
+            pass
+
+        try:
+            self.dismiss(None)
+        except Exception:
+            pass
 
     def action_save_and_restart(self) -> None:
         """Save configuration, restart child worker process in PTY, and dismiss modal."""
         target_id = self._resolve_selected_worker_id()
         new_config = self._gather_config_dict()
+        self._apply_saved_configs()
 
         # Respawn worker through TerminalManager
         try:
             self._terminal_manager.restart_worker(target_id, new_config)
             try:
                 if hasattr(self, "app") and hasattr(self.app, "notify"):
-                    self.app.notify(f"Config applied & Worker {target_id} restarted", severity="information", timeout=2.0)
+                    agent_lbl = new_config.get("assigned_agent") or new_config.get("name", "")
+                    self.app.notify(f"Config applied & Tab {target_id} restarted ({agent_lbl})", severity="information", timeout=2.5)
             except Exception:
                 pass
         except Exception as e:
@@ -895,4 +989,7 @@ class AgentConfigModal(ModalScreen[None]):
             except Exception:
                 pass
 
-        self.dismiss(None)
+        try:
+            self.dismiss(None)
+        except Exception:
+            pass

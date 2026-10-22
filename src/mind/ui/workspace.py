@@ -684,12 +684,28 @@ class WorkspaceScreen(Screen):
     def _on_worker_configured(self, worker_id: str, new_config: dict[str, Any], restarted: bool) -> None:
         """Callback when worker configuration is updated in AgentConfigModal."""
         new_name = new_config.get("name")
+        new_agent = new_config.get("assigned_agent")
+        new_model = new_config.get("model")
+
+        # 1. Ensure worker session reflects updated assigned_agent and name
+        worker = self._terminal_manager.get_worker(str(worker_id))
+        if worker:
+            if new_agent:
+                worker.assigned_agent = new_agent
+                worker.profile.assigned_agent = new_agent
+            if new_name:
+                worker.name = new_name
+                worker.profile.name = new_name
+            if new_model:
+                worker.model = new_model
+                worker.profile.model = new_model
+
         if new_name:
             if str(worker_id) in ("coordinator", "primary"):
                 if len(self._agents) > 0:
                     self._agents[0].name = new_name
-                    if new_config.get("model"):
-                        self._agents[0].model = new_config["model"]
+                    if new_model:
+                        self._agents[0].model = new_model
                 coord_tab = getattr(self, "_coordinator_tab", None)
                 if coord_tab:
                     try:
@@ -702,8 +718,8 @@ class WorkspaceScreen(Screen):
             for agent in self._agents:
                 if str(agent.id) == str(worker_id):
                     agent.name = new_name
-                    if new_config.get("model"):
-                        agent.model = new_config["model"]
+                    if new_model:
+                        agent.model = new_model
                     break
 
             # Rebuild tab bar

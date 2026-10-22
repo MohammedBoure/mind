@@ -618,8 +618,8 @@ AgentConfigModal {
 #agent-config-dialog {
     width: 92;
     max-width: 96%;
-    height: 32;
-    max-height: 92%;
+    height: 36;
+    max-height: 94%;
     border: round #7aa2f7;
     background: #16161e;
     padding: 1 2;
@@ -665,6 +665,19 @@ AgentConfigModal {
     border-top: solid #292e42;
     color: #9aa5ce;
     padding-top: 1;
+}
+
+#config-action-buttons {
+    height: 3;
+    width: 100%;
+    margin-top: 1;
+    layout: horizontal;
+    align: right middle;
+}
+
+#config-action-buttons Button {
+    margin-left: 2;
+    min-width: 16;
 }
 
 #config-footer-hints {

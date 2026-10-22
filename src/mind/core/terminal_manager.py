@@ -354,8 +354,9 @@ class WorkerSession:
         self.runtime_warnings.clear()
 
         # 3. Respawn with updated command or flags
+        self.last_env = None
         target_command = command if command is not None else self.custom_command
-        self.start(command=target_command, cwd=self.last_cwd, env=self.last_env)
+        self.start(command=target_command, cwd=self.last_cwd, env=None)
 
     def _resolve_command(self, command: str | list[str] | None) -> list[str]:
         """Resolve executable command, defaulting to `agy` with tuned CLI flags if present."""

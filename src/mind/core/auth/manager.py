@@ -30,6 +30,8 @@ class TokenManager:
         instances_dir: Path | None = None,
         lock_name: str = r"Global\AgyCredentialMutex",
     ) -> None:
+        self._custom_tokens_dir: bool = tokens_dir is not None
+        self._custom_instances_dir: bool = instances_dir is not None
         self.tokens_dir: Path = tokens_dir or (Path.home() / ".gemini" / "tokens")
         self.instances_dir: Path = instances_dir or (Path.home() / ".gemini" / "instances")
         self.backend: CredentialBackend = backend or get_default_backend(self.tokens_dir)
@@ -74,12 +76,24 @@ class TokenManager:
         return self.tokens_dir / f"agy{slot}.token"
 
     def get_instance_dir(self, slot: int) -> Path:
-        """Return the path to the isolated instance directory (~/.gemini/instances/agy<N>)."""
-        return self.instances_dir / f"agy{slot}"
+        """Return the path to the isolated instance directory (~/.gemini/instances/agy<N> or host agys)."""
+        if self._custom_instances_dir:
+            return self.instances_dir / f"agy{slot}"
+        try:
+            from mind.core.agent_discovery import get_slot_instance_dir
+            return get_slot_instance_dir(slot)
+        except Exception:
+            return self.instances_dir / f"agy{slot}"
 
     def get_instance_token_path(self, slot: int) -> Path:
-        """Return the path to the instance token file (~/.gemini/instances/agy<N>/token.json)."""
-        return self.get_instance_dir(slot) / "token.json"
+        """Return the path to the instance token file (~/.gemini/instances/agy<N>/token.json or host agys)."""
+        if self._custom_instances_dir:
+            return self.get_instance_dir(slot) / "token.json"
+        try:
+            from mind.core.agent_discovery import get_slot_instance_token_path
+            return get_slot_instance_token_path(slot)
+        except Exception:
+            return self.get_instance_dir(slot) / "token.json"
 
     def write_slot_token(self, slot: int, token_bytes: bytes, sync_both: bool = True) -> bool:
         """Write token bytes to slot storage atomically (dual-syncing to central tokens and instance paths)."""
@@ -260,7 +274,7 @@ class TokenManager:
         return build_slot_isolation_env(
             slot=slot,
             base_env=base_env,
-            instances_root=self.instances_dir,
+            instances_root=self.instances_dir if self._custom_instances_dir else None,
             tokens_root=self.tokens_dir,
             auto_init=True,
         )

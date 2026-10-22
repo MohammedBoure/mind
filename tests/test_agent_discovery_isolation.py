@@ -374,3 +374,60 @@ async def test_select_worker_modal_lifecycle() -> None:
         opt_list = modal.query_one("#worker-options-list")
         assert opt_list is not None
         assert opt_list.option_count >= 1
+
+
+def test_token_manager_resolves_agys_instance_tokens() -> None:
+    """Verify TokenManager finds instance tokens in agys multi-instance directory."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_home = Path(tmp_dir)
+        agys_instances = fake_home / ".local" / "share" / "agy-instances"
+        agys_instances.mkdir(parents=True, exist_ok=True)
+        slot11_dir = agys_instances / "agy11"
+        slot11_dir.mkdir()
+        slot11_tok = slot11_dir / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+        slot11_tok.parent.mkdir(parents=True, exist_ok=True)
+        slot11_tok.write_text("token-slot-11", encoding="utf-8")
+
+        with patch("mind.core.agent_discovery.get_real_user_home", return_value=fake_home):
+            with patch.dict(os.environ, {"AGY_INSTANCES_DIR": str(agys_instances)}):
+                mgr = TokenManager()
+                assert mgr.get_instance_dir(11) == slot11_dir
+                assert mgr.get_instance_token_path(11) == slot11_tok
+
+
+def test_agent_config_modal_tab_selection_and_persistence() -> None:
+    """Verify AgentConfigModal preselects Tab 1 and persists assigned_agent reliably."""
+    from mind.core.terminal_manager import TerminalManager
+    from mind.ui.agent_config_modal import AgentConfigModal
+
+    mgr = TerminalManager.get_instance()
+    # Ensure clean state with Coordinator and Worker 1
+    coord = mgr.create_worker("coordinator", role="coordinator", assigned_agent="agy1", autostart=False)
+    worker1 = mgr.create_worker("1", role="worker", assigned_agent="agy2", autostart=False)
+
+    # 1. Opening modal for default_target="1" must preselect Tab 1, not Coordinator
+    modal = AgentConfigModal(default_target="1")
+    target_opt = next(opt for opt in modal.options if opt.key == "target_worker")
+    assert "Tab 1:" in target_opt.value
+    assert "Coordinator:" not in target_opt.value
+
+    # System agent option must show current worker agent (agy2)
+    sys_opt = next(opt for opt in modal.options if opt.key == "system_agent")
+    assert sys_opt.value == "agy2"
+
+    # 2. Change system agent to agy11 and save & close
+    sys_opt.set_value("agy11")
+    modal.action_save_and_close()
+
+    # Worker session in TerminalManager MUST now have assigned_agent="agy11"
+    assert worker1.assigned_agent == "agy11"
+    assert worker1.name == "agy11"
+    assert worker1.profile.assigned_agent == "agy11"
+
+    # 3. Reopening modal for Tab 1 MUST now show agy11 preserved
+    modal2 = AgentConfigModal(default_target="1")
+    target_opt2 = next(opt for opt in modal2.options if opt.key == "target_worker")
+    sys_opt2 = next(opt for opt in modal2.options if opt.key == "system_agent")
+    assert "Tab 1:" in target_opt2.value
+    assert sys_opt2.value == "agy11"
+
