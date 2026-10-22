@@ -70,3 +70,7 @@ include = ["src/mind"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::pytest.PytestConfigWarning",
+    "ignore::RuntimeWarning",
+]

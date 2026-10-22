@@ -113,7 +113,7 @@
   * `mind doctor`: فحص توافق النظام، مفاتيح PTY، توكنات الحسابات، وصحة خادم MCP.
   * `mind sessions`: إدارة وتنظيف الجلسات المؤقتة.
 
-# 16 : high
+# 16 : high [COMPLETED]
 حزمة الاختبارات الآلية الشاملة وضمان الجودة (Comprehensive Automated Test Suite).
 - بناء اختبارات شاملة في مجلد `tests/` تضمن اجتياز 100% من الحالات على ويندوز ولينكس:
   * اختبارات عزل التوكنات والمصادقة (`test_auth_refactor.py`, `test_credentials_isolation.py`).

@@ -110,6 +110,16 @@ class WorkspaceScreen(Screen):
         self._is_split_view: bool = True
         self._terminal_manager = TerminalManager.get_instance()
 
+    @property
+    def session_name(self) -> str:
+        """Name of the active multi-agent session."""
+        return self._session_name
+
+    @property
+    def agent_count(self) -> int:
+        """Configured number of agents in this session."""
+        return self._agent_count
+
     def _resolve_coordinator_command(self) -> list[str]:
         """Resolve command line to launch agy as Primary Coordinator in a clean, idle state."""
         # 1. Prioritize direct agy executable to avoid nested cmd/python wrapper delays and lock contention
