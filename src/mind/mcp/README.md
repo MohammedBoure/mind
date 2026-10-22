@@ -15,7 +15,7 @@ This directory contains the embedded MCP server (`mind-mcp`) that exposes lightw
 1. **`list_workers()`**
    - Returns operational status, PIDs, tasks, and linked slot/account identities (`slot_id`, `assigned_agent`, `linked_account`, `token_status`, `quota_status`, `hourly_remaining`, `weekly_remaining`).
 2. **`get_terminal_screen(worker_id, lines=50)`**
-   - Reads clean, ANSI-free rendered text from any worker's virtual terminal buffer.
+   - Reads clean, ANSI-free rendered text from any worker's virtual terminal buffer (use `lines=0` to retrieve the entire buffer including full scrollback history uncapped).
    - Utilizes `TerminalScreenCache` to provide instant $O(1)$ responses when buffer version is unchanged.
 3. **`send_terminal_input(worker_id, text, press_enter=True)`**
    - Dispatches raw commands and keystrokes directly to the target worker process stdin.

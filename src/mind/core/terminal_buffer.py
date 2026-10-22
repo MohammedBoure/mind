@@ -375,9 +375,16 @@ class TerminalBuffer:
         """Clean plain text export function explicitly provided for MCP tool consumption."""
         return self.get_plain_text(include_history=include_history, max_lines=lines)
 
-    def get_rich_text(self, show_cursor: bool = True) -> Text:
+    def get_history_count(self) -> int:
+        """Return the number of lines currently stored in scrollback history."""
+        with self._lock:
+            history_rows = getattr(self._screen.history, "top", None)
+            return len(history_rows) if history_rows else 0
+
+    def get_rich_text(self, show_cursor: bool = True, scroll_offset: int = 0) -> Text:
         """Render the 2D screen buffer into a Rich Text object with full ANSI styles.
 
+        Supports interactive scrollback offset (`scroll_offset > 0` views past history rows).
         Optimized with Run-Length Encoding (RLE) character batching, Style object caching,
         and frame-level cache retention to prevent memory bloat and avoid re-rendering
         unchanged content ("تفادي إعادة رسم ما لم يتغير").
@@ -385,23 +392,55 @@ class TerminalBuffer:
         with self._lock:
             cursor_y = self._screen.cursor.y
             cursor_x = self._screen.cursor.x
-            cache_key = (self._version, cursor_y, cursor_x, show_cursor)
+            
+            history_rows = getattr(self._screen.history, "top", None)
+            total_history = len(history_rows) if history_rows else 0
+            offset = max(0, min(scroll_offset, total_history))
+            
+            cache_key = (self._version, cursor_y, cursor_x, show_cursor, offset)
 
-            # Return cached Text if version and cursor state have not changed
+            # Return cached Text if version, cursor state, and scroll offset have not changed
             if self._cached_rich_text is not None and self._cached_rich_key == cache_key:
                 return self._cached_rich_text.copy()
 
             rich_text = Text()
 
+            # Build list of rows to render: either from history or current screen buffer
+            rows_to_render = []
             for y in range(self._lines):
-                row = self._screen.buffer[y]
+                target_idx = y - offset
+                if target_idx < 0:
+                    # Row comes from scrollback history
+                    hist_idx = total_history + target_idx
+                    if 0 <= hist_idx < total_history:
+                        row_dict = history_rows[hist_idx]
+                        rows_to_render.append((row_dict, False, y))
+                    else:
+                        rows_to_render.append((None, False, y))
+                else:
+                    # Row comes from active screen buffer
+                    if target_idx < self._lines:
+                        row = self._screen.buffer[target_idx]
+                        is_current_cursor_row = (show_cursor and offset == 0 and target_idx == cursor_y)
+                        rows_to_render.append((row, is_current_cursor_row, target_idx))
+                    else:
+                        rows_to_render.append((None, False, y))
 
-                # Determine last non-empty character to avoid unnecessary trailing spans,
-                # while preserving cursor highlight and background color styles
+            for y_render, (row_data, is_cursor_row, active_y) in enumerate(rows_to_render):
+                if row_data is None:
+                    if y_render < self._lines - 1:
+                        rich_text.append("\n")
+                    continue
+
+                is_dict = isinstance(row_data, dict)
+
+                # Determine last non-empty character to avoid unnecessary trailing spans
                 max_x = self._columns
                 for x in range(self._columns - 1, -1, -1):
-                    char_obj = row[x]
-                    is_cursor = show_cursor and y == cursor_y and x == cursor_x
+                    char_obj = row_data.get(x) if is_dict else row_data[x]
+                    if not char_obj:
+                        continue
+                    is_cursor = is_cursor_row and x == cursor_x
                     has_data = char_obj.data != " "
                     has_bg = char_obj.bg not in ("default", None)
                     has_special = bool(
@@ -412,27 +451,31 @@ class TerminalBuffer:
                         max_x = x + 1
                         break
                 else:
-                    max_x = 1 if (show_cursor and y == cursor_y) else 0
+                    max_x = 1 if is_cursor_row else 0
 
                 run_chars: list[str] = []
                 current_style: Style | None = None
                 current_style_key: tuple | None = None
 
                 for x in range(max_x):
-                    char_obj = row[x]
-                    data = char_obj.data or " "
-
-                    fg = _resolve_color(char_obj.fg)
-                    bg = _resolve_color(char_obj.bg)
-                    bold = bool(char_obj.bold)
-                    italics = bool(char_obj.italics)
-                    underline = bool(char_obj.underscore)
-                    strike = bool(char_obj.strikethrough)
-                    reverse = bool(char_obj.reverse)
-                    blink = bool(char_obj.blink)
+                    char_obj = row_data.get(x) if is_dict else row_data[x]
+                    if not char_obj:
+                        data = " "
+                        fg, bg = "default", "default"
+                        bold = italics = underline = strike = reverse = blink = False
+                    else:
+                        data = char_obj.data or " "
+                        fg = _resolve_color(char_obj.fg)
+                        bg = _resolve_color(char_obj.bg)
+                        bold = bool(char_obj.bold)
+                        italics = bool(char_obj.italics)
+                        underline = bool(char_obj.underscore)
+                        strike = bool(char_obj.strikethrough)
+                        reverse = bool(char_obj.reverse)
+                        blink = bool(char_obj.blink)
 
                     # Highlight the active cursor position
-                    if show_cursor and y == cursor_y and x == cursor_x:
+                    if is_cursor_row and x == cursor_x:
                         reverse = not reverse
 
                     style_key = (fg, bg, bold, italics, underline, strike, reverse, blink)
@@ -449,7 +492,7 @@ class TerminalBuffer:
                 if run_chars:
                     rich_text.append("".join(run_chars), style=current_style)
 
-                if y < self._lines - 1:
+                if y_render < self._lines - 1:
                     rich_text.append("\n")
 
             self._cached_rich_text = rich_text

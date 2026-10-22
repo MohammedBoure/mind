@@ -63,7 +63,6 @@ HeaderBar {
     color: #c0caf5;
     layout: horizontal;
     padding: 0 1;
-    border-bottom: solid #24283b;
 }
 
 #brand-pill {
@@ -76,16 +75,17 @@ HeaderBar {
 
 #session-pill {
     width: auto;
+    height: 1;
     color: #bb9af7;
     background: #24283b;
     padding: 0 1;
     margin-right: 1;
     text-style: bold;
-    border: round #343b58;
 }
 
 #mode-badge {
     width: auto;
+    height: 1;
     margin-right: 1;
 }
 
@@ -95,31 +95,31 @@ HeaderBar {
 
 #worker-count-pill {
     width: auto;
+    height: 1;
     color: #e0af68;
     background: #24283b;
     padding: 0 1;
     margin-right: 1;
     text-style: bold;
-    border: round #343b58;
 }
 
 #quota-pill {
     width: auto;
+    height: 1;
     color: #9ece6a;
     background: #1f2335;
     padding: 0 1;
     margin-right: 1;
     text-style: bold;
-    border: round #292e42;
 }
 
 #mcp-indicator {
     width: auto;
+    height: 1;
     color: #9ece6a;
     background: #1f2335;
     padding: 0 1;
     text-style: bold;
-    border: round #292e42;
 }
 
 /* ── Interrupt & Toast Alerts (Global Toast & Banner) ──────────────────────── */
@@ -319,7 +319,6 @@ WorkerTabBar, #worker-tab-bar {
     background: #16161e;
     color: #c0caf5;
     padding: 0 1;
-    border-bottom: solid #24283b;
 }
 
 #worker-tab-strip {
@@ -330,40 +329,37 @@ WorkerTabBar, #worker-tab-bar {
 
 .worker-tab-pill {
     width: auto;
+    height: 1;
     min-width: 14;
     margin-right: 1;
     padding: 0 1;
     background: #1f2335;
     color: #7aa2f7;
-    border: round #292e42;
 }
 
 .worker-tab-pill.-active {
     background: #7aa2f7;
     color: #1a1b26;
     text-style: bold;
-    border: round #7aa2f7;
 }
 
 .worker-tab-pill:hover {
     background: #24283b;
     color: #7dcfff;
-    border: round #3b4261;
 }
 
 .worker-new-pill {
     width: auto;
+    height: 1;
     padding: 0 1;
     background: #1f2335;
     color: #9ece6a;
     text-style: bold;
-    border: round #292e42;
 }
 
 .worker-new-pill:hover {
     background: #24283b;
     color: #a6e3a1;
-    border: round #9ece6a;
 }
 
 #worker-switcher {
@@ -491,7 +487,6 @@ BottomBar {
     color: #c0caf5;
     layout: horizontal;
     padding: 0 1;
-    border-top: solid #24283b;
 }
 
 #bottom-bar-container {
@@ -526,18 +521,17 @@ BottomBar {
 
 .action-pill {
     width: auto;
+    height: 1;
     margin-right: 1;
     padding: 0 1;
     background: #1f2335;
     color: #c0caf5;
-    border: round #24283b;
 }
 
 .action-pill:hover {
     background: #2f354d;
     color: #7aa2f7;
     text-style: bold;
-    border: round #7aa2f7;
 }
 
 #bottom-status-pill {

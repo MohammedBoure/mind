@@ -268,7 +268,7 @@ class WorkspaceScreen(Screen):
             else "🚨 Assistance Needed"
         )
 
-        # 1. Update Coordinator pane header badge
+        # 1. Update Coordinator pane header badge subtly
         coord_tab = getattr(self, "_coordinator_tab", None)
         if not coord_tab:
             try:
@@ -279,23 +279,19 @@ class WorkspaceScreen(Screen):
         if coord_tab:
             coord_tab.set_alarm_badge(badge)
 
-        # 2. Notify user with non-intrusive alert
-        self._safe_notify(f"🔔 {badge}: {summary}", severity="information", timeout=3.0)
+        # 2. Only show toast if user explicitly requests help, preventing repetitive idle toast spam
+        if event_type != "worker_idle":
+            self._safe_notify(f"🔔 {badge}: {summary}", severity="warning", timeout=3.0)
 
-        # 3. Inject event notice to Coordinator PTY so it wakes up and reasons only upon an actual event
+        # 3. For critical assistance requests only, forward a directive to Coordinator PTY.
+        # Routine idle transitions are logged in MCP check_coordinator_alarms() to prevent Echo Loop flood.
         coord_session = self._terminal_manager.get_worker("coordinator")
-        if coord_session and coord_session.is_alive:
-            if event_type == "worker_idle":
-                status_line = (
-                    f"\n[⚡ Worker-{worker_id} Finished (Idle)]: {summary}\n"
-                    f"Coordinator Directive: Worker task complete. Review output and deduce next execution step.\n"
-                )
-            else:
-                priority = event.get("priority", "high")
-                status_line = (
-                    f"\n[🚨 Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
-                    f"Coordinator Directive: Intervene immediately to resolve roadblock.\n"
-                )
+        if coord_session and coord_session.is_alive and event_type != "worker_idle":
+            priority = event.get("priority", "high")
+            status_line = (
+                f"\n[🚨 Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
+                f"Coordinator Directive: Intervene to resolve roadblock.\n"
+            )
             coord_session.write(status_line, press_enter=True)
 
     def on_unmount(self) -> None:

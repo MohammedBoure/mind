@@ -37,6 +37,7 @@ def is_idle_prompt(text: str) -> bool:
     """Check if the virtual terminal screen text ends with an interactive IDLE prompt.
 
     Strips ANSI color and control codes and inspects the trailing visible lines.
+    Filters out statusline artifacts such as '-- INSERT --' and model names.
     """
     clean_text = strip_ansi(text).rstrip()
     if not clean_text:
@@ -46,15 +47,24 @@ def is_idle_prompt(text: str) -> bool:
     if not lines:
         return False
 
+    # Ignore editor mode status lines like '-- INSERT --' or '-- NORMAL --'
+    filtered_lines = [
+        l for l in lines 
+        if not re.match(r"^--\s*(?:INSERT|NORMAL|REPLACE|VISUAL)\b", l, re.IGNORECASE)
+        and not re.match(r"^(?:Gemini|Claude|GPT|DeepSeek)\b.*?(?:high|low|medium)?$", l, re.IGNORECASE)
+    ]
+    if not filtered_lines:
+        return False
+
     # Check last line
-    last_line = lines[-1]
+    last_line = filtered_lines[-1]
     for pattern in _PROMPT_PATTERNS:
         if pattern.search(last_line):
             return True
 
     # Check last two lines combined for multiline prompt setups
-    if len(lines) >= 2:
-        combined = f"{lines[-2]}\n{lines[-1]}"
+    if len(filtered_lines) >= 2:
+        combined = f"{filtered_lines[-2]}\n{filtered_lines[-1]}"
         for pattern in _PROMPT_PATTERNS:
             if pattern.search(combined):
                 return True

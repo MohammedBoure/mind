@@ -168,7 +168,7 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
 
         Args:
             worker_id: The identifier of the worker agent (e.g. '1', 'worker-1').
-            lines: Number of recent lines to retrieve (default: 50).
+            lines: Number of recent lines to retrieve (default: 50, use 0 for entire buffer including scrollback history).
             target: Alias for worker_id.
 
         Returns:
@@ -180,7 +180,7 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             available = [w.worker_id for w in mgr.list_workers()]
             return f"Error: Worker '{actual_id}' not found. Available workers: {available}"
 
-        req_lines = lines if lines > 0 else 50
+        req_lines = max(0, lines)
         cache_key = f"{actual_id}:{req_lines}"
         current_version = worker.buffer.version
 

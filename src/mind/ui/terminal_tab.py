@@ -114,6 +114,7 @@ class TerminalScreenWidget(Widget):
         super().__init__(**kwargs)
         self.worker_session = worker_session
         self.mode = mode
+        self.term_scroll_offset: int = 0
         self._last_rendered_version = -1
         self._pending_esc: bool = False
         self._last_esc_time: float = 0.0
@@ -123,6 +124,41 @@ class TerminalScreenWidget(Widget):
         self._select_end: tuple[int, int] | None = None
         self.add_class("terminal-screen")
         self._sync_mode_classes()
+
+    def scroll_up(self, delta: int = 3) -> None:
+        """Scroll backwards into terminal scrollback history."""
+        max_history = self.worker_session.buffer.get_history_count()
+        if max_history <= 0:
+            return
+        new_offset = min(self.term_scroll_offset + delta, max_history)
+        if new_offset != self.term_scroll_offset:
+            self.term_scroll_offset = new_offset
+            self.refresh()
+
+    def scroll_down(self, delta: int = 3) -> None:
+        """Scroll forwards towards live terminal screen output."""
+        new_offset = max(0, self.term_scroll_offset - delta)
+        if new_offset != self.term_scroll_offset:
+            self.term_scroll_offset = new_offset
+            self.refresh()
+
+    def scroll_to_bottom(self) -> None:
+        """Reset scroll to live terminal screen."""
+        if self.term_scroll_offset != 0:
+            self.term_scroll_offset = 0
+            self.refresh()
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        """Handle mouse wheel scrolling upwards."""
+        self.scroll_up(delta=3)
+        event.stop()
+        event.prevent_default()
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        """Handle mouse wheel scrolling downwards."""
+        self.scroll_down(delta=3)
+        event.stop()
+        event.prevent_default()
 
     @property
     def has_selection(self) -> bool:
@@ -249,14 +285,20 @@ class TerminalScreenWidget(Widget):
     def render(self) -> Text:
         """Render virtual screen buffer or placeholder banner if still initializing."""
         if self.worker_session.buffer.has_content:
-            text = self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            text = self.worker_session.buffer.get_rich_text(
+                show_cursor=self.has_focus,
+                scroll_offset=self.term_scroll_offset,
+            )
             if self.has_selection:
                 self._apply_selection_styling(text)
             return text
 
         visible_lines = self.worker_session.buffer.get_visible_lines()
         if any(line.strip() for line in visible_lines):
-            text = self.worker_session.buffer.get_rich_text(show_cursor=self.has_focus)
+            text = self.worker_session.buffer.get_rich_text(
+                show_cursor=self.has_focus,
+                scroll_offset=self.term_scroll_offset,
+            )
             if self.has_selection:
                 self._apply_selection_styling(text)
             return text
@@ -469,10 +511,43 @@ class TerminalScreenWidget(Widget):
             event.prevent_default()
             return
 
-        # In NORMAL mode: handle 'y' Yank directly, otherwise bubble to WorkspaceScreen
+        # 0.05 Scrollback shortcuts in both modes: Shift+PageUp / Shift+PageDown
+        if key_name in ("shift+pageup", "shift+page_up"):
+            self.scroll_up(delta=8)
+            event.stop()
+            event.prevent_default()
+            return
+
+        if key_name in ("shift+pagedown", "shift+page_down"):
+            self.scroll_down(delta=8)
+            event.stop()
+            event.prevent_default()
+            return
+
+        # In NORMAL mode: handle 'y' Yank, scrolling keys, otherwise bubble to WorkspaceScreen
         if not self.is_pty_mode:
             if key_name == "y":
                 self.copy_selection_or_buffer()
+                event.stop()
+                event.prevent_default()
+                return
+            if key_name in ("pageup", "page_up", "shift+up"):
+                self.scroll_up(delta=8)
+                event.stop()
+                event.prevent_default()
+                return
+            if key_name in ("pagedown", "page_down", "shift+down"):
+                self.scroll_down(delta=8)
+                event.stop()
+                event.prevent_default()
+                return
+            if key_name in ("g", "home"):
+                self.scroll_up(delta=999999)
+                event.stop()
+                event.prevent_default()
+                return
+            if key_name in ("shift+g", "end"):
+                self.scroll_to_bottom()
                 event.stop()
                 event.prevent_default()
                 return
@@ -584,8 +659,8 @@ class TerminalScreenWidget(Widget):
             event.prevent_default()
             return
 
-        # 7. Regular characters
-        if event.character and len(event.character) == 1:
+        # 7. Regular characters (including Arabic ligatures, accented characters, and Unicode glyphs)
+        if event.character:
             self.worker_session.write(event.character)
             event.stop()
             event.prevent_default()
