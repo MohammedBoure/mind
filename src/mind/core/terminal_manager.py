@@ -359,8 +359,28 @@ class WorkerSession:
         """Resolve executable command, defaulting to `agy` with tuned CLI flags if present."""
         if command:
             if isinstance(command, str):
-                return command.split()
-            return list(command)
+                base_cmd = command.split()
+            else:
+                base_cmd = list(command)
+
+            first_token = os.path.basename(base_cmd[0]).lower() if base_cmd else ""
+            if "agy" in first_token:
+                if self.cli_mode and "--mode" not in base_cmd:
+                    base_cmd.extend(["--mode", self.cli_mode])
+                if self.model and self.model != "default" and "--model" not in base_cmd:
+                    base_cmd.extend(["--model", self.model])
+                if self.reasoning_effort and "--effort" not in base_cmd:
+                    base_cmd.extend(["--effort", self.reasoning_effort])
+                if self.extra_flags:
+                    import shlex
+                    try:
+                        flags = shlex.split(self.extra_flags)
+                    except Exception:
+                        flags = self.extra_flags.split()
+                    for f in flags:
+                        if f not in base_cmd:
+                            base_cmd.append(f)
+            return base_cmd
 
         # 1. Search for standard `agy` or `agy.exe` on PATH or LocalAppData
         # Running agy directly avoids nested cmd/python wrapper delays and lock contention

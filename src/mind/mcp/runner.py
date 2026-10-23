@@ -9,7 +9,11 @@ Supports dual transports:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
+import shutil
+import sys
 import threading
 import time
 from typing import Any
@@ -24,6 +28,93 @@ except ImportError:
 from mind.mcp.server import get_default_mcp_server
 
 logger = logging.getLogger("mind.mcp.runner")
+
+
+def provision_mcp_config(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    user_home: Path | None = None,
+) -> list[Path]:
+    """Auto-provision and persist mind-mcp server in mcp_config.json files across instances.
+
+    Ensures that orchestrator instances (including agy1 and any active/discovered slots)
+    as well as the global user configuration have the mind-mcp server entry:
+    {
+      "mcpServers": {
+        "mind-mcp": {
+          "disabled": false,
+          "serverUrl": "http://{host}:{port}/sse"
+        }
+      }
+    }
+
+    Returns:
+        List of Path objects where mcp_config.json was successfully verified or updated.
+    """
+    home = user_home or Path.home()
+    target_paths: set[Path] = set()
+
+    # 1. Global user mcp_config.json
+    target_paths.add(home / ".gemini" / "config" / "mcp_config.json")
+
+    # 2. Standard orchestrator slot (agy1)
+    target_paths.add(home / ".local" / "share" / "agy-instances" / "agy1" / ".gemini" / "config" / "mcp_config.json")
+    target_paths.add(home / ".gemini" / "instances" / "agy1" / ".gemini" / "config" / "mcp_config.json")
+
+    # 3. Discover all existing instance directories
+    agys_base = home / ".local" / "share" / "agy-instances"
+    if agys_base.is_dir():
+        for d in agys_base.iterdir():
+            if d.is_dir() and d.name.startswith("agy"):
+                target_paths.add(d / ".gemini" / "config" / "mcp_config.json")
+
+    gemini_inst_base = home / ".gemini" / "instances"
+    if gemini_inst_base.is_dir():
+        for d in gemini_inst_base.iterdir():
+            if d.is_dir() and d.name.startswith("agy"):
+                target_paths.add(d / ".gemini" / "config" / "mcp_config.json")
+
+    sse_url = f"http://{host}:{port}/sse"
+    configured: list[Path] = []
+
+    for p in target_paths:
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            data: dict[str, Any] = {}
+            if p.is_file():
+                try:
+                    loaded = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        data = loaded
+                except Exception:
+                    data = {}
+
+            mcp_servers = data.setdefault("mcpServers", {})
+            if not isinstance(mcp_servers, dict):
+                mcp_servers = {}
+                data["mcpServers"] = mcp_servers
+
+            existing_mind = mcp_servers.get("mind-mcp")
+            needs_update = True
+            if (
+                isinstance(existing_mind, dict)
+                and existing_mind.get("serverUrl") == sse_url
+                and existing_mind.get("disabled") is False
+            ):
+                needs_update = False
+
+            if needs_update:
+                mcp_servers["mind-mcp"] = {
+                    "disabled": False,
+                    "serverUrl": sse_url,
+                }
+                p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                logger.info("Provisioned mind-mcp in %s", p)
+            configured.append(p)
+        except Exception as exc:
+            logger.debug("Could not provision mcp config at %s: %s", p, exc)
+
+    return configured
 
 
 class MCPServerRunner:
@@ -71,6 +162,24 @@ class MCPServerRunner:
         """
         with self._lock:
             if self.is_running:
+                return
+
+            # Check if port is already being served by an existing process
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.2)
+            is_already_bound = False
+            try:
+                res = sock.connect_ex((self.host, self.port))
+                is_already_bound = (res == 0)
+            except Exception:
+                pass
+            finally:
+                sock.close()
+
+            if is_already_bound:
+                logger.info("Port %s:%d is already listening; attaching to existing MCP server.", self.host, self.port)
+                self._is_running = True
                 return
 
             app = self.server.sse_app()
@@ -199,9 +308,15 @@ def start_background_mcp_server(
 ) -> MCPServerRunner:
     """Start or retrieve the global background MCP server runner.
 
-    Defaults to non-blocking execution (`wait_for_ready=False`) to avoid pausing
+    Automatically provisions mcp_config.json for orchestrator instances
+    and defaults to non-blocking execution (`wait_for_ready=False`) to avoid pausing
     the main application lifecycle.
     """
+    try:
+        provision_mcp_config(host=host, port=port)
+    except Exception as exc:
+        logger.debug("Failed auto-provisioning mcp_config.json: %s", exc)
+
     global _global_runner
     with _runner_lock:
         if _global_runner is None or not _global_runner.is_running:

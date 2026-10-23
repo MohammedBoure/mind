@@ -23,6 +23,13 @@ def main(ctx: click.Context, usage: bool) -> None:
     Launch the TUI to manage multi-agent sessions.
     Running without arguments opens the session picker.
     """
+    # Auto-provision MCP configuration for orchestrator instances
+    try:
+        from mind.mcp.runner import provision_mcp_config
+        provision_mcp_config()
+    except Exception:
+        pass
+
     if usage:
         from mind.core.usage_monitor import print_usage_cli
 
@@ -124,6 +131,16 @@ def register_mcp(transport: str, port: int) -> None:
     Enables the primary agent running agy to discover and call
     mind-mcp tools (inspect screens, inject interrupts, send input).
     """
+    from mind.mcp.runner import provision_mcp_config
+
+    # 1. Directly provision mcp_config.json files across orchestrator instances
+    try:
+        provisioned = provision_mcp_config(port=port)
+        if provisioned:
+            click.secho(f"Provisioned mind-mcp in {len(provisioned)} instance configuration file(s).", fg="green")
+    except Exception as exc:
+        click.secho(f"Warning: Auto-provisioning mcp_config.json encountered error: {exc}", fg="yellow")
+
     agy_path = shutil.which("agy") or shutil.which("agy.exe")
     if not agy_path and sys.platform == "win32":
         import os

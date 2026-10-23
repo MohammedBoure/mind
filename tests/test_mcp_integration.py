@@ -12,6 +12,7 @@ import pytest
 from mind.core.terminal_manager import TerminalManager, WorkerProcessState
 from mind.mcp.runner import (
     MCPServerRunner,
+    provision_mcp_config,
     run_stdio_mcp_server_async,
     start_background_mcp_server,
     stop_background_mcp_server,
@@ -240,3 +241,38 @@ def test_terminal_screen_cache_operations() -> None:
     cache.put("slot2:10", current_version=1, text="V2")
     cache.clear()
     assert cache.get("slot2:10", current_version=1) is None
+
+
+def test_provision_mcp_config(tmp_path) -> None:
+    """Verify provision_mcp_config creates and updates mcp_config.json files."""
+    paths = provision_mcp_config(host="127.0.0.1", port=8765, user_home=tmp_path)
+    assert len(paths) >= 2
+
+    global_cfg = tmp_path / ".gemini" / "config" / "mcp_config.json"
+    assert global_cfg.is_file()
+    data = json.loads(global_cfg.read_text(encoding="utf-8"))
+    assert "mind-mcp" in data.get("mcpServers", {})
+    assert data["mcpServers"]["mind-mcp"]["serverUrl"] == "http://127.0.0.1:8765/sse"
+    assert data["mcpServers"]["mind-mcp"]["disabled"] is False
+
+    agy1_cfg = tmp_path / ".local" / "share" / "agy-instances" / "agy1" / ".gemini" / "config" / "mcp_config.json"
+    assert agy1_cfg.is_file()
+    data_agy1 = json.loads(agy1_cfg.read_text(encoding="utf-8"))
+    assert data_agy1["mcpServers"]["mind-mcp"]["serverUrl"] == "http://127.0.0.1:8765/sse"
+
+
+@pytest.mark.anyio
+async def test_check_coordinator_alarms_tool() -> None:
+    """Verify check_coordinator_alarms retrieves alarms from manager."""
+    mgr = TerminalManager.get_instance()
+    mgr.clear_coordinator_alarms()
+    mgr.notify_coordinator_worker_idle(worker_id="alarm-worker-1", status_summary="Task Done")
+
+    server = create_mcp_server(manager=mgr)
+    res = await server.call_tool("check_coordinator_alarms", {})
+    assert not res.is_error
+    raw_alarms = json.loads(res.content[0].text)
+    alarms = [raw_alarms] if isinstance(raw_alarms, dict) else raw_alarms
+    assert isinstance(alarms, list)
+    assert len(alarms) >= 1
+    assert any(a.get("worker_id") == "alarm-worker-1" for a in alarms)

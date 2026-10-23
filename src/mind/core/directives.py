@@ -26,6 +26,13 @@ logger = logging.getLogger("mind.directives")
 
 DEFAULT_COORDINATOR_DIRECTIVE = """# Primary Coordinator Guidelines
 Managed directly via .GEMINI.md.
+
+## Orchestration & Alarm Polling Loop
+When running tasks prefixed with `-mind`, actively orchestrate workers via the `mind-mcp` tools:
+1. Dispatch tasks to workers using `send_terminal_input(worker_id, text, press_enter=True)`.
+2. Inspect worker progress with `get_terminal_screen(worker_id, lines)`.
+3. Periodically poll `check_coordinator_alarms()` to handle worker completion notices (`worker_idle`) and assistance requests without blocking.
+4. Maintain this continuous loop until the high-level objective is fully achieved.
 """
 
 DEFAULT_WORKER_DIRECTIVE_TEMPLATE = """# Worker Agent Directive ({slot})

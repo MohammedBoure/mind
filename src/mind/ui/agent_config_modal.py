@@ -187,7 +187,16 @@ class ConfigSettingsListWidget(Widget):
             event.stop()
             event.prevent_default()
         elif key in ("right", "l", "space", "enter"):
-            self.action_cycle_next()
+            active = self.get_active_entry()
+            if active and active.key == "system_agent" and key in ("enter", "space", "l", "right"):
+                try:
+                    inp = self.screen.query_one("#config-agent-input", Input)
+                    inp.focus()
+                    inp.cursor_position = len(inp.value)
+                except Exception:
+                    self.action_cycle_next()
+            else:
+                self.action_cycle_next()
             event.stop()
             event.prevent_default()
         elif key in ("left", "h"):
@@ -1043,6 +1052,14 @@ class AgentConfigModal(ModalScreen[None]):
         new_config = self._gather_config_dict()
         self._apply_saved_configs()
 
+        # Save all pending worker drafts as well as current target
+        for wid, cfg in self._worker_drafts.items():
+            if wid != str(target_id) and self._on_save_callback:
+                try:
+                    self._on_save_callback(wid, cfg, False)
+                except Exception:
+                    pass
+
         if self._on_save_callback:
             try:
                 self._on_save_callback(target_id, new_config, False)
@@ -1066,6 +1083,14 @@ class AgentConfigModal(ModalScreen[None]):
         target_id = self._resolve_selected_worker_id()
         new_config = self._gather_config_dict()
         self._apply_saved_configs()
+
+        # Save all pending worker drafts as well as current target
+        for wid, cfg in self._worker_drafts.items():
+            if wid != str(target_id) and self._on_save_callback:
+                try:
+                    self._on_save_callback(wid, cfg, False)
+                except Exception:
+                    pass
 
         # Respawn worker through TerminalManager
         try:

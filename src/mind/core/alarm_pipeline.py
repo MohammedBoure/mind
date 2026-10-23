@@ -185,10 +185,21 @@ class CoordinatorAlarmPipeline:
                 for worker_id, last_time in pending_items:
                     elapsed = now - last_time
                     if elapsed >= self._debounce_interval:
-                        del self._pending_workers[worker_id]
                         worker = self._get_worker(worker_id)
                         if worker is not None and worker.is_alive:
-                            workers_to_fire.append((worker_id, worker))
+                            # Verify virtual screen buffer ends with an interactive IDLE prompt
+                            screen_sample = worker.buffer.get_screen_text(lines=10)
+                            at_idle = is_idle_prompt(screen_sample)
+                            max_wait = max(self._debounce_interval * 1.5, self._debounce_interval + 0.08)
+                            if at_idle or elapsed >= max_wait:
+                                del self._pending_workers[worker_id]
+                                workers_to_fire.append((worker_id, worker))
+                            else:
+                                remaining = max_wait - elapsed
+                                if min_remaining is None or remaining < min_remaining:
+                                    min_remaining = remaining
+                        else:
+                            del self._pending_workers[worker_id]
                     else:
                         remaining = self._debounce_interval - elapsed
                         if min_remaining is None or remaining < min_remaining:

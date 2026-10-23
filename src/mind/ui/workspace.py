@@ -725,7 +725,7 @@ class WorkspaceScreen(Screen):
             )
         )
 
-    def _on_worker_configured(self, worker_id: str, new_config: dict[str, Any], restarted: bool) -> None:
+    def _on_worker_configured(self, worker_id: str, new_config: dict[str, Any], restarted: bool = False) -> None:
         """Callback when worker configuration is updated in AgentConfigModal."""
         new_name = new_config.get("name")
         new_agent = new_config.get("assigned_agent")
