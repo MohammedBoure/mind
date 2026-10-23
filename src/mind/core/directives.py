@@ -24,31 +24,59 @@ from typing import Any, Callable
 
 logger = logging.getLogger("mind.directives")
 
-DEFAULT_COORDINATOR_DIRECTIVE = """# Primary Coordinator Directive
-You are the Primary Coordinator for the `mind` multi-agent terminal multiplexer.
-
-## Role & Responsibilities:
-- Stand by in an idle state for explicit user instructions.
-- Never run unsolicited scans or auto-prompts without user request.
-- When given a task by the user, decompose the objective into modular sub-tasks.
-- Actively delegate tasks to the worker agents in the right pane using mind-bridge MCP tools:
-  * `list_workers()`: Check available worker slots and active states.
-  * `send_terminal_input(worker_id, text)`: Dispatch commands or prompts to worker terminals.
-  * `get_terminal_screen(worker_id)`: Inspect worker outputs and verify results.
-  * `interrupt_and_inject(worker_id, message)`: Redirect workers if an issue occurs.
-- Monitor worker completion alerts and report concise summaries back to the user.
+DEFAULT_COORDINATOR_DIRECTIVE = """# Primary Coordinator Guidelines
+Managed directly via .GEMINI.md.
 """
 
 DEFAULT_WORKER_DIRECTIVE_TEMPLATE = """# Worker Agent Directive ({slot})
-You are an autonomous worker agent operating in slot `{slot}`.
-
-## Principles:
-1. Maintain an idle standby state until a task is assigned by the user or coordinator.
-2. Execute terminal commands accurately with clean, deterministic edits.
-3. Keep code modular, adhere to existing directory architectures, and update documentation.
-4. When execution finishes, return cleanly to the terminal prompt so completion can be detected.
-5. Report any blockers or errors immediately.
+Managed directly via .GEMINI.md.
 """
+
+
+def get_instance_gemini_path(target: str) -> Path | None:
+    """Locate the .GEMINI.md file for the given agent target or instance slot.
+
+    Checks:
+    1. ~/.local/share/agy-instances/<slot>/.gemini/.GEMINI.md (or GEMINI.md)
+    2. Current workspace ./.GEMINI.md or GEMINI.md
+    3. Global ~/.gemini/.GEMINI.md
+    """
+    t = str(target).strip()
+    slot_name = ""
+    if t.lower() in ("coordinator", "primary", "0"):
+        slot_name = "agy1"
+    elif t.lower().startswith("agy"):
+        slot_name = t.lower()
+    else:
+        digits = "".join(filter(str.isdigit, t))
+        if digits:
+            slot_name = f"agy{digits}"
+        else:
+            slot_name = t
+
+    instances_dir = Path.home() / ".local" / "share" / "agy-instances"
+    if instances_dir.exists():
+        slot_dir = instances_dir / slot_name / ".gemini"
+        if slot_dir.exists():
+            for name in (".GEMINI.md", "GEMINI.md"):
+                candidate = slot_dir / name
+                if candidate.is_file():
+                    return candidate
+            return slot_dir / ".GEMINI.md"
+
+    cwd = Path.cwd()
+    if (cwd / ".GEMINI.md").is_file():
+        return cwd / ".GEMINI.md"
+    if (cwd / "GEMINI.md").is_file():
+        return cwd / "GEMINI.md"
+
+    gemini_home = Path.home() / ".gemini"
+    if (gemini_home / ".GEMINI.md").is_file():
+        return gemini_home / ".GEMINI.md"
+    if (gemini_home / "GEMINI.md").is_file():
+        return gemini_home / "GEMINI.md"
+
+    return None
 
 
 def get_directives_dir() -> Path:
@@ -75,7 +103,12 @@ def get_worker_directive_path(agent_slot: str) -> Path:
 
 
 def resolve_directive_path(target: str) -> Path:
-    """Resolve target name ('coordinator', 'primary', 'agy1', '1', 'worker-1', etc.) to a file path."""
+    """Resolve target name ('coordinator', 'primary', 'agy1', '1', 'worker-1', etc.) to a file path, prioritizing .GEMINI.md."""
+    # First priority: check for instance or workspace .GEMINI.md file
+    gemini_file = get_instance_gemini_path(target)
+    if gemini_file is not None and gemini_file.exists():
+        return gemini_file
+
     t = str(target).strip().lower()
     if t in ("coordinator", "primary", "0"):
         return get_coordinator_directive_path()
@@ -94,8 +127,11 @@ def resolve_directive_path(target: str) -> Path:
 
 
 def extract_target_from_path(path: Path | str) -> str:
-    """Extract agent target ('coordinator', 'agy1', etc.) from directive file path."""
+    """Extract agent target ('coordinator', 'agy1', etc.) from directive or .GEMINI.md file path."""
     p = Path(path)
+    if p.parent.name == ".gemini" and p.parent.parent.parent.name == "agy-instances":
+        return p.parent.parent.name.lower()
+
     name_lower = p.name.lower()
     if name_lower in ("coordinator.md", "coordinator"):
         return "coordinator"
@@ -260,23 +296,31 @@ class DirectivesWatcher:
                     pass
 
     def _list_directive_files(self) -> list[Path]:
-        """List all tracked markdown files in the directives directory."""
-        if not self._directives_dir.exists():
-            return []
+        """List all tracked markdown files in the directives and instance .gemini directories."""
         files: list[Path] = []
-        try:
-            for p in self._directives_dir.glob("*.md"):
-                if p.is_file():
-                    files.append(p)
-        except Exception:
-            pass
-
-        workers_dir = self._directives_dir / "workers"
-        if workers_dir.exists():
+        if self._directives_dir.exists():
             try:
-                for p in workers_dir.glob("*.md"):
+                for p in self._directives_dir.glob("*.md"):
                     if p.is_file():
                         files.append(p)
+                workers_dir = self._directives_dir / "workers"
+                if workers_dir.exists():
+                    for p in workers_dir.glob("*.md"):
+                        if p.is_file():
+                            files.append(p)
+            except Exception:
+                pass
+
+        instances_dir = Path.home() / ".local" / "share" / "agy-instances"
+        if instances_dir.exists():
+            try:
+                for inst in instances_dir.iterdir():
+                    if inst.is_dir():
+                        gemini_dir = inst / ".gemini"
+                        if gemini_dir.is_dir():
+                            for f in gemini_dir.glob("*.md"):
+                                if f.is_file() and f not in files:
+                                    files.append(f)
             except Exception:
                 pass
         return sorted(files)

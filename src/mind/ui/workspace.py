@@ -337,15 +337,12 @@ class WorkspaceScreen(Screen):
         if event_type != "worker_idle":
             self._safe_notify(f"{badge}: {summary}", severity="warning", timeout=3.0)
 
-        # 3. For critical assistance requests only, forward a directive to Coordinator PTY.
+        # 3. For critical assistance requests only, forward status notification to Coordinator PTY.
         # Routine idle transitions are logged in MCP check_coordinator_alarms() to prevent Echo Loop flood.
         coord_session = self._terminal_manager.get_worker("coordinator")
         if coord_session and coord_session.is_alive and event_type != "worker_idle":
             priority = event.get("priority", "high")
-            status_line = (
-                f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
-                f"Coordinator Directive: Intervene to resolve roadblock.\n"
-            )
+            status_line = f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
             coord_session.write(status_line, press_enter=True)
 
     def on_unmount(self) -> None:

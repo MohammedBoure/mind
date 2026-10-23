@@ -50,15 +50,8 @@ class AgentProfile:
     reasoning_effort: str = "high"
     extra_flags: str = ""
     assigned_agent: str = ""
-    principles: list[str] = field(
-        default_factory=lambda: [
-            "Execute tasks assigned by the primary coordinator.",
-            "Report progress and roadblocks immediately.",
-            "Prioritize interrupt directives from supervisor and peer agents.",
-            "Maintain clean, deterministic workspace edits.",
-        ]
-    )
-    instructions: str = "Act as an autonomous worker agent. Listen for directives and execute terminal tasks."
+    principles: list[str] = field(default_factory=list)
+    instructions: str = ""
     local_config: dict[str, Any] = field(default_factory=dict)
 
 
@@ -451,10 +444,7 @@ class WorkerSession:
         time.sleep(0.4)
 
         # 3. Format injection payload
-        formatted_directive = (
-            f"\n[INTERRUPT from {sender_id} | Priority: {priority.upper()}]: {message}\n"
-            f"Directive: Prioritize this message. Adjust plan and resume previous task only if no conflict.\n"
-        )
+        formatted_directive = f"\n[INTERRUPT from {sender_id} | Priority: {priority.upper()}]: {message}\n"
         self.last_interrupt_directive = formatted_directive
 
         # 4. Inject directive into stdin
@@ -495,10 +485,7 @@ class WorkerSession:
         await asyncio.sleep(0.4)
 
         # 3. Format injection payload
-        formatted_directive = (
-            f"\n[INTERRUPT from {sender_id} | Priority: {priority.upper()}]: {message}\n"
-            f"Directive: Prioritize this message. Adjust plan and resume previous task only if no conflict.\n"
-        )
+        formatted_directive = f"\n[INTERRUPT from {sender_id} | Priority: {priority.upper()}]: {message}\n"
         self.last_interrupt_directive = formatted_directive
 
         # 4. Inject directive into stdin

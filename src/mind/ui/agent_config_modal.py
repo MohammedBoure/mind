@@ -613,15 +613,15 @@ class AgentConfigModal(ModalScreen[None]):
                 label="Directives File",
                 options=["[Open in System Editor (o)]"],
                 current_index=0,
-                description=f"Directives file: {resolve_directive_path(self._resolve_selected_worker_id())}. Press Enter or 'o' to open in default system editor.",
+                description=f"Guidelines file: {resolve_directive_path(self._resolve_selected_worker_id())}. Press Enter or 'o' to open in default system editor.",
                 is_worker_specific=True,
             ),
             ConfigOption(
                 key="behavioral_directive",
-                label="Role & Behavioral Directive Prompt",
-                options=["[Edit In-App (e)]", "Autonomous Worker", "Architect Planner", "Code Reviewer"],
+                label=".GEMINI.md Guidelines",
+                options=["[Edit in App (e)]"],
                 current_index=0,
-                description="Persisted in ~/.mind/directives/. Press 'e' or Enter to inspect and edit full markdown rules in-app.",
+                description=f"Managed via .GEMINI.md ({resolve_directive_path(self._resolve_selected_worker_id())}). Press 'e' or Enter to inspect and edit guidelines.",
                 is_worker_specific=True,
             ),
         ]
@@ -650,6 +650,12 @@ class AgentConfigModal(ModalScreen[None]):
                 opt.set_value(cur_flags)
 
     def compose(self) -> ComposeResult:
+        cur_agent = ""
+        for opt in self.options:
+            if opt.key == "system_agent":
+                cur_agent = opt.value
+                break
+
         with Vertical(id="agent-config-dialog"):
             # 1. Search Bar
             with Horizontal(id="config-search-box"):
@@ -657,6 +663,15 @@ class AgentConfigModal(ModalScreen[None]):
                 yield Input(
                     placeholder="",
                     id="config-search-input",
+                )
+
+            # 1b. Direct System Agent Input
+            with Horizontal(id="config-agent-box"):
+                yield Static("Agent: ", id="config-agent-prompt")
+                yield Input(
+                    value=cur_agent,
+                    placeholder="Enter agent slot directly (e.g. agy1, agy15, agy100)...",
+                    id="config-agent-input",
                 )
 
             # 2. Main Two-Column Interactive Settings List
@@ -697,17 +712,32 @@ class AgentConfigModal(ModalScreen[None]):
             pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Filter settings list live as user types into search input."""
+        """Filter settings list or update system agent live as user types."""
         if event.input.id == "config-search-input":
             self.settings_list.set_search_query(event.value)
             self._update_description()
+        elif event.input.id == "config-agent-input":
+            new_agent = event.value.strip()
+            if new_agent:
+                for opt in self.options:
+                    if opt.key == "system_agent":
+                        opt.set_value(new_agent)
+                        break
+                selected_worker_id = self._resolve_selected_worker_id()
+                if selected_worker_id in self._worker_drafts:
+                    self._worker_drafts[selected_worker_id]["assigned_agent"] = new_agent
+                    self._worker_drafts[selected_worker_id]["name"] = new_agent
+                self.settings_list.refresh()
 
     def on_key(self, event: events.Key) -> None:
         """Global key interceptor for dialog navigation and shortcuts."""
-        # If user presses Down, Enter, or Tab while in search input, shift focus to settings list
+        # Navigation from search input
         if self.focused and getattr(self.focused, "id", "") == "config-search-input":
-            if event.key in ("down", "enter", "tab"):
-                self.settings_list.focus()
+            if event.key in ("down", "tab", "enter"):
+                try:
+                    self.query_one("#config-agent-input", Input).focus()
+                except Exception:
+                    self.settings_list.focus()
                 event.stop()
                 event.prevent_default()
                 return
@@ -724,6 +754,27 @@ class AgentConfigModal(ModalScreen[None]):
                     event.stop()
                     event.prevent_default()
                     return
+
+        # Navigation from direct agent input
+        if self.focused and getattr(self.focused, "id", "") == "config-agent-input":
+            if event.key in ("down", "tab", "enter"):
+                self.settings_list.focus()
+                event.stop()
+                event.prevent_default()
+                return
+            elif event.key == "up":
+                try:
+                    self.query_one("#config-search-input", Input).focus()
+                except Exception:
+                    pass
+                event.stop()
+                event.prevent_default()
+                return
+            elif event.key == "escape":
+                self.settings_list.focus()
+                event.stop()
+                event.prevent_default()
+                return
 
         # 'q' in list exits dialog
         if event.key == "q" and self.focused == self.settings_list:
@@ -743,6 +794,19 @@ class AgentConfigModal(ModalScreen[None]):
             event.stop()
             event.prevent_default()
             return
+
+        # If Enter or Space pressed on system_agent in settings list, focus direct agent input
+        if event.key in ("enter", "space") and self.focused == self.settings_list:
+            active_entry = self.settings_list.get_active_entry()
+            if active_entry and active_entry.key == "system_agent":
+                try:
+                    agent_inp = self.query_one("#config-agent-input", Input)
+                    agent_inp.focus()
+                    event.stop()
+                    event.prevent_default()
+                    return
+                except Exception:
+                    pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle click events on modal action buttons."""
@@ -815,9 +879,24 @@ class AgentConfigModal(ModalScreen[None]):
                         elif opt.key == "extra_flags" and worker.extra_flags:
                             opt.set_value(worker.extra_flags)
 
+            # Synchronize direct agent text input with currently selected tab
+            agent_val = ""
+            for opt in self.options:
+                if opt.key == "system_agent":
+                    agent_val = opt.value
+                    break
+            try:
+                agent_inp = self.query_one("#config-agent-input", Input)
+                if agent_inp.value != agent_val:
+                    agent_inp.value = agent_val
+            except Exception:
+                pass
+
             for opt in self.options:
                 if opt.key == "open_directive":
-                    opt.description = f"Directives file: {resolve_directive_path(selected_worker_id)}. Press Enter or 'o' to open in editor."
+                    opt.description = f"Guidelines file: {resolve_directive_path(selected_worker_id)}. Press Enter or 'o' to open in editor."
+                elif opt.key == "behavioral_directive":
+                    opt.description = f"Managed via .GEMINI.md ({resolve_directive_path(selected_worker_id)}). Press 'e' or Enter to edit in-app."
             self.settings_list.refresh()
 
     def _resolve_directive_target(self) -> str:

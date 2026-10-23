@@ -620,8 +620,8 @@ AgentConfigModal {
 #agent-config-dialog {
     width: 92;
     max-width: 96%;
-    height: 36;
-    max-height: 94%;
+    height: 38;
+    max-height: 96%;
     border: round #7aa2f7;
     background: #16161e;
     padding: 1 2;
@@ -630,7 +630,7 @@ AgentConfigModal {
 #config-search-box {
     height: 3;
     width: 100%;
-    margin-bottom: 1;
+    margin-bottom: 0;
     layout: horizontal;
 }
 
@@ -650,6 +650,33 @@ AgentConfigModal {
 
 #config-search-input:focus {
     border: round #7aa2f7;
+    background: #24283b;
+    color: #ffffff;
+}
+
+#config-agent-box {
+    height: 3;
+    width: 100%;
+    margin-bottom: 1;
+    layout: horizontal;
+}
+
+#config-agent-prompt {
+    width: 9;
+    color: #bb9af7;
+    text-style: bold;
+    padding-top: 1;
+}
+
+#config-agent-input {
+    width: 1fr;
+    background: #1a1b26;
+    color: #c0caf5;
+    border: round #3b4261;
+}
+
+#config-agent-input:focus {
+    border: round #bb9af7;
     background: #24283b;
     color: #ffffff;
 }

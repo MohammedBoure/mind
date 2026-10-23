@@ -310,16 +310,10 @@ class CoordinatorAlarmPipeline:
         summary = event.get("summary") or event.get("reason", "")
 
         if event_type == "worker_idle":
-            status_line = (
-                f"\n[Worker-{worker_id} Finished (Idle)]: {summary}\n"
-                f"Coordinator Directive: Worker task is complete. Deduce next workflow step and dispatch new task.\n"
-            )
+            status_line = f"\n[Worker-{worker_id} Finished (Idle)]: {summary}\n"
         else:
             priority = event.get("priority", "high")
-            status_line = (
-                f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
-                f"Coordinator Directive: Intervene immediately to resolve roadblock.\n"
-            )
+            status_line = f"\n[Assistance Needed from Worker-{worker_id} | Priority: {priority.upper()}]: {summary}\n"
 
         coord_session.write(status_line, press_enter=press_enter)
         return True
