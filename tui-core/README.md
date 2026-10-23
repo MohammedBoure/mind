@@ -177,7 +177,11 @@ tui-core/
     ├── ui_widgets_test.rs # Ratatui ANSI cell matrix, themes, & scrollback tests
     ├── concurrency_multiplex_test.rs # Concurrent worker session multiplexing
     ├── ipc_test.rs     # JSON-RPC & MCP tool dispatch tests
-    └── session_test.rs # Session lifecycle, direct Alt jump, & resize tests
+    ├── session_test.rs # Session lifecycle, direct Alt jump, & resize tests
+    ├── session_persistence_test.rs # Session serialization, atomic updates & pruning tests
+    ├── host_slot_discovery_test.rs # Host slot discovery, role extraction & env isolation tests
+    ├── shortcut_parity_test.rs # Python-parity shortcut key engine & TOML config tests
+    └── modal_state_machine_test.rs # Modal dialog state machine & transition flow tests
 ```
 
 ---

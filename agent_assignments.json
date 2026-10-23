@@ -24,7 +24,7 @@
       "role": "Testing & Verification",
       "branch": "test/agy100-session-and-parity-tests",
       "scope": "Automated tests for session persistence, config parsing, shortcut engine, and agent slot isolation",
-      "status": "READY"
+      "status": "COMPLETED"
     },
     {
       "agent_id": "agy151",

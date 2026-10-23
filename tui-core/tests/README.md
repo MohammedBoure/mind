@@ -28,6 +28,10 @@ Target system modules covered:
 | [`concurrency_multiplex_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/concurrency_multiplex_test.rs) | Concurrent Swarm Multiplexing | `session::manager`, `session::worker`, `ipc::mcp_server` | Concurrent spawning of 8+ worker sessions via `join_all`, simultaneous tab navigation cycling (500 iterations) under concurrent input writes and screen queries, parallel MCP alarm generation and draining, broadcast terminal resizing, and concurrent graceful termination (`kill`). |
 | [`session_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/session_test.rs) | Session Lifecycle & Hotkey Jumping | `session::manager`, `session::worker` | Session registry, tab indexing (`next_session`, `prev_session`, `select_index`), direct `Alt+1`..`Alt+9` jumping, input pass-through, broadcast resize propagation, and graceful swarm shutdown (`shutdown_all`). |
 | [`ipc_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/ipc_test.rs) | Embedded MCP JSON-RPC Server | `ipc::mcp_server`, `ipc::jsonrpc` | JSON-RPC 2.0 serialization/deserialization, MCP `tools/list` schema validation, and tool dispatch (`list_workers`, `check_account_quotas`). |
+| [`session_persistence_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/session_persistence_test.rs) | Session Persistence & Clean Pruning | `session::session_store` | Verification of session file serialization (`~/.mind/sessions/<name>.json`), atomic updates and filename sanitization, telemetry tracking (`total_steps`, `total_interactions`, `last_activity`), descending sorting by `last_activity`, inactive/empty session pruning (`--clean`), and default session provisioning. |
+| [`host_slot_discovery_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/host_slot_discovery_test.rs) | Dynamic Host Slot Discovery & Isolation | `session::identity` | Dynamic slot scanning under `~/.local/share/agy-instances/agy[x]`, multi-tier role extraction priority (`agent_assignments.json` -> `.gemini/GEMINI.md` -> heuristics), settings model detection, JWT token payload base64 email parsing, isolated environment variable provisioning (`USERPROFILE`, `HOME`, `AGY_SLOT`), and live filesystem discovery. |
+| [`shortcut_parity_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/shortcut_parity_test.rs) | Shortcut Engine & Python Parity | `session::shortcuts` | Exact Python-parity shortcuts (`q`, `?`, `Tab`, `Shift+Tab`, `BackTab`, `m`, `d`, `o`, `s`, `n`, `1`..`9`), pass-through for unmapped keys, custom TOML configuration loading (`~/.config/mind/agi.toml`), and conflict-free tab switching. |
+| [`modal_state_machine_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/modal_state_machine_test.rs) | Modal State Transitions & Screen Flow | `ui::*` | Modal open/close state transitions (`HelpModal`), `DirectiveModal` priority cycling (Normal -> High -> Critical -> Low) and input submission/cancellation, `DirectiveEditorModal` multiline buffer navigation, line editing, saving, and cancelling, `NewWorkerModal` slot selection & spawn dispatch, and `SessionPickerScreen` list navigation, creation, opening, deleting, and exit actions. |
 
 ---
 
@@ -51,6 +55,18 @@ cargo test --test concurrency_multiplex_test --manifest-path tui-core/Cargo.toml
 
 # Run MCP IPC Protocol Tests
 cargo test --test ipc_test --manifest-path tui-core/Cargo.toml
+
+# Run Session Persistence & Pruning Tests
+cargo test --test session_persistence_test --manifest-path tui-core/Cargo.toml
+
+# Run Host Slot Discovery & Isolation Tests
+cargo test --test host_slot_discovery_test --manifest-path tui-core/Cargo.toml
+
+# Run Python-Parity Shortcut Engine Tests
+cargo test --test shortcut_parity_test --manifest-path tui-core/Cargo.toml
+
+# Run Modal State Machine Tests
+cargo test --test modal_state_machine_test --manifest-path tui-core/Cargo.toml
 ```
 
 ### Run Tests with Full Tracing Output
@@ -72,3 +88,11 @@ RUST_LOG=debug cargo test --test pty_burst_test -- --nocapture
    - High concurrent contention across `SessionManager::sessions`, `WorkerSession::pty`, and `PtyProcess::buffer` is validated under simultaneous tab switching, alarm pushing, and background reader updating. No cyclic lock acquisition exists.
 5. **Platform Independence:**
    - Tests automatically detect the host OS (`cfg!(windows)` vs Linux POSIX), using `cmd.exe` or `bash` accordingly.
+6. **Atomic Session Persistence & Filename Sanitization:**
+   - Session store updates write to hidden temporary files before atomic filesystem rename (`rename`), preventing half-written corrupted states upon sudden power loss or process kill. Unsafe characters (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`) in session names are sanitized to `_`.
+7. **Multi-Tier Agent Slot Discovery & Environment Isolation:**
+   - Dynamic host discovery traverses instances and falls back gracefully when `.gemini/GEMINI.md` or `settings.json` is absent. Environment variables (`USERPROFILE`, `HOME`, `AGY_SLOT`, `ANTIGRAVITY_APP_DATA_DIR`) are strictly mapped to each agent slot's directory to ensure complete file-system isolation.
+8. **Shortcut Engine Conflict Resolution:**
+   - Custom keybindings configured in `~/.config/mind/agi.toml` override defaults without collisions. Unmapped keystrokes automatically pass through as raw terminal bytes to the active child PTY.
+9. **Modal State Stack Transition Safety:**
+   - Modal dialogs (`HelpModal`, `DirectiveModal`, `DirectiveEditorModal`, `NewWorkerModal`) manage encapsulated lifecycle states. Modals safely capture input while active and cleanly return control to the underlying screen upon submission or dismissal (`Esc`), preventing trapped focus states.
