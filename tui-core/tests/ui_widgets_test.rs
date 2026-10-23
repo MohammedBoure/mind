@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::TestBackend,
     layout::Rect,
@@ -9,9 +10,13 @@ use ratatui::{
 };
 
 use tui_core::pty::buffer::ScreenBuffer;
+use tui_core::session::identity::AgentSlot;
+use tui_core::session::session_store::{SessionRecord, SessionStore};
 use tui_core::session::worker::{WorkerSession, WorkerState};
 use tui_core::ui::{
-    AlertBadge, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget,
+    AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
+    DirectivePriority, GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction,
+    QuotaGaugesWidget, SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget,
     StatusBarWidget, TerminalScreenWidget, Theme, WorkerListItem, WorkerListWidget,
 };
 
@@ -276,42 +281,42 @@ fn test_quota_gauges_comprehensive() {
 #[test]
 fn test_worker_list_dynamic_interaction() {
     let items = vec![
-        WorkerListItem {
-            id: "coordinator".to_string(),
-            slot_id: "agy1".to_string(),
-            pid: Some(1001),
-            state: WorkerState::Running,
-            task: Some("Managing multi-agent swarm".to_string()),
-            has_finished_alarm: false,
-            has_help_alarm: false,
-        },
-        WorkerListItem {
-            id: "worker-build".to_string(),
-            slot_id: "agy2".to_string(),
-            pid: Some(1002),
-            state: WorkerState::Idle,
-            task: Some("Cargo build release".to_string()),
-            has_finished_alarm: true,
-            has_help_alarm: false,
-        },
-        WorkerListItem {
-            id: "worker-bench".to_string(),
-            slot_id: "agy3".to_string(),
-            pid: Some(1003),
-            state: WorkerState::Interrupted,
-            task: Some("Benchmark suite execution".to_string()),
-            has_finished_alarm: false,
-            has_help_alarm: true,
-        },
-        WorkerListItem {
-            id: "worker-done".to_string(),
-            slot_id: "agy4".to_string(),
-            pid: None,
-            state: WorkerState::Exited(Some(0)),
-            task: None,
-            has_finished_alarm: false,
-            has_help_alarm: false,
-        },
+        WorkerListItem::new(
+            "coordinator",
+            "agy1",
+            Some(1001),
+            WorkerState::Running,
+            Some("Managing multi-agent swarm".to_string()),
+            false,
+            false,
+        ),
+        WorkerListItem::new(
+            "worker-build",
+            "agy2",
+            Some(1002),
+            WorkerState::Idle,
+            Some("Cargo build release".to_string()),
+            true,
+            false,
+        ),
+        WorkerListItem::new(
+            "worker-bench",
+            "agy3",
+            Some(1003),
+            WorkerState::Interrupted,
+            Some("Benchmark suite execution".to_string()),
+            false,
+            true,
+        ),
+        WorkerListItem::new(
+            "worker-done",
+            "agy4",
+            None,
+            WorkerState::Exited(Some(0)),
+            None,
+            false,
+            false,
+        ),
     ];
 
     let backend = TestBackend::new(80, 8);
@@ -447,4 +452,228 @@ async fn test_split_panes_with_scrollback_rendering() {
     // Reset scroll on user input
     session.send_input("ls", true).unwrap();
     assert_eq!(session.scroll_offset(), 0);
+}
+
+#[test]
+fn test_help_modal_and_shortcuts_integration() {
+    let mut help = HelpModal::new(Theme::default());
+    assert!(help.is_open());
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|f| {
+            f.render_widget(&help, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..24 {
+        for x in 0..80 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+
+    assert!(text.contains("Keyboard Shortcuts Reference"));
+    assert!(text.contains("SWARM NAVIGATION"));
+    assert!(text.contains("DIRECTIVES"));
+
+    // Key handling: Esc closes
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    assert!(help.handle_key(&esc));
+    assert!(!help.is_open());
+}
+
+#[test]
+fn test_directive_injection_modal_integration() {
+    let mut modal = DirectiveModal::new("worker-1", "agy11", "Backend Engineer");
+    assert_eq!(modal.priority, DirectivePriority::Normal);
+
+    // Cycle priority
+    let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+    modal.handle_key(&tab);
+    assert_eq!(modal.priority, DirectivePriority::High);
+
+    // Type text
+    for c in "Optimize database index".chars() {
+        modal.handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    assert_eq!(modal.message, "Optimize database index");
+
+    // Render verification
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&modal, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..20 {
+        for x in 0..80 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    assert!(text.contains("Directive Injection: worker-1 [agy11]"));
+    assert!(text.contains("Optimize database index"));
+
+    // Submit
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let action = modal.handle_key(&enter);
+    assert_eq!(
+        action,
+        DirectiveModalAction::Submit {
+            worker_id: "worker-1".to_string(),
+            message: "Optimize database index".to_string(),
+            priority: DirectivePriority::High,
+        }
+    );
+}
+
+#[test]
+fn test_directive_editor_multiline_integration() {
+    let mut editor = DirectiveEditorModal::new(
+        "worker-2",
+        "agy51",
+        "Frontend Engineer",
+        "# Plan\nStep 1: Write TUI",
+    );
+    assert_eq!(editor.lines.len(), 2);
+
+    let backend = TestBackend::new(90, 25);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&editor, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..25 {
+        for x in 0..90 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    assert!(text.contains("In-app Directive Editor: worker-2 [agy51]"));
+    assert!(text.contains("# Plan"));
+    assert!(text.contains("Step 1: Write TUI"));
+
+    // Save with Ctrl+S
+    let save_key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+    let action = editor.handle_key(&save_key);
+    assert_eq!(
+        action,
+        DirectiveEditorAction::Save("# Plan\nStep 1: Write TUI".to_string())
+    );
+}
+
+#[test]
+fn test_new_worker_modal_and_slot_selection_integration() {
+    let slots = vec![
+        AgentSlot::new(
+            11,
+            "agy11",
+            std::path::PathBuf::from("/tmp/agy11"),
+            "Backend Systems",
+            "gemini-3.8-flash-high",
+            Some("P0 Engine".to_string()),
+            true,
+            Some("agy11@mind.local".to_string()),
+        ),
+        AgentSlot::new(
+            51,
+            "agy51",
+            std::path::PathBuf::from("/tmp/agy51"),
+            "Frontend UI/UX",
+            "gemini-3.8-flash-high",
+            Some("Ratatui TUI".to_string()),
+            true,
+            Some("agy51@mind.local".to_string()),
+        ),
+    ];
+
+    let mut modal = NewWorkerModal::new(slots.clone());
+    assert_eq!(modal.selected_index, 0);
+
+    // Navigate down
+    let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+    modal.handle_key(&down);
+    assert_eq!(modal.selected_index, 1);
+
+    // Render
+    let backend = TestBackend::new(90, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&modal, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..20 {
+        for x in 0..90 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    assert!(text.contains("Provision New Agent Worker Slot"));
+    assert!(text.contains("agy11"));
+    assert!(text.contains("agy51"));
+    assert!(text.contains("Frontend UI/UX"));
+
+    // Press Enter to spawn
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let action = modal.handle_key(&enter);
+    assert_eq!(action, NewWorkerModalAction::Spawn(slots[1].clone()));
+}
+
+#[test]
+fn test_session_picker_screen_full_integration() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = Arc::new(SessionStore::with_dir(tmp.path().to_path_buf()));
+
+    let mut rec1 = SessionRecord::new("swarm_alpha", "Build compiled core");
+    rec1.total_steps = 42;
+    store.save_session(&rec1).unwrap();
+
+    let mut picker = SessionPickerScreen::new(Arc::clone(&store));
+    assert_eq!(picker.sessions.len(), 1);
+
+    // Render session picker
+    let backend = TestBackend::new(120, 25);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&picker, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..25 {
+        for x in 0..120 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    assert!(text.contains("Mind Multi-Agent Session Picker"));
+    assert!(text.contains("swarm_alpha"));
+    assert!(text.contains("Build compiled core"));
+
+    // Open session
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let action = picker.handle_key(&enter);
+    match action {
+        SessionPickerAction::Open(s) => assert_eq!(s.name, "swarm_alpha"),
+        _ => panic!("Expected SessionPickerAction::Open"),
+    }
 }

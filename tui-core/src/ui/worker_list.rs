@@ -15,11 +15,50 @@ use crate::ui::theme::{glyphs, Theme};
 pub struct WorkerListItem {
     pub id: String,
     pub slot_id: String,
+    pub worker_name: Option<String>,
+    pub role: Option<String>,
     pub pid: Option<u32>,
     pub state: WorkerState,
     pub task: Option<String>,
     pub has_finished_alarm: bool,
     pub has_help_alarm: bool,
+}
+
+impl WorkerListItem {
+    /// Create new WorkerListItem descriptor.
+    pub fn new(
+        id: impl Into<String>,
+        slot_id: impl Into<String>,
+        pid: Option<u32>,
+        state: WorkerState,
+        task: Option<String>,
+        has_finished_alarm: bool,
+        has_help_alarm: bool,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            slot_id: slot_id.into(),
+            worker_name: None,
+            role: None,
+            pid,
+            state,
+            task,
+            has_finished_alarm,
+            has_help_alarm,
+        }
+    }
+
+    /// Set operational role.
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+
+    /// Set worker friendly name.
+    pub fn with_worker_name(mut self, name: impl Into<String>) -> Self {
+        self.worker_name = Some(name.into());
+        self
+    }
 }
 
 impl From<&WorkerSession> for WorkerListItem {
@@ -33,6 +72,8 @@ impl From<&WorkerSession> for WorkerListItem {
         Self {
             id: s.id.clone(),
             slot_id: s.slot_id.clone(),
+            worker_name: Some(s.worker_name()),
+            role: Some(s.role()),
             pid: s.pid(),
             state: s.state.lock().clone(),
             task: s.task.lock().clone(),
@@ -133,13 +174,17 @@ impl<'a> WorkerListWidget<'a> {
 
                 spans.push(Span::styled(format!("{} ", icon), icon_style));
 
-                // 3. Worker ID & Slot ID
+                // 3. Worker ID & Slot ID & Role
                 let name_style = if is_selected {
                     Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(p.fg_light)
                 };
-                spans.push(Span::styled(format!("{}:{} ", item.id, item.slot_id), name_style));
+                let role_label = match &item.role {
+                    Some(r) if !r.is_empty() => format!(" [{}]", r),
+                    _ => String::new(),
+                };
+                spans.push(Span::styled(format!("{}:{}{} ", item.id, item.slot_id, role_label), name_style));
 
                 // 4. PID badge
                 if let Some(pid) = item.pid {
@@ -229,24 +274,24 @@ mod tests {
     #[test]
     fn test_worker_list_widget_render() {
         let items = vec![
-            WorkerListItem {
-                id: "coordinator".to_string(),
-                slot_id: "agy1".to_string(),
-                pid: Some(101),
-                state: WorkerState::Running,
-                task: Some("Managing build swarm".to_string()),
-                has_finished_alarm: false,
-                has_help_alarm: false,
-            },
-            WorkerListItem {
-                id: "worker-bench".to_string(),
-                slot_id: "agy2".to_string(),
-                pid: Some(102),
-                state: WorkerState::Idle,
-                task: None,
-                has_finished_alarm: true,
-                has_help_alarm: false,
-            },
+            WorkerListItem::new(
+                "coordinator",
+                "agy1",
+                Some(101),
+                WorkerState::Running,
+                Some("Managing build swarm".to_string()),
+                false,
+                false,
+            ).with_role("Lead Orchestrator"),
+            WorkerListItem::new(
+                "worker-bench",
+                "agy2",
+                Some(102),
+                WorkerState::Idle,
+                None,
+                true,
+                false,
+            ),
         ];
 
         let backend = TestBackend::new(60, 4);

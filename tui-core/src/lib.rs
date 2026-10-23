@@ -24,8 +24,11 @@ pub use session::{
     WorkerState,
 };
 pub use ui::{
-    AlertBadge, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget, StatusBarWidget,
-    TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem, WorkerListWidget,
+    AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
+    DirectivePriority, GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction,
+    QuotaGaugesWidget, SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget,
+    StatusBarWidget, TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem,
+    WorkerListWidget,
 };
 
 /// High-performance compiled TUI core engine binding PTY master processes,

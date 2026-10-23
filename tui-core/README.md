@@ -41,6 +41,7 @@ The interactive compiled TUI interface offers ergonomic, single-keystroke naviga
 
 | Hotkey / Shortcut | Action | Description |
 |---|---|---|
+| `Ctrl+P` | Screen Switch | Open interactive full-screen session picker |
 | `q` / `Ctrl+Q` | `Action::Quit` | Save session state and exit application |
 | `?` | `Action::Help` | Toggle shortcuts help modal |
 | `Tab` | `Action::CycleFocus` | Focus next worker tab / pane |
@@ -49,7 +50,7 @@ The interactive compiled TUI interface offers ergonomic, single-keystroke naviga
 | `d` / `Ctrl+D` | `Action::DirectiveEditor` | Open In-app Directive Editor Modal |
 | `o` / `Ctrl+O` | `Action::OpenExternalEditor` | Open directive file in system editor ($EDITOR) |
 | `s` | `Action::ToggleSplit` | Toggle split layout (Single -> Horizontal -> Vertical -> Grid) |
-| `n` | `Action::NewWorker` | Dynamically provision and spawn next agent slot |
+| `n` | `Action::NewWorker` | Open New Worker Modal to dynamically provision slot |
 | `1`..`9` / `F5`..`F8` | `Action::SelectTab(idx)` | Configurable fast tab jump keys |
 | `PageUp` / `Shift+Up` | `Action::ScrollUp` | Scrolls active terminal history backward (5 lines per step) |
 | `PageDown` / `Shift+Down` | `Action::ScrollDown` | Scrolls active terminal history forward toward live bottom |
@@ -159,10 +160,15 @@ tui-core/
 │       ├── README.md   # Comprehensive UI documentation & API specifications
 │       ├── mod.rs      # Public exports & widget facade
 │       ├── theme.rs    # Accessible themes (Tokyo Night, HC Dark, HC Light, Color-Blind)
+│       ├── session_picker.rs # Interactive session picker screen with inline session creation
+│       ├── help_modal.rs # Accessible shortcuts reference card popup modal
+│       ├── directive_modal.rs # Directive injection modal with priority cycling (Low/Normal/High/Critical)
+│       ├── directive_editor.rs # In-app multiline directive editor with line numbers & Ctrl+S save
+│       ├── new_worker_modal.rs # Dynamic slot discovery modal with isolated environment provisioning
 │       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid) with history badges
-│       ├── status_bar.rs  # Accessible status bar with metrics & alert badges
+│       ├── status_bar.rs  # Accessible status bar with real roles, metrics & alert badges
 │       ├── gauges.rs      # Quota consumption & CPU/RAM progress gauges
-│       ├── worker_list.rs # Dynamic navigable session list with accessible badges
+│       ├── worker_list.rs # Dynamic navigable session list with real roles & accessible badges
 │       └── terminal_screen.rs # High-efficiency ANSI ScreenCell renderer with scrollback support
 └── tests/
     ├── README.md       # Integration test framework documentation

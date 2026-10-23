@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::io::stdout;
+use std::sync::Arc;
 use crossterm::{
     cursor,
     event::{KeyCode, KeyModifiers},
@@ -11,19 +11,27 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Tabs},
+    widgets::{Block, Borders, Tabs},
     Terminal,
 };
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 use tui_core::events::AppEvent;
-use tui_core::session::{Action, SessionStore};
+use tui_core::session::{Action, IdentityDiscovery, SessionStore};
 use tui_core::ui::{
-    glyphs, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget,
-    StatusBarWidget, Theme, ThemeMode, WorkerListWidget,
+    glyphs, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
+    GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction, QuotaGaugesWidget,
+    SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget, StatusBarWidget, Theme,
+    ThemeMode, WorkerListWidget,
 };
-use tui_core::TuiEngine;
+use tui_core::{McpBackend, TuiEngine};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppScreen {
+    Multiplexer,
+    SessionPicker,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,10 +64,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Mode: Interactive Session Picker Screen (`agi picker`, `agi --picker`)
+    if subcmd == "picker" || args.iter().any(|a| a == "--picker") {
+        run_tui_app(None, true).await?;
+        return Ok(());
+    }
+
     // Mode: Create New Session (`agi new <name>`)
     if subcmd == "new" {
         let session_name = args.get(2).map(|s| s.as_str()).unwrap_or("session_1");
-        run_tui_app(Some(session_name.to_string())).await?;
+        run_tui_app(Some(session_name.to_string()), false).await?;
         return Ok(());
     }
 
@@ -69,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    run_tui_app(run_session).await?;
+    run_tui_app(run_session, false).await?;
     Ok(())
 }
 
@@ -107,7 +121,7 @@ async fn run_benchmarks() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_tui_app(session_name: Option<String>, start_in_picker: bool) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
@@ -135,9 +149,14 @@ async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::er
 
     engine.resize_all(rows, cols);
 
+    let mut current_screen = if start_in_picker {
+        AppScreen::SessionPicker
+    } else {
+        AppScreen::Multiplexer
+    };
+
     let mut split_mode = SplitMode::Horizontal;
     let mut show_sidebar = true;
-    let mut show_help_modal = false;
     let mut active_modal_notice: Option<String> = None;
     let mut theme = Theme::new(ThemeMode::TokyoNight);
     let hourly_quota = 85.0;
@@ -145,12 +164,23 @@ async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::er
     let mut cpu_usage = 18.5;
     let mem_mb = (2780, 8192);
 
+    let mut session_picker = SessionPickerScreen::new(engine.session_manager.store()).theme(theme);
+    let mut help_modal: Option<HelpModal> = None;
+    let mut directive_modal: Option<DirectiveModal> = None;
+    let mut directive_editor_modal: Option<DirectiveEditorModal> = None;
+    let mut new_worker_modal: Option<NewWorkerModal> = None;
+
     loop {
         let sessions = engine.sessions();
         let active_idx = engine.session_manager.active_index();
         let p = theme.palette();
 
         terminal.draw(|f| {
+            if current_screen == AppScreen::SessionPicker {
+                f.render_widget(&session_picker, f.area());
+                return;
+            }
+
             let root_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -250,61 +280,141 @@ async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::er
             };
             f.render_widget(status_bar, root_chunks[2]);
 
-            // Optional Shortcuts Help Overlay Modal
-            if show_help_modal {
-                let area = f.area();
-                let modal_width = 64.min(area.width.saturating_sub(4));
-                let modal_height = 18.min(area.height.saturating_sub(4));
-                let modal_area = ratatui::layout::Rect::new(
-                    (area.width.saturating_sub(modal_width)) / 2,
-                    (area.height.saturating_sub(modal_height)) / 2,
-                    modal_width,
-                    modal_height,
-                );
-
-                f.render_widget(Clear, modal_area);
-
-                let help_text = vec![
-                    Line::from(vec![Span::styled(" AGI TUI Shortcuts (Configurable via ~/.config/mind/agi.toml) ", Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD))]),
-                    Line::from(""),
-                    Line::from("  q / Ctrl+Q       Quit application & persist session"),
-                    Line::from("  ?                Toggle this shortcuts help modal"),
-                    Line::from("  Tab / Shift+Tab  Cycle worker tab / pane focus"),
-                    Line::from("  1..9 / F5..F8    Configurable fast tab jump keys"),
-                    Line::from("  m / Ctrl+M       Directive Injection Modal"),
-                    Line::from("  d / Ctrl+D       In-app Directive Editor Modal"),
-                    Line::from("  o / Ctrl+O       Open directive in external system editor"),
-                    Line::from("  s                Toggle split layout (Horizontal <-> Vertical)"),
-                    Line::from("  n                Dynamically provision & spawn next agent slot"),
-                    Line::from("  b                Toggle worker metadata & quota sidebar"),
-                    Line::from("  F4 / Alt+T       Cycle theme (TokyoNight <-> Solarized <-> HighContrast)"),
-                    Line::from("  PageUp / Down    Scrollback terminal history navigation"),
-                    Line::from(""),
-                    Line::from(vec![Span::styled("  Press '?' or 'Esc' to dismiss this modal ", Style::default().fg(p.accent_blue))]),
-                ];
-
-                let modal = Paragraph::new(help_text)
-                    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(p.accent_cyan)).title(" Help: Keyboard Shortcuts "));
-                f.render_widget(modal, modal_area);
+            // Overlays: Render any active modal on top
+            if let Some(ref modal) = help_modal {
+                f.render_widget(modal, f.area());
+            } else if let Some(ref modal) = directive_modal {
+                f.render_widget(modal, f.area());
+            } else if let Some(ref modal) = directive_editor_modal {
+                f.render_widget(modal, f.area());
+            } else if let Some(ref modal) = new_worker_modal {
+                f.render_widget(modal, f.area());
             }
         })?;
 
         if let Some(event) = engine.next_event().await {
             match event {
                 AppEvent::Key(key) => {
-                    // Help modal dismissal with Esc or ?
-                    if show_help_modal && (key.code == KeyCode::Esc || key.code == KeyCode::Char('?')) {
-                        show_help_modal = false;
+                    // 1. Session Picker Screen key handling
+                    if current_screen == AppScreen::SessionPicker {
+                        match session_picker.handle_key(&key) {
+                            SessionPickerAction::Open(rec) => {
+                                let _ = engine.session_manager.load_and_restore_session(&rec.name, shell_cmd, rows, cols);
+                                current_screen = AppScreen::Multiplexer;
+                                active_modal_notice = Some(format!("Opened session '{}'", rec.name));
+                            }
+                            SessionPickerAction::Create(new_name) => {
+                                let _ = engine.session_manager.create_and_launch_session(&new_name, shell_cmd, rows, cols);
+                                current_screen = AppScreen::Multiplexer;
+                                active_modal_notice = Some(format!("Created session '{}'", new_name));
+                            }
+                            SessionPickerAction::Delete(deleted_name) => {
+                                active_modal_notice = Some(format!("Deleted session '{}'", deleted_name));
+                            }
+                            SessionPickerAction::Exit => {
+                                if engine.sessions().is_empty() {
+                                    break;
+                                } else {
+                                    current_screen = AppScreen::Multiplexer;
+                                }
+                            }
+                            SessionPickerAction::None => {}
+                        }
                         continue;
                     }
 
-                    // Resolve key through ShortcutEngine
+                    // 2. Help Modal key handling
+                    if let Some(ref mut modal) = help_modal {
+                        if modal.handle_key(&key) {
+                            help_modal = None;
+                        }
+                        continue;
+                    }
+
+                    // 3. Directive Modal key handling
+                    if let Some(ref mut modal) = directive_modal {
+                        match modal.handle_key(&key) {
+                            DirectiveModalAction::Submit { worker_id, message, priority } => {
+                                directive_modal = None;
+                                let mgr = Arc::clone(&engine.session_manager);
+                                let wid = worker_id.clone();
+                                tokio::spawn(async move {
+                                    let priority_str = priority.as_str().to_string();
+                                    let _ = mgr.interrupt_and_inject(&wid, "operator", &message, &priority_str).await;
+                                });
+                                active_modal_notice = Some(format!("Directive ({:?}) sent to {}", priority, worker_id));
+                            }
+                            DirectiveModalAction::Cancel => {
+                                directive_modal = None;
+                            }
+                            DirectiveModalAction::None => {}
+                        }
+                        continue;
+                    }
+
+                    // 4. In-App Directive Editor Modal key handling
+                    if let Some(ref mut modal) = directive_editor_modal {
+                        match modal.handle_key(&key) {
+                            DirectiveEditorAction::Save(content) => {
+                                let target_id = modal.worker_id.clone();
+                                if let Some(worker) = engine.session_manager.get_session(&target_id) {
+                                    *worker.task.lock() = Some(content.clone());
+                                    let _ = worker.send_input(&content, true);
+                                }
+                                directive_editor_modal = None;
+                                active_modal_notice = Some(format!("Directives saved for {}", target_id));
+                            }
+                            DirectiveEditorAction::Cancel => {
+                                directive_editor_modal = None;
+                            }
+                            DirectiveEditorAction::None => {}
+                        }
+                        continue;
+                    }
+
+                    // 5. New Worker Modal key handling
+                    if let Some(ref mut modal) = new_worker_modal {
+                        match modal.handle_key(&key) {
+                            NewWorkerModalAction::Spawn(slot) => {
+                                let count = engine.sessions().len() + 1;
+                                let worker_name = format!("worker-{}", count);
+                                let slot_str = format!("agy{}", slot.slot_id);
+                                let isolation_env = IdentityDiscovery::build_slot_isolation_env(&slot);
+                                let _ = engine.spawn_worker(
+                                    worker_name,
+                                    slot_str,
+                                    shell_cmd,
+                                    vec![],
+                                    None,
+                                    isolation_env,
+                                    rows,
+                                    cols,
+                                );
+                                new_worker_modal = None;
+                                active_modal_notice = Some(format!("Spawned agent slot agy{}", slot.slot_id));
+                            }
+                            NewWorkerModalAction::Cancel => {
+                                new_worker_modal = None;
+                            }
+                            NewWorkerModalAction::None => {}
+                        }
+                        continue;
+                    }
+
+                    // 6. Fast session picker switch hotkey (Ctrl+P)
+                    if (key.code == KeyCode::Char('p') || key.code == KeyCode::Char('P')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        session_picker.refresh();
+                        current_screen = AppScreen::SessionPicker;
+                        continue;
+                    }
+
+                    // 7. Resolve shortcuts in multiplexer mode
                     let action = engine.shortcut_engine.resolve(&key);
 
                     match action {
                         Action::Quit => break,
                         Action::Help => {
-                            show_help_modal = !show_help_modal;
+                            help_modal = Some(HelpModal::new(theme));
                             continue;
                         }
                         Action::ToggleSplit => {
@@ -312,34 +422,33 @@ async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::er
                             continue;
                         }
                         Action::NewWorker => {
-                            let count = engine.sessions().len();
-                            let next_slot_id = match count {
-                                0 => "agy1",
-                                1 => "agy11",
-                                2 => "agy51",
-                                3 => "agy100",
-                                4 => "agy151",
-                                n => format!("agy{}", n + 1).leak(),
-                            };
-                            let _ = engine.spawn_worker(
-                                format!("worker-{}", count + 1),
-                                next_slot_id,
-                                shell_cmd,
-                                vec![],
-                                None,
-                                HashMap::new(),
-                                rows,
-                                cols,
-                            );
-                            active_modal_notice = Some(format!("Spawned {}", next_slot_id));
+                            new_worker_modal = Some(NewWorkerModal::default().theme(theme));
                             continue;
                         }
                         Action::DirectiveModal => {
-                            active_modal_notice = Some("Directive Injection Modal (m)".to_string());
+                            if let Some(active_worker) = engine.active_session() {
+                                directive_modal = Some(
+                                    DirectiveModal::new(
+                                        active_worker.id.clone(),
+                                        active_worker.slot_id.clone(),
+                                        active_worker.role(),
+                                    ).theme(theme)
+                                );
+                            }
                             continue;
                         }
                         Action::DirectiveEditor => {
-                            active_modal_notice = Some("Directive Editor Modal (d)".to_string());
+                            if let Some(active_worker) = engine.active_session() {
+                                let existing_task = active_worker.task.lock().clone().unwrap_or_default();
+                                directive_editor_modal = Some(
+                                    DirectiveEditorModal::new(
+                                        active_worker.id.clone(),
+                                        active_worker.slot_id.clone(),
+                                        active_worker.role(),
+                                        &existing_task,
+                                    ).theme(theme)
+                                );
+                            }
                             continue;
                         }
                         Action::OpenExternalEditor => {
@@ -378,6 +487,7 @@ async fn run_tui_app(session_name: Option<String>) -> Result<(), Box<dyn std::er
                             }
                             if key.code == KeyCode::F(4) || (key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::ALT)) {
                                 theme = Theme::new(theme.mode.next());
+                                session_picker = session_picker.theme(theme);
                                 continue;
                             }
 

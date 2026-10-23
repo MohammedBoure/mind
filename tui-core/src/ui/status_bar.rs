@@ -27,6 +27,8 @@ pub enum AlertBadge {
 pub struct StatusBarWidget<'a> {
     worker_id: &'a str,
     slot_id: &'a str,
+    worker_name: Option<String>,
+    role: Option<String>,
     pid: Option<u32>,
     model: &'a str,
     token_used: u64,
@@ -44,6 +46,8 @@ impl<'a> StatusBarWidget<'a> {
         Self {
             worker_id,
             slot_id,
+            worker_name: None,
+            role: None,
             pid: None,
             model: "claude-3-5-sonnet",
             token_used: 0,
@@ -61,6 +65,8 @@ impl<'a> StatusBarWidget<'a> {
         let (used, total) = session.tokens();
         let state = session.state.lock().clone();
         let pid = session.pid();
+        let role = session.role();
+        let worker_name = session.worker_name();
 
         let alert_badge = if let Some(alarm) = session.last_alarm() {
             match alarm.alarm_type.as_str() {
@@ -77,6 +83,8 @@ impl<'a> StatusBarWidget<'a> {
         Self {
             worker_id: &session.id,
             slot_id: &session.slot_id,
+            worker_name: Some(worker_name),
+            role: Some(role),
             pid,
             model,
             token_used: used,
@@ -87,6 +95,18 @@ impl<'a> StatusBarWidget<'a> {
             custom_hint: None,
             theme: Theme::default(),
         }
+    }
+
+    /// Set real role label.
+    pub fn role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+
+    /// Set human-friendly worker name.
+    pub fn worker_name(mut self, name: impl Into<String>) -> Self {
+        self.worker_name = Some(name.into());
+        self
     }
 
     /// Set active theme for colors and alert badges.
@@ -174,8 +194,13 @@ impl<'a> Widget for StatusBarWidget<'a> {
             WorkerState::Exited(_) => glyphs::EXITED,
         };
 
+        let role_label = match &self.role {
+            Some(r) if !r.is_empty() => format!(" [{}]", r),
+            _ => String::new(),
+        };
+
         left_spans.push(Span::styled(
-            format!(" {} {}:{} ", state_icon, self.worker_id, self.slot_id),
+            format!(" {} {}:{}{} ", state_icon, self.worker_id, self.slot_id, role_label),
             self.theme.status_bar_worker_style(),
         ));
         left_spans.push(Span::raw(" "));

@@ -8,14 +8,24 @@
 //! - [`TerminalScreenWidget`]: Zero-overhead character matrix renderer with dirty-frame checking.
 //! - [`Theme`]: Tokyo Night color palette and standard typography styles.
 
+pub mod directive_editor;
+pub mod directive_modal;
 pub mod gauges;
+pub mod help_modal;
+pub mod new_worker_modal;
+pub mod session_picker;
 pub mod split_panes;
 pub mod status_bar;
 pub mod terminal_screen;
 pub mod theme;
 pub mod worker_list;
 
+pub use directive_editor::{DirectiveEditorAction, DirectiveEditorModal};
+pub use directive_modal::{DirectiveModal, DirectiveModalAction, DirectivePriority};
 pub use gauges::{GaugeLayout, QuotaGaugesWidget};
+pub use help_modal::{HelpModal, ShortcutEntry};
+pub use new_worker_modal::{NewWorkerModal, NewWorkerModalAction};
+pub use session_picker::{SessionPickerAction, SessionPickerScreen};
 pub use split_panes::{SplitMode, SplitPanesWidget};
 pub use status_bar::{AlertBadge, StatusBarWidget};
 pub use terminal_screen::{
