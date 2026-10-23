@@ -30,6 +30,13 @@ from mind.mcp.server import get_default_mcp_server
 logger = logging.getLogger("mind.mcp.runner")
 
 
+def resolve_python_path() -> str:
+    """Resolve the active Python interpreter path without resolving virtualenv symlinks."""
+    if sys.executable and Path(sys.executable).is_file():
+        return str(Path(sys.executable))
+    return shutil.which("python3") or shutil.which("python") or "python"
+
+
 def provision_mcp_config(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -38,12 +45,17 @@ def provision_mcp_config(
     """Auto-provision and persist mind-mcp server in mcp_config.json files across instances.
 
     Ensures that orchestrator instances (including agy1 and any active/discovered slots)
-    as well as the global user configuration have the mind-mcp server entry:
+    as well as the global user configuration have the mind-mcp server entry configured
+    with the native stdio transport for direct Antigravity CLI compatibility:
     {
       "mcpServers": {
         "mind-mcp": {
-          "disabled": false,
-          "serverUrl": "http://{host}:{port}/sse"
+          "command": "<python>",
+          "args": ["-m", "mind.cli.main", "mcp"],
+          "env": {
+            "MIND_HTTP_PORT": "<port>"
+          },
+          "disabled": false
         }
       }
     }
@@ -74,7 +86,9 @@ def provision_mcp_config(
             if d.is_dir() and d.name.startswith("agy"):
                 target_paths.add(d / ".gemini" / "config" / "mcp_config.json")
 
-    sse_url = f"http://{host}:{port}/sse"
+    python_cmd = resolve_python_path()
+    expected_args = ["-m", "mind.cli.main", "mcp"]
+    expected_env = {"MIND_HTTP_PORT": str(port)}
     configured: list[Path] = []
 
     for p in target_paths:
@@ -98,15 +112,20 @@ def provision_mcp_config(
             needs_update = True
             if (
                 isinstance(existing_mind, dict)
-                and existing_mind.get("serverUrl") == sse_url
+                and existing_mind.get("command") == python_cmd
+                and existing_mind.get("args") == expected_args
                 and existing_mind.get("disabled") is False
+                and existing_mind.get("env", {}).get("MIND_HTTP_PORT") == str(port)
+                and "serverUrl" not in existing_mind
             ):
                 needs_update = False
 
             if needs_update:
                 mcp_servers["mind-mcp"] = {
+                    "command": python_cmd,
+                    "args": expected_args,
+                    "env": expected_env,
                     "disabled": False,
-                    "serverUrl": sse_url,
                 }
                 p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
                 logger.info("Provisioned mind-mcp in %s", p)
@@ -182,7 +201,7 @@ class MCPServerRunner:
                 self._is_running = True
                 return
 
-            app = self.server.sse_app()
+            app = self._create_app()
             config = uvicorn.Config(
                 app=app,
                 host=self.host,
@@ -238,12 +257,45 @@ class MCPServerRunner:
             self._task = None
             self._loop = None
 
+    def _create_app(self) -> Any:
+        """Create Starlette app with both SSE transport and direct HTTP tool bridge."""
+        self.server._is_background_server = True
+        app = self.server.sse_app()
+
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route
+
+        async def handle_call_tool(request: Request) -> JSONResponse:
+            tool_name = ""
+            try:
+                payload = await request.json()
+                tool_name = payload.get("name")
+                tool_args = payload.get("arguments", {})
+                if not tool_name:
+                    return JSONResponse({"success": False, "error": "Tool name is required"}, status_code=400)
+
+                call_result = await self.server.call_tool(tool_name, tool_args)
+                res_data = None
+                if call_result.structured_content and "result" in call_result.structured_content:
+                    res_data = call_result.structured_content["result"]
+                elif call_result.content:
+                    res_data = "\n".join(c.text for c in call_result.content if hasattr(c, "text"))
+
+                return JSONResponse({"success": not call_result.is_error, "result": res_data})
+            except Exception as exc:
+                logger.error("Error in /api/call-tool handler for %s: %s", tool_name, exc)
+                return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+        app.routes.append(Route("/api/call-tool", handle_call_tool, methods=["POST"]))
+        return app
+
     async def serve_async(self) -> None:
         """Serve the MCP SSE server directly as a native coroutine in the active event loop."""
         if self.is_running:
             return
 
-        app = self.server.sse_app()
+        app = self._create_app()
         config = uvicorn.Config(
             app=app,
             host=self.host,
@@ -264,7 +316,7 @@ class MCPServerRunner:
             if self.is_running and self._task:
                 return self._task
 
-            app = self.server.sse_app()
+            app = self._create_app()
             config = uvicorn.Config(
                 app=app,
                 host=self.host,

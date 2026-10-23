@@ -17,9 +17,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any
+
+import httpx
 
 try:
     from mcp.server.mcpserver import MCPServer as FastMCP
@@ -119,6 +122,34 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
 
     mgr = manager or TerminalManager.get_instance()
     usage_monitor = UsageMonitor()
+    is_custom_manager = (manager is not None)
+
+    async def _forward_if_remote(tool_name: str, arguments: dict[str, Any]) -> tuple[bool, Any]:
+        """Forward tool call to running background mind MCP server if available.
+
+        Returns:
+            (True, result) if handled remotely by active server.
+            (False, None) if should execute locally.
+        """
+        if is_custom_manager:
+            return False, None
+        if getattr(server, "_is_background_server", False):
+            return False, None
+        if os.environ.get("MIND_DISABLE_MCP_FORWARDING") == "1":
+            return False, None
+
+        port = int(os.environ.get("MIND_HTTP_PORT", "8765"))
+        url = f"http://127.0.0.1:{port}/api/call-tool"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json={"name": tool_name, "arguments": arguments})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success"):
+                        return True, data.get("result")
+        except Exception:
+            pass
+        return False, None
 
     # ── Tool 1: list_workers ──────────────────────────────────────────
     @server.tool()
@@ -132,6 +163,10 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             is_alive flag, linked slot_id, assigned_agent, linked_account email,
             token_status, quota_status, and remaining hourly/weekly quotas.
         """
+        handled, remote_res = await _forward_if_remote("list_workers", {})
+        if handled and isinstance(remote_res, list):
+            return remote_res
+
         workers = mgr.list_workers()
         results: list[dict[str, Any]] = []
 
@@ -175,6 +210,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Rendered terminal text content, or an error message if not found.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "get_terminal_screen",
+            {"worker_id": actual_id, "lines": lines, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         worker = mgr.get_worker(actual_id)
         if not worker:
             available = [w.worker_id for w in mgr.list_workers()]
@@ -213,6 +255,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Status message.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "restart_worker",
+            {"worker_id": actual_id, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         worker = mgr.get_worker(actual_id)
         if not worker:
             return f"Error: Worker '{actual_id}' not found."
@@ -240,6 +289,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Status confirmation message.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "send_terminal_input",
+            {"worker_id": actual_id, "text": text, "press_enter": press_enter, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         worker = mgr.get_worker(actual_id)
         if not worker:
             return f"Error: Worker '{actual_id}' not found."
@@ -279,6 +335,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Confirmation of interrupt and injection.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "interrupt_and_inject",
+            {"worker_id": actual_id, "sender_id": sender_id, "message": message, "priority": priority, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         worker = mgr.get_worker(actual_id)
         if not worker:
             return f"Error: Worker '{actual_id}' not found."
@@ -319,6 +382,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             status ('normal', 'warning', 'throttled'), and visual progress bars.
         """
         actual_slot = slot or target
+        handled, remote_res = await _forward_if_remote(
+            "check_account_quotas",
+            {"slot": actual_slot, "as_json": as_json, "hourly_limit": hourly_limit, "weekly_limit": weekly_limit, "target": target},
+        )
+        if handled and isinstance(remote_res, (dict, str)):
+            return remote_res
+
         if actual_slot:
             usage = usage_monitor.get_slot_usage(
                 slot=actual_slot,
@@ -377,6 +447,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Dictionary containing role, assigned task, principles, instructions, and config.
         """
         actual_id = agent_id or worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "get_agent_profile",
+            {"agent_id": actual_id, "worker_id": worker_id, "target": target},
+        )
+        if handled and isinstance(remote_res, dict):
+            return remote_res
+
         worker = mgr.get_worker(actual_id)
         if worker:
             return worker.get_profile_dict()
@@ -408,6 +485,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Confirmation message and alarm event status.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "notify_coordinator_worker_idle",
+            {"worker_id": actual_id, "status_summary": status_summary, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         if not actual_id:
             return "Error: worker_id must be provided."
 
@@ -437,6 +521,13 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             Confirmation of dispatched alarm event.
         """
         actual_id = worker_id or target
+        handled, remote_res = await _forward_if_remote(
+            "notify_coordinator_help",
+            {"worker_id": actual_id, "reason": reason, "priority": priority, "target": target},
+        )
+        if handled and isinstance(remote_res, str):
+            return remote_res
+
         if not actual_id:
             return "Error: worker_id must be provided."
 
@@ -455,6 +546,10 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
         Returns:
             List of alarm event dictionaries queued for the coordinator.
         """
+        handled, remote_res = await _forward_if_remote("check_coordinator_alarms", {})
+        if handled and isinstance(remote_res, list):
+            return remote_res
+
         return mgr.get_coordinator_alarms()
 
     return server

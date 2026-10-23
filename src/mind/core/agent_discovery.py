@@ -237,22 +237,13 @@ def initialize_slot_instance(
         except Exception as err:
             logger.debug("Failed seeding .GEMINI.md for %s: %s", slot_name, err)
 
-    # 5. Provision mcp_config.json with mind-mcp server entry
+    # 5. Provision mcp_config.json with native stdio mind-mcp server entry
     mcp_config_file = gemini_dir / "config" / "mcp_config.json"
-    if not mcp_config_file.exists():
-        try:
-            mcp_config_file.parent.mkdir(parents=True, exist_ok=True)
-            mcp_data = {
-                "mcpServers": {
-                    "mind-mcp": {
-                        "disabled": False,
-                        "serverUrl": "http://127.0.0.1:8765/sse",
-                    }
-                }
-            }
-            mcp_config_file.write_text(json.dumps(mcp_data, indent=2) + "\n", encoding="utf-8")
-        except Exception as err:
-            logger.debug("Failed writing mcp_config.json for %s: %s", slot_name, err)
+    try:
+        from mind.mcp.runner import provision_mcp_config
+        provision_mcp_config(user_home=home)
+    except Exception as err:
+        logger.debug("Failed auto-provisioning mcp_config.json for %s: %s", slot_name, err)
 
     return {
         "slot_id": slot_id,

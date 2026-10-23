@@ -252,13 +252,34 @@ def test_provision_mcp_config(tmp_path) -> None:
     assert global_cfg.is_file()
     data = json.loads(global_cfg.read_text(encoding="utf-8"))
     assert "mind-mcp" in data.get("mcpServers", {})
-    assert data["mcpServers"]["mind-mcp"]["serverUrl"] == "http://127.0.0.1:8765/sse"
+    assert "command" in data["mcpServers"]["mind-mcp"]
+    assert data["mcpServers"]["mind-mcp"]["args"] == ["-m", "mind.cli.main", "mcp"]
+    assert data["mcpServers"]["mind-mcp"]["env"]["MIND_HTTP_PORT"] == "8765"
     assert data["mcpServers"]["mind-mcp"]["disabled"] is False
 
     agy1_cfg = tmp_path / ".local" / "share" / "agy-instances" / "agy1" / ".gemini" / "config" / "mcp_config.json"
     assert agy1_cfg.is_file()
     data_agy1 = json.loads(agy1_cfg.read_text(encoding="utf-8"))
-    assert data_agy1["mcpServers"]["mind-mcp"]["serverUrl"] == "http://127.0.0.1:8765/sse"
+    assert data_agy1["mcpServers"]["mind-mcp"]["args"] == ["-m", "mind.cli.main", "mcp"]
+    assert data_agy1["mcpServers"]["mind-mcp"]["disabled"] is False
+
+
+@pytest.mark.anyio
+async def test_mcp_runner_call_tool_bridge() -> None:
+    """Verify MCPServerRunner exposes /api/call-tool bridge for stdio worker forwarding."""
+    from starlette.testclient import TestClient
+
+    mgr = TerminalManager.get_instance()
+    server = create_mcp_server(manager=mgr)
+    runner = MCPServerRunner(host="127.0.0.1", port=8991, server=server)
+    app = runner._create_app()
+
+    client = TestClient(app)
+    resp = client.post("/api/call-tool", json={"name": "list_workers", "arguments": {}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("success") is True
+    assert isinstance(body.get("result"), list)
 
 
 @pytest.mark.anyio

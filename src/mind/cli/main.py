@@ -115,15 +115,15 @@ def mcp() -> None:
 @click.option(
     "--transport",
     "-t",
-    type=click.Choice(["sse", "stdio"]),
-    default="sse",
-    help="MCP transport to register with agy (default: sse).",
+    type=click.Choice(["stdio", "sse"]),
+    default="stdio",
+    help="MCP transport to register with agy (default: stdio).",
 )
 @click.option(
     "--port",
     "-p",
     default=8765,
-    help="Port of the background SSE server (default: 8765).",
+    help="Port of the background server (default: 8765).",
 )
 def register_mcp(transport: str, port: int) -> None:
     """Register the mind-mcp server with agy automatically.
@@ -131,7 +131,7 @@ def register_mcp(transport: str, port: int) -> None:
     Enables the primary agent running agy to discover and call
     mind-mcp tools (inspect screens, inject interrupts, send input).
     """
-    from mind.mcp.runner import provision_mcp_config
+    from mind.mcp.runner import provision_mcp_config, resolve_python_path
 
     # 1. Directly provision mcp_config.json files across orchestrator instances
     try:
@@ -156,7 +156,7 @@ def register_mcp(transport: str, port: int) -> None:
         target = f"http://127.0.0.1:{port}/sse"
         cmd = [agy_path, "mcp", "add", "mind-mcp", target]
     else:
-        executable = sys.executable
+        executable = resolve_python_path()
         cmd = [agy_path, "mcp", "add", "mind-mcp", executable, "-m", "mind.cli.main", "mcp"]
 
     click.echo(f"Registering mind-mcp with agy: {' '.join(cmd)}")

@@ -116,9 +116,9 @@ def test_pty_output_listeners() -> None:
         listener_chunks.append(chunk)
 
     cmd = (
-        ["cmd.exe", "/c", "echo LISTENER_TEST_OK"]
+        ["cmd.exe", "/c", "timeout /t 1 >nul && echo LISTENER_TEST_OK"]
         if sys.platform == "win32"
-        else ["bash", "-c", "echo LISTENER_TEST_OK"]
+        else ["bash", "-c", "sleep 0.05 && echo LISTENER_TEST_OK"]
     )
 
     proc = spawn_pty(command=cmd, columns=80, lines=24)
