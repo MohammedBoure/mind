@@ -1,38 +1,38 @@
 {
   "target_integration_branch": "AGI",
-  "integration_status": "CONSOLIDATED",
+  "integration_status": "IN_PROGRESS",
   "assignments": [
     {
       "agent_id": "agy11",
       "worker_id": "1",
       "role": "Backend / Systems",
-      "branch": "backend/agy11-tui-engine",
-      "scope": "Scaffold compiled TUI engine (Rust Ratatui/Tokio/portable-pty), PTY master event loop, async IO, IPC/MCP connectivity",
-      "status": "MERGED"
+      "branch": "backend/agy11-session-and-identity",
+      "scope": "Session management persistence (~/.mind/sessions), CLI commands (agi new/sessions), dynamic agy[x] slot discovery, externalized config and shortcut engine (~/.config/mind/agi.toml)",
+      "status": "COMPLETED"
     },
     {
       "agent_id": "agy51",
       "worker_id": "2",
       "role": "Frontend & UI/UX",
-      "branch": "frontend/agy51-tui-components",
-      "scope": "Visual widget components (split panes, status bars, real-time gauges, dynamic lists) with high-efficiency terminal rendering",
-      "status": "MERGED"
+      "branch": "frontend/agy51-session-picker-and-modals",
+      "scope": "Session Picker screen, shortcuts help modal (?), directive injection modal (m/Ctrl+M), directive editor (d/Ctrl+D), new worker modal (n), worker identity indicators",
+      "status": "READY"
     },
     {
       "agent_id": "agy100",
       "worker_id": "3",
-      "role": "Testing & Benchmarking",
-      "branch": "test/agy100-perf-benchmarks",
-      "scope": "Automated test suites and performance benchmarks (latency, CPU, memory vs Python)",
-      "status": "MERGED"
+      "role": "Testing & Verification",
+      "branch": "test/agy100-session-and-parity-tests",
+      "scope": "Automated tests for session persistence, config parsing, shortcut engine, and agent slot isolation",
+      "status": "PENDING_FRONTEND"
     },
     {
       "agent_id": "agy151",
       "worker_id": "4",
       "role": "Polish & Ergonomics",
-      "branch": "ux/agy151-tui-ergonomics",
-      "scope": "SIGWINCH terminal resizing, keyboard navigation, accessibility palettes, sub-README documentation",
-      "status": "MERGED"
+      "branch": "ux/agy151-shortcuts-and-docs",
+      "scope": "Modal animations, non-conflicting shortcut fallbacks, documentation in sub-READMEs, gatekeeper consolidation into AGI",
+      "status": "PENDING_TESTS"
     }
   ]
 }

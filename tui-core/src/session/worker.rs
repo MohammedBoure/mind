@@ -11,6 +11,7 @@ use crate::ipc::types::WorkerSummary;
 use crate::pty::buffer::ScreenBuffer;
 use crate::pty::master::PtyConfig;
 use crate::pty::process::PtyProcess;
+use crate::session::identity::IdentityDiscovery;
 
 /// Current operational state of a worker agent process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,7 +26,9 @@ pub enum WorkerState {
 /// Managed worker session encapsulating its PTY process, virtual buffer, and metadata.
 pub struct WorkerSession {
     pub id: String,
+    pub worker_name: Arc<Mutex<String>>,
     pub slot_id: String,
+    pub role: Arc<Mutex<String>>,
     pub task: Arc<Mutex<Option<String>>>,
     pub state: Arc<Mutex<WorkerState>>,
     pub model: Arc<Mutex<String>>,
@@ -36,7 +39,7 @@ pub struct WorkerSession {
 }
 
 impl WorkerSession {
-    /// Spawn a new worker session with dedicated PTY process.
+    /// Spawn a new worker session with dedicated PTY process and dynamic slot identity linking.
     pub fn spawn(
         id: impl Into<String>,
         slot_id: impl Into<String>,
@@ -50,24 +53,54 @@ impl WorkerSession {
         let id = id.into();
         let slot_id = slot_id.into();
 
+        // Discover host slot metadata
+        let discovered_slot = IdentityDiscovery::find_slot(&slot_id);
+        let default_role = discovered_slot
+            .as_ref()
+            .map(|s| s.role.clone())
+            .unwrap_or_else(|| match slot_id.as_str() {
+                "agy1" | "1" => "Lead Orchestrator".to_string(),
+                "agy11" | "11" => "Backend Logic & Systems".to_string(),
+                "agy51" | "51" => "Frontend & UI/UX".to_string(),
+                "agy100" | "100" => "Testing & Verification".to_string(),
+                "agy151" | "151" => "Polish & Ergonomics".to_string(),
+                _ => "Autonomous Worker Agent".to_string(),
+            });
+        let default_model = discovered_slot
+            .as_ref()
+            .map(|s| s.model.clone())
+            .unwrap_or_else(|| "gemini-3.8-flash-high".to_string());
+        let default_task = discovered_slot.as_ref().and_then(|s| s.task.clone());
+
+        // Merge slot isolation environment
+        let mut final_env = env;
+        if let Some(slot) = &discovered_slot {
+            let isolation = IdentityDiscovery::build_slot_isolation_env(slot);
+            for (k, v) in isolation {
+                final_env.entry(k).or_insert(v);
+            }
+        }
+
         let config = PtyConfig {
             command: command.into(),
             args,
             cwd,
-            env,
+            env: final_env,
             rows,
             cols,
         };
 
-        info!("Spawning worker session '{}' (slot: {})", id, slot_id);
+        info!("Spawning worker session '{}' (slot: {}, role: {})", id, slot_id, default_role);
         let pty = PtyProcess::spawn(config)?;
 
         Ok(Self {
+            worker_name: Arc::new(Mutex::new(id.clone())),
             id,
             slot_id,
-            task: Arc::new(Mutex::new(None)),
+            role: Arc::new(Mutex::new(default_role)),
+            task: Arc::new(Mutex::new(default_task)),
             state: Arc::new(Mutex::new(WorkerState::Running)),
-            model: Arc::new(Mutex::new("claude-3-5-sonnet".to_string())),
+            model: Arc::new(Mutex::new(default_model)),
             token_usage: Arc::new(Mutex::new((12_450, 200_000))),
             last_alarm: Arc::new(Mutex::new(None)),
             pty: Arc::new(Mutex::new(pty)),
@@ -237,7 +270,27 @@ impl WorkerSession {
         Arc::clone(&self.pty)
     }
 
-    /// Set model identifier for this worker session (e.g. "claude-3-5-sonnet").
+    /// Retrieve the worker's operational role.
+    pub fn role(&self) -> String {
+        self.role.lock().clone()
+    }
+
+    /// Set the worker's operational role.
+    pub fn set_role(&self, role: impl Into<String>) {
+        *self.role.lock() = role.into();
+    }
+
+    /// Retrieve human-friendly worker name.
+    pub fn worker_name(&self) -> String {
+        self.worker_name.lock().clone()
+    }
+
+    /// Set human-friendly worker name.
+    pub fn set_worker_name(&self, name: impl Into<String>) {
+        *self.worker_name.lock() = name.into();
+    }
+
+    /// Set model identifier for this worker session (e.g. "gemini-3.8-flash-high").
     pub fn set_model(&self, model: impl Into<String>) {
         *self.model.lock() = model.into();
     }

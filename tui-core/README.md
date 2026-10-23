@@ -35,27 +35,46 @@
 
 ---
 
-## 2. Keyboard Navigation & Ergonomics
+## 2. Keyboard Navigation & Python-Parity Configurable Shortcuts
 
-The interactive compiled TUI interface offers ergonomic, single-keystroke navigation controls across all sessions, views, themes, and scrollback histories:
+The interactive compiled TUI interface offers ergonomic, single-keystroke navigation controls across all sessions, views, themes, and scrollback histories. Shortcuts can be customized via `~/.config/mind/agi.toml` (or `~/.mind/config.toml`):
 
 | Hotkey / Shortcut | Action | Description |
 |---|---|---|
-| `Tab` | Next Tab | Cycles focus forward through active agent sessions. |
-| `Shift+Tab` / `BackTab` | Previous Tab | Cycles focus backward through active agent sessions. |
-| `Alt+1` through `Alt+9` | Direct Tab Jump | Directly switches active focus to worker #1 through #9. |
-| `F2` or `Alt+S` | Cycle Split Mode | Cycles multiplexer layout: Single -> Horizontal -> Vertical -> 2x2 Grid. |
-| `F1` or `Alt+B` | Toggle Sidebar | Shows or hides the left worker list and compact quota sidebar. |
-| `F4` or `Alt+T` | Cycle Theme Mode | Switches active color palette: Tokyo Night -> HC Dark -> HC Light -> Color-Blind. |
-| `PageUp` / `Shift+Up` | Scroll History Up | Scrolls active terminal history backward (5 lines per step). |
-| `PageDown` / `Shift+Down` | Scroll History Down | Scrolls active terminal history forward toward live bottom. |
-| Any Typing / Enter | Terminal Input | Delivers keystroke to child PTY and automatically resets scroll offset to live bottom. |
-| `Ctrl+C` | Send SIGINT | Delivers interrupt signal (0x03) to the currently active worker PTY. |
-| `Ctrl+Q` | Clean Quit | Gracefully restores raw terminal mode and terminates child worker PTYs. |
+| `q` / `Ctrl+Q` | `Action::Quit` | Save session state and exit application |
+| `?` | `Action::Help` | Toggle shortcuts help modal |
+| `Tab` | `Action::CycleFocus` | Focus next worker tab / pane |
+| `Shift+Tab` / `BackTab` | `Action::CycleFocusReverse` | Focus previous worker tab / pane |
+| `m` / `Ctrl+M` | `Action::DirectiveModal` | Open Directive Injection Modal |
+| `d` / `Ctrl+D` | `Action::DirectiveEditor` | Open In-app Directive Editor Modal |
+| `o` / `Ctrl+O` | `Action::OpenExternalEditor` | Open directive file in system editor ($EDITOR) |
+| `s` | `Action::ToggleSplit` | Toggle split layout (Single -> Horizontal -> Vertical -> Grid) |
+| `n` | `Action::NewWorker` | Dynamically provision and spawn next agent slot |
+| `1`..`9` / `F5`..`F8` | `Action::SelectTab(idx)` | Configurable fast tab jump keys |
+| `PageUp` / `Shift+Up` | `Action::ScrollUp` | Scrolls active terminal history backward (5 lines per step) |
+| `PageDown` / `Shift+Down` | `Action::ScrollDown` | Scrolls active terminal history forward toward live bottom |
+| `b` | UI Toggle | Toggle worker metadata & quota sidebar |
+| `F4` / `Alt+T` | Theme Toggle | Switch active color palette: Tokyo Night -> HC Dark -> HC Light -> Color-Blind |
+| Any Typing / Enter | Terminal Input | Delivers keystroke to child PTY and automatically resets scroll offset |
+| `Ctrl+C` | Send SIGINT | Delivers interrupt signal (0x03) to the currently active worker PTY |
 
 ---
 
-## 3. Responsive Terminal Resizing (SIGWINCH Architecture)
+## 3. Persistent Sessions & Real Slot Discovery
+
+1. **Persistent Sessions (`~/.mind/sessions/<name>.json`)**:
+   - `SessionStore` persists multi-agent sessions, activity telemetry (`total_steps`, `total_interactions`, `last_activity`), and worker configurations.
+   - Provides atomic write guarantees using sibling temporary files before atomic renames.
+   - Automatically prunes stale/inactive sessions with `clean_sessions()`.
+
+2. **Real Agent Slot Identity (`IdentityDiscovery`)**:
+   - Dynamically scans `/home/pluto/.local/share/agy-instances/agy[x]`.
+   - Parses real roles from `.gemini/GEMINI.md` and models from `antigravity-cli/settings.json`.
+   - Proactively builds slot-isolated environments (`USERPROFILE`, `HOME`, `AGY_SLOT`, `ANTIGRAVITY_APP_DATA_DIR`).
+
+---
+
+## 4. Responsive Terminal Resizing (SIGWINCH Architecture)
 
 The engine implements robust, tearing-free terminal resizing capable of dynamically adapting to arbitrary window dimensions:
 
@@ -129,8 +148,11 @@ tui-core/
 │   │   ├── mcp_client.rs # Async HTTP/SSE client
 │   │   └── mcp_server.rs # Embedded stdio/in-memory MCP server
 │   ├── session/        # Agent session orchestration & tab switching
-│   │   ├── README.md   # Session manager, worker sessions, and scrolling docs
+│   │   ├── README.md   # Session manager, identity discovery, and shortcuts docs
 │   │   ├── mod.rs
+│   │   ├── identity.rs # Dynamic host agy[x] slot discovery and environment isolation
+│   │   ├── session_store.rs # Persistent storage at ~/.mind/sessions/<name>.json
+│   │   ├── shortcuts.rs # Configurable shortcut engine (~/.config/mind/agi.toml)
 │   │   ├── worker.rs   # WorkerSession (state, PTY, scrollback offset, idle detection)
 │   │   └── manager.rs  # SessionManager & McpBackend implementation
 │   └── ui/             # Accessible visual Ratatui widgets
@@ -154,26 +176,36 @@ tui-core/
 
 ---
 
-## 6. Build, Test & Benchmark Commands
+## 7. Build, Test & CLI Command Suite
 
 ### Run Integration Tests
 ```bash
 cargo test
 ```
 
-### Run Performance Benchmarks
+### Launch Interactive AGI TUI
 ```bash
-cargo run --release -- bench
+# Launch default/active session or Session Picker
+cargo run --bin agi
+
+# Create and launch new session named 'alpha_mission'
+cargo run --bin agi -- new alpha_mission
+
+# Inspect saved sessions
+cargo run --bin agi -- sessions
+
+# Clean / prune stale and empty sessions
+cargo run --bin agi -- sessions --clean
 ```
 
-### Run Interactive TUI Multiplexer
+### Run Performance Benchmarks
 ```bash
-cargo run -- run
+cargo run --release --bin agi -- bench
 ```
 
 ### Run as Stdio MCP Server
 ```bash
-cargo run -- --mcp-stdio
+cargo run --bin agi -- --mcp-stdio
 ```
 
 ---

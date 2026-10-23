@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["agy11 <systems@mind.ai>"]
 description = "High-performance compiled TUI core architecture with async PTY master loop, Tokio event engine, and MCP/IPC bridge."
 license = "MIT"
+default-run = "agi"
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }
@@ -23,9 +24,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3.10"
+
+[[bin]]
+name = "agi"
+path = "src/main.rs"
 
 [[bench]]
 name = "benchmarks"

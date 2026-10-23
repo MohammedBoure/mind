@@ -18,7 +18,11 @@ pub use ipc::{
     McpClient, McpTool, WorkerSummary,
 };
 pub use pty::{CellColor, PtyConfig, PtyMaster, PtyProcess, ScreenBuffer, ScreenCell};
-pub use session::{SessionManager, WorkerSession, WorkerState};
+pub use session::{
+    Action, AgentSlot, AgiConfig, GeneralConfig, IdentityDiscovery, KeyBinding, SessionManager,
+    SessionRecord, SessionStore, SessionWorkerConfig, ShortcutConfig, ShortcutEngine, WorkerSession,
+    WorkerState,
+};
 pub use ui::{
     AlertBadge, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget, StatusBarWidget,
     TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem, WorkerListWidget,
@@ -31,6 +35,7 @@ pub struct TuiEngine {
     pub event_loop: Arc<Mutex<EventLoop>>,
     pub mcp_client: McpClient,
     pub mcp_server: Arc<EmbeddedMcpServer>,
+    pub shortcut_engine: Arc<ShortcutEngine>,
 }
 
 impl Default for TuiEngine {
@@ -46,12 +51,14 @@ impl TuiEngine {
         let event_loop = Arc::new(Mutex::new(EventLoop::new(tick_ms)));
         let mcp_client = McpClient::new(mcp_url);
         let mcp_server = Arc::new(EmbeddedMcpServer::new(Arc::clone(&session_manager) as Arc<dyn McpBackend>));
+        let shortcut_engine = Arc::new(ShortcutEngine::load_or_default());
 
         Self {
             session_manager,
             event_loop,
             mcp_client,
             mcp_server,
+            shortcut_engine,
         }
     }
 

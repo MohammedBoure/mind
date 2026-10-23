@@ -10,6 +10,7 @@ use crate::error::{Result, TuiError};
 use crate::events::types::AlarmEvent;
 use crate::ipc::mcp_server::McpBackend;
 use crate::ipc::types::WorkerSummary;
+use crate::session::session_store::{SessionRecord, SessionStore, SessionWorkerConfig};
 use crate::session::worker::{WorkerSession, WorkerState};
 
 /// Central manager orchestrating multi-agent PTY sessions, active tab switching,
@@ -18,6 +19,8 @@ pub struct SessionManager {
     sessions: Arc<Mutex<Vec<Arc<WorkerSession>>>>,
     active_index: Arc<Mutex<usize>>,
     alarms: Arc<Mutex<Vec<AlarmEvent>>>,
+    store: Arc<SessionStore>,
+    current_session_name: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for SessionManager {
@@ -27,13 +30,131 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
-    /// Initialize an empty session manager.
+    /// Initialize an empty session manager with default session store.
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(Vec::new())),
             active_index: Arc::new(Mutex::new(0)),
             alarms: Arc::new(Mutex::new(Vec::new())),
+            store: Arc::new(SessionStore::new()),
+            current_session_name: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Initialize session manager with a custom session store.
+    pub fn with_store(store: SessionStore) -> Self {
+        Self {
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            active_index: Arc::new(Mutex::new(0)),
+            alarms: Arc::new(Mutex::new(Vec::new())),
+            store: Arc::new(store),
+            current_session_name: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Access reference to underlying persistent SessionStore.
+    pub fn store(&self) -> Arc<SessionStore> {
+        Arc::clone(&self.store)
+    }
+
+    /// Name of currently active session, if any.
+    pub fn current_session_name(&self) -> Option<String> {
+        self.current_session_name.lock().clone()
+    }
+
+    /// Set name of currently active session.
+    pub fn set_current_session_name(&self, name: Option<String>) {
+        *self.current_session_name.lock() = name;
+    }
+
+    /// Load and restore a session from persistent storage into running worker tabs.
+    pub fn load_and_restore_session(
+        &self,
+        name: &str,
+        default_cmd: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<SessionRecord> {
+        let session_record = self
+            .store
+            .get_session(name)?
+            .ok_or_else(|| TuiError::SessionNotFound(format!("Session '{}' does not exist", name)))?;
+
+        // Clear currently running sessions
+        self.sessions.lock().clear();
+        *self.active_index.lock() = 0;
+
+        for w_cfg in &session_record.workers {
+            let cmd = w_cfg.command.as_deref().unwrap_or(default_cmd);
+            let args = w_cfg.args.clone().unwrap_or_default();
+            let env = w_cfg.env.clone().unwrap_or_default();
+
+            let worker = self.spawn_session(
+                &w_cfg.id,
+                &w_cfg.slot_id,
+                cmd,
+                args,
+                None,
+                env,
+                rows,
+                cols,
+            )?;
+
+            worker.set_role(&w_cfg.role);
+            worker.set_model(&w_cfg.model);
+            worker.set_task(w_cfg.task.clone());
+        }
+
+        *self.current_session_name.lock() = Some(name.to_string());
+        let _ = self.store.touch_activity(name, 0, 1);
+
+        Ok(session_record)
+    }
+
+    /// Create, persist, and launch a new multi-agent session.
+    pub fn create_and_launch_session(
+        &self,
+        name: &str,
+        default_cmd: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<SessionRecord> {
+        let record = self.store.create_default_session(name);
+        self.store.save_session(&record)?;
+        self.load_and_restore_session(name, default_cmd, rows, cols)
+    }
+
+    /// Save state of current running workers into the persistent session file.
+    pub fn save_current_session(&self) -> Result<Option<PathBuf>> {
+        let name = match self.current_session_name() {
+            Some(n) => n,
+            None => return Ok(None),
+        };
+
+        let mut record = self
+            .store
+            .get_session(&name)?
+            .unwrap_or_else(|| SessionRecord::new(&name, ""));
+
+        let current_workers = self.list_sessions();
+        record.workers.clear();
+
+        for w in &current_workers {
+            record.workers.push(SessionWorkerConfig {
+                id: w.id.clone(),
+                slot_id: w.slot_id.clone(),
+                role: w.role(),
+                model: w.model(),
+                task: w.task.lock().clone(),
+                command: None,
+                args: None,
+                env: None,
+            });
+        }
+        record.agent_count = record.workers.len();
+
+        let path = self.store.save_session(&record)?;
+        Ok(Some(path))
     }
 
     /// Spawn and register a new worker session.
