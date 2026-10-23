@@ -228,6 +228,15 @@ def initialize_slot_instance(
         except Exception:
             pass
 
+    # 4. Seed .GEMINI.md guidelines into slot profile if available
+    agys_gemini = get_agys_instances_dir(home) / slot_name / ".gemini" / ".GEMINI.md"
+    inst_gemini = gemini_dir / ".GEMINI.md"
+    if agys_gemini.exists() and not inst_gemini.exists():
+        try:
+            inst_gemini.write_bytes(agys_gemini.read_bytes())
+        except Exception as err:
+            logger.debug("Failed seeding .GEMINI.md for %s: %s", slot_name, err)
+
     return {
         "slot_id": slot_id,
         "slot_name": slot_name,
@@ -261,11 +270,15 @@ def build_slot_isolation_env(
     slot_id = parse_slot_id(slot)
     home = real_home or get_real_user_home()
 
-    inst_root = instances_root or (home / ".gemini" / "instances")
-    tok_root = tokens_root or (home / ".gemini" / "tokens")
+    if instances_root is not None:
+        instance_dir = instances_root / f"agy{slot_id}"
+    else:
+        instance_dir = get_slot_instance_dir(slot_id, home)
 
-    instance_dir = inst_root / f"agy{slot_id}"
-    token_file = tok_root / f"agy{slot_id}.token"
+    if tokens_root is not None:
+        token_file = tokens_root / f"agy{slot_id}.token"
+    else:
+        token_file = get_slot_token_path(slot_id, home)
 
     if auto_init:
         try:
