@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::session::worker::{WorkerSession, WorkerState};
-use crate::ui::theme::{colors, glyphs, Theme};
+use crate::ui::theme::{glyphs, Theme};
 
 /// Item representation for a worker entry in the dynamic list.
 #[derive(Debug, Clone)]
@@ -48,28 +48,40 @@ pub struct WorkerListWidget<'a> {
     selected_index: Option<usize>,
     block: Option<Block<'a>>,
     highlight_style: Style,
+    theme: Theme,
 }
 
 impl<'a> WorkerListWidget<'a> {
     /// Create new worker list from raw items.
     pub fn new(items: Vec<WorkerListItem>) -> Self {
+        let theme = Theme::default();
         Self {
             items,
             selected_index: None,
             block: None,
-            highlight_style: Theme::list_selected(),
+            highlight_style: theme.list_selected_style(),
+            theme,
         }
     }
 
     /// Construct worker list directly from active worker sessions.
     pub fn from_sessions(sessions: &[Arc<WorkerSession>], selected_index: Option<usize>) -> Self {
         let items: Vec<WorkerListItem> = sessions.iter().map(|s| WorkerListItem::from(s.as_ref())).collect();
+        let theme = Theme::default();
         Self {
             items,
             selected_index,
             block: None,
-            highlight_style: Theme::list_selected(),
+            highlight_style: theme.list_selected_style(),
+            theme,
         }
+    }
+
+    /// Set active theme for colors and highlights.
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.highlight_style = theme.list_selected_style();
+        self.theme = theme;
+        self
     }
 
     /// Attach container block/border.
@@ -84,8 +96,9 @@ impl<'a> WorkerListWidget<'a> {
         self
     }
 
-    /// Build internal `ListItem`s with Tokyo-Night icons, colors, and badges.
+    /// Build internal `ListItem`s with accessible icons, colors, and badges.
     fn build_list_items(&self) -> Vec<ListItem<'a>> {
+        let p = self.theme.palette();
         self.items
             .iter()
             .enumerate()
@@ -97,7 +110,7 @@ impl<'a> WorkerListWidget<'a> {
                 if is_selected {
                     spans.push(Span::styled(
                         format!("{} ", glyphs::POINTER),
-                        Style::default().fg(colors::ACCENT_CYAN).add_modifier(Modifier::BOLD),
+                        Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD),
                     ));
                 } else {
                     spans.push(Span::raw("  "));
@@ -105,16 +118,16 @@ impl<'a> WorkerListWidget<'a> {
 
                 // 2. Status icon
                 let (icon, icon_style) = if item.has_help_alarm {
-                    (glyphs::ALERT, Style::default().fg(colors::ACCENT_RED).add_modifier(Modifier::BOLD))
+                    (glyphs::ALERT, Style::default().fg(p.accent_red).add_modifier(Modifier::BOLD))
                 } else if item.has_finished_alarm {
-                    (glyphs::FINISHED, Style::default().fg(colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD))
+                    (glyphs::FINISHED, Style::default().fg(p.accent_yellow).add_modifier(Modifier::BOLD))
                 } else {
                     match item.state {
-                        WorkerState::Spawning => (glyphs::IDLE, Style::default().fg(colors::ACCENT_BLUE)),
-                        WorkerState::Running => (glyphs::RUNNING, Style::default().fg(colors::ACCENT_GREEN)),
-                        WorkerState::Idle => (glyphs::IDLE, Style::default().fg(colors::FG_MUTED)),
-                        WorkerState::Interrupted => (glyphs::INTERRUPTED, Style::default().fg(colors::ACCENT_ORANGE)),
-                        WorkerState::Exited(_) => (glyphs::EXITED, Style::default().fg(colors::FG_MUTED)),
+                        WorkerState::Spawning => (glyphs::IDLE, Style::default().fg(p.accent_blue)),
+                        WorkerState::Running => (glyphs::RUNNING, Style::default().fg(p.accent_green)),
+                        WorkerState::Idle => (glyphs::IDLE, Style::default().fg(p.fg_muted)),
+                        WorkerState::Interrupted => (glyphs::INTERRUPTED, Style::default().fg(p.accent_orange)),
+                        WorkerState::Exited(_) => (glyphs::EXITED, Style::default().fg(p.fg_muted)),
                     }
                 };
 
@@ -122,9 +135,9 @@ impl<'a> WorkerListWidget<'a> {
 
                 // 3. Worker ID & Slot ID
                 let name_style = if is_selected {
-                    Style::default().fg(colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)
+                    Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(colors::FG_LIGHT)
+                    Style::default().fg(p.fg_light)
                 };
                 spans.push(Span::styled(format!("{}:{} ", item.id, item.slot_id), name_style));
 
@@ -132,26 +145,36 @@ impl<'a> WorkerListWidget<'a> {
                 if let Some(pid) = item.pid {
                     spans.push(Span::styled(
                         format!("({}) ", pid),
-                        Style::default().fg(colors::FG_MUTED),
+                        Style::default().fg(p.fg_muted),
                     ));
                 }
 
                 // 5. Task snippet or alert badge
                 if item.has_help_alarm {
+                    let badge = if self.theme.mode == crate::ui::theme::ThemeMode::ColorBlind {
+                        "[!] NEED HELP"
+                    } else {
+                        "[🚨 NEED HELP]"
+                    };
                     spans.push(Span::styled(
-                        "[🚨 NEED HELP]",
-                        Style::default().fg(colors::ACCENT_RED).add_modifier(Modifier::BOLD),
+                        badge,
+                        Style::default().fg(p.accent_red).add_modifier(Modifier::BOLD),
                     ));
                 } else if item.has_finished_alarm {
+                    let badge = if self.theme.mode == crate::ui::theme::ThemeMode::ColorBlind {
+                        "[⚡] DONE"
+                    } else {
+                        "[⚡ DONE]"
+                    };
                     spans.push(Span::styled(
-                        "[⚡ DONE]",
-                        Style::default().fg(colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD),
+                        badge,
+                        Style::default().fg(p.accent_yellow).add_modifier(Modifier::BOLD),
                     ));
                 } else if let Some(ref t) = item.task {
                     let preview: String = t.chars().take(22).collect();
                     spans.push(Span::styled(
                         format!("\"{}\"", preview),
-                        Style::default().fg(colors::ACCENT_TEAL),
+                        Style::default().fg(p.accent_teal),
                     ));
                 }
 
@@ -159,7 +182,7 @@ impl<'a> WorkerListWidget<'a> {
                 let item_style = if is_selected {
                     self.highlight_style
                 } else {
-                    Theme::list_normal()
+                    self.theme.list_normal_style()
                 };
 
                 ListItem::new(line).style(item_style)

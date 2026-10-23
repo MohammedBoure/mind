@@ -21,5 +21,5 @@ pub use status_bar::{AlertBadge, StatusBarWidget};
 pub use terminal_screen::{
     cell_bg_to_ratatui, cell_color_to_ratatui, TerminalScreenWidget, TerminalSource,
 };
-pub use theme::{colors, glyphs, Theme};
+pub use theme::{colors, glyphs, Theme, ThemeMode, ThemePalette};
 pub use worker_list::{WorkerListItem, WorkerListWidget};

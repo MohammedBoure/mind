@@ -345,3 +345,106 @@ fn test_worker_list_dynamic_interaction() {
     assert!(content.contains("DONE"));
     assert!(content.contains("NEED HELP"));
 }
+
+#[test]
+fn test_accessibility_themes_and_palettes() {
+    use tui_core::ui::ThemeMode;
+
+    let modes = [
+        ThemeMode::TokyoNight,
+        ThemeMode::HighContrastDark,
+        ThemeMode::HighContrastLight,
+        ThemeMode::ColorBlind,
+    ];
+
+    let backend = TestBackend::new(140, 5);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    for mode in modes {
+        let theme = Theme::new(mode);
+        let palette = theme.palette();
+
+        assert_eq!(theme.mode, mode);
+        assert!(!mode.label().is_empty());
+
+        terminal
+            .draw(|f| {
+                let status_bar = StatusBarWidget::new("worker-1", "slot-1")
+                    .theme(theme)
+                    .alert_badge(AlertBadge::AssistanceNeeded("Critical issue".to_string()));
+                f.render_widget(status_bar, f.area());
+            })
+            .unwrap();
+
+        let term_buf = terminal.backend().buffer();
+        let mut rendered = String::new();
+        for x in 0..140 {
+            rendered.push_str(term_buf[(x, 0)].symbol());
+        }
+        assert!(rendered.contains("worker-1:slot-1"));
+        if mode == ThemeMode::ColorBlind {
+            assert!(rendered.contains("[!] Assistance Needed"));
+        } else {
+            assert!(rendered.contains("Assistance Needed"));
+        }
+
+        // Verify high-contrast / color-blind palette distinctness
+        if mode == ThemeMode::HighContrastDark {
+            assert_eq!(palette.bg_dark, Color::Rgb(0, 0, 0));
+            assert_eq!(palette.fg_light, Color::Rgb(255, 255, 255));
+        } else if mode == ThemeMode::HighContrastLight {
+            assert_eq!(palette.bg_dark, Color::Rgb(255, 255, 255));
+            assert_eq!(palette.fg_light, Color::Rgb(15, 15, 20));
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_split_panes_with_scrollback_rendering() {
+    let shell = if cfg!(windows) { "cmd.exe" } else { "bash" };
+    let session = Arc::new(
+        WorkerSession::spawn("scroll-test", "slot1", shell, vec![], None, HashMap::new(), 5, 40)
+            .unwrap(),
+    );
+
+    // Push output lines to populate scrollback
+    {
+        let pty = session.pty.lock();
+        let buf = pty.buffer();
+        let mut b = buf.lock();
+        b.process_bytes(b"line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5\r\nline 6\r\nline 7\r\nline 8");
+    }
+
+    assert!(session.pty.lock().buffer().lock().history_count() > 0);
+
+    // Scroll up
+    session.scroll_up(3);
+    assert_eq!(session.scroll_offset(), 3);
+
+    let backend = TestBackend::new(80, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|f| {
+            let widget = SplitPanesWidget::new(SplitMode::Single)
+                .sessions(vec![session.clone()])
+                .focused_index(0);
+            f.render_widget(widget, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..10 {
+        for x in 0..80 {
+            text.push_str(term_buf[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+
+    assert!(text.contains("SCROLL -3"));
+
+    // Reset scroll on user input
+    session.send_input("ls", true).unwrap();
+    assert_eq!(session.scroll_offset(), 0);
+}

@@ -31,7 +31,7 @@
       "role": "Polish & Ergonomics",
       "branch": "ux/agy151-tui-ergonomics",
       "scope": "SIGWINCH terminal resizing, keyboard navigation, accessibility palettes, sub-README documentation",
-      "status": "READY"
+      "status": "COMPLETED"
     }
   ]
 }

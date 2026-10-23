@@ -34,6 +34,12 @@ pub enum TerminalSource<'a> {
         cursor: Option<(usize, usize)>,
         version: u64,
     },
+    /// Owned cell matrix slice (e.g. from history scrollback slice).
+    OwnedCells {
+        cells: Vec<Vec<ScreenCell>>,
+        cursor: Option<(usize, usize)>,
+        version: u64,
+    },
     /// Clean plain text fallback.
     PlainText(&'a str),
 }
@@ -70,6 +76,22 @@ impl<'a> TerminalScreenWidget<'a> {
     pub fn from_cells(cells: &'a [Vec<ScreenCell>], cursor: Option<(usize, usize)>, version: u64) -> Self {
         Self {
             source: TerminalSource::Cells {
+                cells,
+                cursor,
+                version,
+            },
+            block: None,
+            show_cursor: cursor.is_some(),
+            scroll_offset: 0,
+            default_fg: colors::FG_LIGHT,
+            default_bg: Color::Reset,
+        }
+    }
+
+    /// Create widget from owned cells matrix (e.g. when scrolling through history scrollback).
+    pub fn from_owned_cells(cells: Vec<Vec<ScreenCell>>, cursor: Option<(usize, usize)>, version: u64) -> Self {
+        Self {
+            source: TerminalSource::OwnedCells {
                 cells,
                 cursor,
                 version,
@@ -128,6 +150,7 @@ impl<'a> TerminalScreenWidget<'a> {
     pub fn version(&self) -> Option<u64> {
         match &self.source {
             TerminalSource::Cells { version, .. } => Some(*version),
+            TerminalSource::OwnedCells { version, .. } => Some(*version),
             TerminalSource::PlainText(_) => None,
         }
     }
@@ -137,6 +160,7 @@ impl<'a> TerminalScreenWidget<'a> {
     pub fn is_dirty(&self, cached_version: u64) -> bool {
         match &self.source {
             TerminalSource::Cells { version, .. } => *version != cached_version,
+            TerminalSource::OwnedCells { version, .. } => *version != cached_version,
             TerminalSource::PlainText(_) => true,
         }
     }
@@ -159,61 +183,10 @@ impl<'a> Widget for TerminalScreenWidget<'a> {
 
         match self.source {
             TerminalSource::Cells { cells, cursor, .. } => {
-                let total_rows = cells.len();
-                let start_row = self.scroll_offset.min(total_rows.saturating_sub(1));
-                let visible_rows = (total_rows - start_row).min(render_area.height as usize);
-
-                for (r_idx, row) in cells.iter().skip(start_row).take(visible_rows).enumerate() {
-                    let y = render_area.y + r_idx as u16;
-                    let visible_cols = row.len().min(render_area.width as usize);
-
-                    for (c_idx, cell) in row.iter().take(visible_cols).enumerate() {
-                        let x = render_area.x + c_idx as u16;
-
-                        let fg = cell_color_to_ratatui(cell.fg, self.default_fg);
-                        let bg = cell_bg_to_ratatui(cell.bg, self.default_bg);
-
-                        let mut modifier = Modifier::empty();
-                        if cell.bold {
-                            modifier |= Modifier::BOLD;
-                        }
-                        if cell.dim {
-                            modifier |= Modifier::DIM;
-                        }
-                        if cell.italic {
-                            modifier |= Modifier::ITALIC;
-                        }
-                        if cell.underline {
-                            modifier |= Modifier::UNDERLINED;
-                        }
-
-                        let target_cell = &mut buf[(x, y)];
-                        target_cell.set_char(cell.c);
-                        target_cell.set_fg(fg);
-                        target_cell.set_bg(bg);
-                        target_cell.set_style(Style::default().fg(fg).bg(bg).add_modifier(modifier));
-                    }
-                }
-
-                // Render cursor if requested and within viewport bounds
-                if self.show_cursor {
-                    if let Some((cur_row, cur_col)) = cursor {
-                        if cur_row >= start_row && cur_row < start_row + visible_rows {
-                            let cur_y = render_area.y + (cur_row - start_row) as u16;
-                            if (cur_col as u16) < render_area.width {
-                                let cur_x = render_area.x + cur_col as u16;
-                                let cursor_cell = &mut buf[(cur_x, cur_y)];
-                                // Invert colors or draw block cursor
-                                cursor_cell.set_style(
-                                    Style::default()
-                                        .fg(colors::BG_DARK)
-                                        .bg(colors::ACCENT_CYAN)
-                                        .add_modifier(Modifier::BOLD | Modifier::REVERSED),
-                                );
-                            }
-                        }
-                    }
-                }
+                Self::render_cells(cells, cursor, self.scroll_offset, self.show_cursor, self.default_fg, self.default_bg, render_area, buf);
+            }
+            TerminalSource::OwnedCells { ref cells, cursor, .. } => {
+                Self::render_cells(cells, cursor, self.scroll_offset, self.show_cursor, self.default_fg, self.default_bg, render_area, buf);
             }
             TerminalSource::PlainText(text) => {
                 let lines: Vec<&str> = text.lines().skip(self.scroll_offset).collect();
@@ -227,6 +200,75 @@ impl<'a> Widget for TerminalScreenWidget<'a> {
                         target_cell.set_char(ch);
                         target_cell.set_fg(self.default_fg);
                         target_cell.set_bg(self.default_bg);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'a> TerminalScreenWidget<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn render_cells(
+        cells: &[Vec<ScreenCell>],
+        cursor: Option<(usize, usize)>,
+        scroll_offset: usize,
+        show_cursor: bool,
+        default_fg: Color,
+        default_bg: Color,
+        render_area: Rect,
+        buf: &mut Buffer,
+    ) {
+        let total_rows = cells.len();
+        let start_row = scroll_offset.min(total_rows.saturating_sub(1));
+        let visible_rows = (total_rows - start_row).min(render_area.height as usize);
+
+        for (r_idx, row) in cells.iter().skip(start_row).take(visible_rows).enumerate() {
+            let y = render_area.y + r_idx as u16;
+            let visible_cols = row.len().min(render_area.width as usize);
+
+            for (c_idx, cell) in row.iter().take(visible_cols).enumerate() {
+                let x = render_area.x + c_idx as u16;
+
+                let fg = cell_color_to_ratatui(cell.fg, default_fg);
+                let bg = cell_bg_to_ratatui(cell.bg, default_bg);
+
+                let mut modifier = Modifier::empty();
+                if cell.bold {
+                    modifier |= Modifier::BOLD;
+                }
+                if cell.dim {
+                    modifier |= Modifier::DIM;
+                }
+                if cell.italic {
+                    modifier |= Modifier::ITALIC;
+                }
+                if cell.underline {
+                    modifier |= Modifier::UNDERLINED;
+                }
+
+                let target_cell = &mut buf[(x, y)];
+                target_cell.set_char(cell.c);
+                target_cell.set_fg(fg);
+                target_cell.set_bg(bg);
+                target_cell.set_style(Style::default().fg(fg).bg(bg).add_modifier(modifier));
+            }
+        }
+
+        // Render cursor if requested and within viewport bounds
+        if show_cursor {
+            if let Some((cur_row, cur_col)) = cursor {
+                if cur_row >= start_row && cur_row < start_row + visible_rows {
+                    let cur_y = render_area.y + (cur_row - start_row) as u16;
+                    if (cur_col as u16) < render_area.width {
+                        let cur_x = render_area.x + cur_col as u16;
+                        let cursor_cell = &mut buf[(cur_x, cur_y)];
+                        cursor_cell.set_style(
+                            Style::default()
+                                .fg(colors::BG_DARK)
+                                .bg(colors::ACCENT_CYAN)
+                                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+                        );
                     }
                 }
             }

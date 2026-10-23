@@ -5,15 +5,20 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Interval};
 use tracing::warn;
 
+#[cfg(unix)]
+use tokio::signal::unix::{signal, Signal, SignalKind};
+
 use crate::events::types::AppEvent;
 
 /// Central asynchronous event loop multiplexing terminal Crossterm inputs,
-/// PTY stream notifications, MCP requests, and tick timers.
+/// POSIX SIGWINCH signals, PTY stream notifications, MCP requests, and tick timers.
 pub struct EventLoop {
     event_stream: EventStream,
     tx: mpsc::Sender<AppEvent>,
     rx: mpsc::Receiver<AppEvent>,
     tick_interval: Interval,
+    #[cfg(unix)]
+    sigwinch: Option<Signal>,
 }
 
 impl EventLoop {
@@ -23,11 +28,21 @@ impl EventLoop {
         let mut tick_interval = interval(Duration::from_millis(tick_ms.max(10)));
         tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        #[cfg(unix)]
+        let sigwinch = signal(SignalKind::window_change())
+            .map_err(|e| {
+                warn!("Failed to initialize POSIX SIGWINCH handler: {}", e);
+                e
+            })
+            .ok();
+
         Self {
             event_stream: EventStream::new(),
             tx,
             rx,
             tick_interval,
+            #[cfg(unix)]
+            sigwinch,
         }
     }
 
@@ -52,6 +67,22 @@ impl EventLoop {
                         None
                     }
                     None => None,
+                }
+            }
+
+            // POSIX SIGWINCH window change signal (Unix only)
+            _ = async {
+                #[cfg(unix)]
+                if let Some(ref mut sig) = self.sigwinch {
+                    sig.recv().await;
+                    return;
+                }
+                std::future::pending::<()>().await;
+            } => {
+                if let Ok((cols, rows)) = crossterm::terminal::size() {
+                    Some(AppEvent::Resize(rows, cols))
+                } else {
+                    None
                 }
             }
 

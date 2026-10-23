@@ -124,6 +124,14 @@ impl SessionManager {
         }
     }
 
+    /// Gracefully terminate and clean up all running worker PTY sessions.
+    pub fn shutdown_all(&self) {
+        let list = self.sessions.lock();
+        for session in list.iter() {
+            let _ = session.kill();
+        }
+    }
+
     /// Push an alarm event into the coordinator queue and update the target session.
     pub fn push_alarm(&self, alarm: AlarmEvent) {
         if let Some(session) = self.get_session(&alarm.worker_id) {

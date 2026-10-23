@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::session::worker::WorkerSession;
 use crate::ui::terminal_screen::TerminalScreenWidget;
-use crate::ui::theme::{colors, glyphs, Theme};
+use crate::ui::theme::{glyphs, Theme};
 
 /// Multiplexing layout mode for split terminal panes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,7 +47,7 @@ impl SplitMode {
 }
 
 /// Flexible split layout widget for multiplexing multiple worker terminals
-/// with active pane highlighting and Tokyo Night styling.
+/// with active pane highlighting and accessible theme styling.
 pub struct SplitPanesWidget<'a> {
     sessions: Vec<Arc<WorkerSession>>,
     focused_index: usize,
@@ -55,6 +55,7 @@ pub struct SplitPanesWidget<'a> {
     left_ratio: u16,
     right_ratio: u16,
     show_cursor: bool,
+    theme: Theme,
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
@@ -68,6 +69,7 @@ impl<'a> SplitPanesWidget<'a> {
             left_ratio: 50,
             right_ratio: 50,
             show_cursor: true,
+            theme: Theme::default(),
             _marker: std::marker::PhantomData,
         }
     }
@@ -81,6 +83,12 @@ impl<'a> SplitPanesWidget<'a> {
     /// Set currently active / focused session index.
     pub fn focused_index(mut self, index: usize) -> Self {
         self.focused_index = index;
+        self
+    }
+
+    /// Set active theme for colors, borders, and badges.
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
         self
     }
 
@@ -163,9 +171,9 @@ impl<'a> SplitPanesWidget<'a> {
         let is_focused = session_idx == self.focused_index;
 
         let (border_style, title_style) = if is_focused {
-            (Theme::active_border(), Theme::active_title())
+            (self.theme.active_border_style(), self.theme.active_title_style())
         } else {
-            (Theme::inactive_border(), Theme::inactive_title())
+            (self.theme.inactive_border_style(), self.theme.inactive_title_style())
         };
 
         if let Some(session) = self.sessions.get(session_idx) {
@@ -180,7 +188,14 @@ impl<'a> SplitPanesWidget<'a> {
                 None => "(no pid)".to_string(),
             };
 
-            let title = format!(" [{}│ {}:{} {}] ", focus_badge, session.id, session.slot_id, pid_text);
+            let scroll_offset = session.scroll_offset();
+            let scroll_badge = if scroll_offset > 0 {
+                format!(" [SCROLL -{}]", scroll_offset)
+            } else {
+                String::new()
+            };
+
+            let title = format!(" [{}│ {}:{} {}{}] ", focus_badge, session.id, session.slot_id, pid_text, scroll_badge);
 
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -194,8 +209,17 @@ impl<'a> SplitPanesWidget<'a> {
             let buf_lock = session.buffer();
             let screen_buffer = buf_lock.lock();
 
-            let terminal_widget = TerminalScreenWidget::from_buffer(&screen_buffer)
-                .show_cursor(is_focused && self.show_cursor);
+            let terminal_widget = if scroll_offset > 0 {
+                let (cells, rel_cursor) = screen_buffer.viewport_cells(scroll_offset, inner.height as usize);
+                let show_cur = is_focused && self.show_cursor && rel_cursor.is_some();
+                TerminalScreenWidget::from_owned_cells(cells, rel_cursor, screen_buffer.version())
+                    .show_cursor(show_cur)
+                    .default_fg(self.theme.palette().fg_light)
+            } else {
+                TerminalScreenWidget::from_buffer(&screen_buffer)
+                    .show_cursor(is_focused && self.show_cursor)
+                    .default_fg(self.theme.palette().fg_light)
+            };
 
             terminal_widget.render(inner, buf);
         } else {
@@ -203,15 +227,15 @@ impl<'a> SplitPanesWidget<'a> {
             let title = format!(" [ Pane #{} │ Empty Slot ] ", pane_idx + 1);
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_style(Theme::inactive_border())
-                .title(Span::styled(title, Theme::inactive_title()));
+                .border_style(self.theme.inactive_border_style())
+                .title(Span::styled(title, self.theme.inactive_title_style()));
 
             let inner = block.inner(area);
             block.render(area, buf);
 
-            let empty_text = "No worker attached to this slot.\nPress Tab to switch or spawn via MCP.";
+            let empty_text = "No worker attached to this slot.\nPress Tab / Alt+1-9 to switch or spawn via MCP.";
             let widget = TerminalScreenWidget::from_plain_text(empty_text)
-                .default_fg(colors::FG_MUTED);
+                .default_fg(self.theme.palette().fg_muted);
             widget.render(inner, buf);
         }
     }

@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
-/// Tokyo Night color palette constants.
+/// Tokyo Night color palette constants for default styling.
 pub mod colors {
     use super::Color;
 
@@ -48,122 +48,428 @@ pub mod glyphs {
     pub const BADGE_WORKER_FINISHED: &str = "⚡ Worker Finished";
     pub const BADGE_ASSISTANCE_NEEDED: &str = "🚨 Assistance Needed";
     pub const BADGE_NORMAL: &str = "✓ Normal";
+    // Color-blind safe badges (explicit symbols)
+    pub const BADGE_CB_FINISHED: &str = "[⚡] Worker Finished";
+    pub const BADGE_CB_ASSISTANCE: &str = "[!] Assistance Needed";
+    pub const BADGE_CB_NORMAL: &str = "[OK] Normal";
 }
 
-/// Pre-configured Tokyo Night styles for widgets.
-pub struct Theme;
+/// Accessible theme modes supported across the entire TUI suite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeMode {
+    /// Sleek, immersive Tokyo Night palette (default).
+    #[default]
+    TokyoNight,
+    /// High-contrast dark theme optimized for low-vision users on dark screens.
+    HighContrastDark,
+    /// High-contrast light theme for bright environments and daylight visibility.
+    HighContrastLight,
+    /// Universal color-blind accessible palette (Protanopia / Deuteranopia safe).
+    ColorBlind,
+}
 
-impl Theme {
-    /// Active pane border style (glowing cyan / bold).
-    pub fn active_border() -> Style {
-        Style::default()
-            .fg(colors::ACCENT_CYAN)
-            .add_modifier(Modifier::BOLD)
+impl ThemeMode {
+    /// Cycle to the next theme mode.
+    pub fn next(self) -> Self {
+        match self {
+            Self::TokyoNight => Self::HighContrastDark,
+            Self::HighContrastDark => Self::HighContrastLight,
+            Self::HighContrastLight => Self::ColorBlind,
+            Self::ColorBlind => Self::TokyoNight,
+        }
     }
 
-    /// Inactive pane border style (muted).
-    pub fn inactive_border() -> Style {
-        Style::default().fg(colors::FG_MUTED)
+    /// Human-readable label for status bars and header breadcrumbs.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TokyoNight => "Tokyo Night",
+            Self::HighContrastDark => "High Contrast Dark",
+            Self::HighContrastLight => "High Contrast Light",
+            Self::ColorBlind => "Color-Blind Accessible",
+        }
+    }
+}
+
+/// Concrete color palette definitions for a theme mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemePalette {
+    pub bg_dark: Color,
+    pub bg_surface: Color,
+    pub bg_highlight: Color,
+    pub fg_light: Color,
+    pub fg_muted: Color,
+    pub accent_blue: Color,
+    pub accent_cyan: Color,
+    pub accent_green: Color,
+    pub accent_teal: Color,
+    pub accent_orange: Color,
+    pub accent_yellow: Color,
+    pub accent_magenta: Color,
+    pub accent_red: Color,
+    pub badge_normal_fg: Color,
+    pub badge_normal_bg: Color,
+    pub badge_finished_fg: Color,
+    pub badge_finished_bg: Color,
+    pub badge_alert_fg: Color,
+    pub badge_alert_bg: Color,
+}
+
+impl ThemePalette {
+    /// Generate palette for given mode.
+    pub fn for_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::TokyoNight => Self {
+                bg_dark: colors::BG_DARK,
+                bg_surface: colors::BG_SURFACE,
+                bg_highlight: colors::BG_HIGHLIGHT,
+                fg_light: colors::FG_LIGHT,
+                fg_muted: colors::FG_MUTED,
+                accent_blue: colors::ACCENT_BLUE,
+                accent_cyan: colors::ACCENT_CYAN,
+                accent_green: colors::ACCENT_GREEN,
+                accent_teal: colors::ACCENT_TEAL,
+                accent_orange: colors::ACCENT_ORANGE,
+                accent_yellow: colors::ACCENT_YELLOW,
+                accent_magenta: colors::ACCENT_MAGENTA,
+                accent_red: colors::ACCENT_RED,
+                badge_normal_fg: colors::ACCENT_GREEN,
+                badge_normal_bg: colors::BG_SURFACE,
+                badge_finished_fg: colors::BG_DARK,
+                badge_finished_bg: colors::ACCENT_YELLOW,
+                badge_alert_fg: Color::White,
+                badge_alert_bg: colors::ACCENT_RED,
+            },
+            ThemeMode::HighContrastDark => Self {
+                bg_dark: Color::Rgb(0, 0, 0),
+                bg_surface: Color::Rgb(20, 20, 20),
+                bg_highlight: Color::Rgb(45, 45, 45),
+                fg_light: Color::Rgb(255, 255, 255),
+                fg_muted: Color::Rgb(180, 180, 180),
+                accent_blue: Color::Rgb(100, 180, 255),
+                accent_cyan: Color::Rgb(0, 255, 255),
+                accent_green: Color::Rgb(0, 255, 0),
+                accent_teal: Color::Rgb(0, 255, 200),
+                accent_orange: Color::Rgb(255, 165, 0),
+                accent_yellow: Color::Rgb(255, 255, 0),
+                accent_magenta: Color::Rgb(255, 128, 255),
+                accent_red: Color::Rgb(255, 60, 60),
+                badge_normal_fg: Color::Rgb(0, 255, 0),
+                badge_normal_bg: Color::Rgb(20, 20, 20),
+                badge_finished_fg: Color::Black,
+                badge_finished_bg: Color::Rgb(255, 255, 0),
+                badge_alert_fg: Color::White,
+                badge_alert_bg: Color::Rgb(255, 0, 0),
+            },
+            ThemeMode::HighContrastLight => Self {
+                bg_dark: Color::Rgb(255, 255, 255),
+                bg_surface: Color::Rgb(240, 242, 245),
+                bg_highlight: Color::Rgb(220, 226, 235),
+                fg_light: Color::Rgb(15, 15, 20),
+                fg_muted: Color::Rgb(80, 85, 95),
+                accent_blue: Color::Rgb(0, 70, 200),
+                accent_cyan: Color::Rgb(0, 120, 180),
+                accent_green: Color::Rgb(0, 130, 20),
+                accent_teal: Color::Rgb(0, 125, 125),
+                accent_orange: Color::Rgb(210, 80, 0),
+                accent_yellow: Color::Rgb(180, 115, 0),
+                accent_magenta: Color::Rgb(140, 0, 170),
+                accent_red: Color::Rgb(200, 0, 0),
+                badge_normal_fg: Color::Rgb(0, 130, 20),
+                badge_normal_bg: Color::Rgb(230, 245, 230),
+                badge_finished_fg: Color::Black,
+                badge_finished_bg: Color::Rgb(255, 215, 0),
+                badge_alert_fg: Color::White,
+                badge_alert_bg: Color::Rgb(200, 0, 0),
+            },
+            ThemeMode::ColorBlind => Self {
+                // Okabe-Ito universal design palette safe for Protanopia, Deuteranopia, and Tritanopia
+                bg_dark: Color::Rgb(18, 22, 30),
+                bg_surface: Color::Rgb(28, 35, 48),
+                bg_highlight: Color::Rgb(40, 50, 70),
+                fg_light: Color::Rgb(240, 245, 255),
+                fg_muted: Color::Rgb(140, 155, 175),
+                accent_blue: Color::Rgb(0, 114, 178),     // Strong Blue
+                accent_cyan: Color::Rgb(86, 180, 233),    // Sky Blue
+                accent_green: Color::Rgb(86, 180, 233),   // Replaced with Sky Blue to prevent green confusion
+                accent_teal: Color::Rgb(86, 180, 233),
+                accent_orange: Color::Rgb(230, 159, 0),   // Orange
+                accent_yellow: Color::Rgb(240, 228, 66),  // Yellow / Amber
+                accent_magenta: Color::Rgb(204, 121, 167),// Reddish Purple
+                accent_red: Color::Rgb(213, 94, 0),       // Vermilion
+                badge_normal_fg: Color::Rgb(86, 180, 233),
+                badge_normal_bg: Color::Rgb(28, 35, 48),
+                badge_finished_fg: Color::Black,
+                badge_finished_bg: Color::Rgb(240, 228, 66),
+                badge_alert_fg: Color::White,
+                badge_alert_bg: Color::Rgb(213, 94, 0),
+            },
+        }
+    }
+
+    /// Active pane border style.
+    pub fn active_border(&self) -> Style {
+        Style::default().fg(self.accent_cyan).add_modifier(Modifier::BOLD)
+    }
+
+    /// Inactive pane border style.
+    pub fn inactive_border(&self) -> Style {
+        Style::default().fg(self.fg_muted)
     }
 
     /// Pane title style for focused pane.
-    pub fn active_title() -> Style {
+    pub fn active_title(&self) -> Style {
         Style::default()
-            .fg(colors::ACCENT_CYAN)
-            .bg(colors::BG_SURFACE)
+            .fg(self.accent_cyan)
+            .bg(self.bg_surface)
             .add_modifier(Modifier::BOLD)
     }
 
     /// Pane title style for inactive pane.
-    pub fn inactive_title() -> Style {
-        Style::default().fg(colors::FG_MUTED)
+    pub fn inactive_title(&self) -> Style {
+        Style::default().fg(self.fg_muted)
     }
 
     /// Status bar root background & foreground style.
-    pub fn status_bar() -> Style {
-        Style::default()
-            .fg(colors::FG_LIGHT)
-            .bg(colors::BG_SURFACE)
+    pub fn status_bar(&self) -> Style {
+        Style::default().fg(self.fg_light).bg(self.bg_surface)
     }
 
     /// Status bar segment pill: Active worker / slot.
-    pub fn status_bar_worker() -> Style {
+    pub fn status_bar_worker(&self) -> Style {
         Style::default()
-            .fg(colors::BG_DARK)
-            .bg(colors::ACCENT_BLUE)
+            .fg(self.bg_dark)
+            .bg(self.accent_blue)
             .add_modifier(Modifier::BOLD)
     }
 
     /// Status bar segment: PID / Process info.
-    pub fn status_bar_pid() -> Style {
-        Style::default()
-            .fg(colors::ACCENT_CYAN)
-            .bg(colors::BG_SURFACE)
+    pub fn status_bar_pid(&self) -> Style {
+        Style::default().fg(self.accent_cyan).bg(self.bg_surface)
     }
 
     /// Status bar segment: AI Model indicator.
-    pub fn status_bar_model() -> Style {
+    pub fn status_bar_model(&self) -> Style {
         Style::default()
-            .fg(colors::ACCENT_MAGENTA)
-            .bg(colors::BG_SURFACE)
+            .fg(self.accent_magenta)
+            .bg(self.bg_surface)
             .add_modifier(Modifier::BOLD)
     }
 
     /// Status bar segment: Token status.
-    pub fn status_bar_tokens() -> Style {
-        Style::default()
-            .fg(colors::ACCENT_TEAL)
-            .bg(colors::BG_SURFACE)
+    pub fn status_bar_tokens(&self) -> Style {
+        Style::default().fg(self.accent_teal).bg(self.bg_surface)
     }
 
-    /// Visual alert badge: Worker Finished (amber / yellow glow).
-    pub fn badge_worker_finished() -> Style {
+    /// Visual alert badge: Worker Finished.
+    pub fn badge_worker_finished(&self) -> Style {
         Style::default()
-            .fg(colors::BG_DARK)
-            .bg(colors::ACCENT_YELLOW)
+            .fg(self.badge_finished_fg)
+            .bg(self.badge_finished_bg)
             .add_modifier(Modifier::BOLD)
     }
 
-    /// Visual alert badge: Assistance Needed (critical red alert).
-    pub fn badge_assistance_needed() -> Style {
+    /// Visual alert badge: Assistance Needed.
+    pub fn badge_assistance_needed(&self) -> Style {
         Style::default()
-            .fg(Color::White)
-            .bg(colors::ACCENT_RED)
+            .fg(self.badge_alert_fg)
+            .bg(self.badge_alert_bg)
             .add_modifier(Modifier::BOLD)
     }
 
     /// Default status badge when idle or healthy.
-    pub fn badge_normal() -> Style {
-        Style::default()
-            .fg(colors::ACCENT_GREEN)
-            .bg(colors::BG_SURFACE)
+    pub fn badge_normal(&self) -> Style {
+        Style::default().fg(self.badge_normal_fg).bg(self.badge_normal_bg)
     }
 
     /// Selected list item style.
-    pub fn list_selected() -> Style {
+    pub fn list_selected(&self) -> Style {
         Style::default()
-            .fg(colors::ACCENT_CYAN)
-            .bg(colors::BG_HIGHLIGHT)
+            .fg(self.accent_cyan)
+            .bg(self.bg_highlight)
             .add_modifier(Modifier::BOLD)
     }
 
     /// Normal list item style.
-    pub fn list_normal() -> Style {
-        Style::default().fg(colors::FG_LIGHT)
+    pub fn list_normal(&self) -> Style {
+        Style::default().fg(self.fg_light)
     }
 
     /// Gauge high-percentage (healthy / abundant) style.
-    pub fn gauge_healthy() -> Style {
-        Style::default().fg(colors::ACCENT_GREEN).bg(colors::BG_SURFACE)
+    pub fn gauge_healthy(&self) -> Style {
+        Style::default().fg(self.accent_green).bg(self.bg_surface)
     }
 
     /// Gauge medium-percentage (moderate) style.
-    pub fn gauge_medium() -> Style {
-        Style::default().fg(colors::ACCENT_YELLOW).bg(colors::BG_SURFACE)
+    pub fn gauge_medium(&self) -> Style {
+        Style::default().fg(self.accent_yellow).bg(self.bg_surface)
     }
 
     /// Gauge low-percentage (critical quota) style.
+    pub fn gauge_critical(&self) -> Style {
+        Style::default().fg(self.accent_red).bg(self.bg_surface)
+    }
+}
+
+/// Configurable and accessible theme manager for UI widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    pub mode: ThemeMode,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::TokyoNight,
+        }
+    }
+}
+
+impl Theme {
+    /// Create new theme instance with specified mode.
+    pub const fn new(mode: ThemeMode) -> Self {
+        Self { mode }
+    }
+
+    /// Access the concrete color palette for this theme.
+    pub fn palette(&self) -> ThemePalette {
+        ThemePalette::for_mode(self.mode)
+    }
+
+    /// Instance style helpers forwarding to the palette:
+    pub fn active_border_style(&self) -> Style {
+        self.palette().active_border()
+    }
+    pub fn inactive_border_style(&self) -> Style {
+        self.palette().inactive_border()
+    }
+    pub fn active_title_style(&self) -> Style {
+        self.palette().active_title()
+    }
+    pub fn inactive_title_style(&self) -> Style {
+        self.palette().inactive_title()
+    }
+    pub fn status_bar_style(&self) -> Style {
+        self.palette().status_bar()
+    }
+    pub fn status_bar_worker_style(&self) -> Style {
+        self.palette().status_bar_worker()
+    }
+    pub fn status_bar_pid_style(&self) -> Style {
+        self.palette().status_bar_pid()
+    }
+    pub fn status_bar_model_style(&self) -> Style {
+        self.palette().status_bar_model()
+    }
+    pub fn status_bar_tokens_style(&self) -> Style {
+        self.palette().status_bar_tokens()
+    }
+    pub fn badge_worker_finished_style(&self) -> Style {
+        self.palette().badge_worker_finished()
+    }
+    pub fn badge_assistance_needed_style(&self) -> Style {
+        self.palette().badge_assistance_needed()
+    }
+    pub fn badge_normal_style(&self) -> Style {
+        self.palette().badge_normal()
+    }
+    pub fn list_selected_style(&self) -> Style {
+        self.palette().list_selected()
+    }
+    pub fn list_normal_style(&self) -> Style {
+        self.palette().list_normal()
+    }
+    pub fn gauge_healthy_style(&self) -> Style {
+        self.palette().gauge_healthy()
+    }
+    pub fn gauge_medium_style(&self) -> Style {
+        self.palette().gauge_medium()
+    }
+    pub fn gauge_critical_style(&self) -> Style {
+        self.palette().gauge_critical()
+    }
+}
+
+// Backward-compatible static methods (Tokyo Night default)
+impl Theme {
+    pub fn active_border() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).active_border()
+    }
+    pub fn inactive_border() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).inactive_border()
+    }
+    pub fn active_title() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).active_title()
+    }
+    pub fn inactive_title() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).inactive_title()
+    }
+    pub fn status_bar() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).status_bar()
+    }
+    pub fn status_bar_worker() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).status_bar_worker()
+    }
+    pub fn status_bar_pid() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).status_bar_pid()
+    }
+    pub fn status_bar_model() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).status_bar_model()
+    }
+    pub fn status_bar_tokens() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).status_bar_tokens()
+    }
+    pub fn badge_worker_finished() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).badge_worker_finished()
+    }
+    pub fn badge_assistance_needed() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).badge_assistance_needed()
+    }
+    pub fn badge_normal() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).badge_normal()
+    }
+    pub fn list_selected() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).list_selected()
+    }
+    pub fn list_normal() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).list_normal()
+    }
+    pub fn gauge_healthy() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).gauge_healthy()
+    }
+    pub fn gauge_medium() -> Style {
+        ThemePalette::for_mode(ThemeMode::TokyoNight).gauge_medium()
+    }
     pub fn gauge_critical() -> Style {
-        Style::default().fg(colors::ACCENT_RED).bg(colors::BG_SURFACE)
+        ThemePalette::for_mode(ThemeMode::TokyoNight).gauge_critical()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_theme_mode_cycling() {
+        let mut mode = ThemeMode::TokyoNight;
+        mode = mode.next();
+        assert_eq!(mode, ThemeMode::HighContrastDark);
+        mode = mode.next();
+        assert_eq!(mode, ThemeMode::HighContrastLight);
+        mode = mode.next();
+        assert_eq!(mode, ThemeMode::ColorBlind);
+        mode = mode.next();
+        assert_eq!(mode, ThemeMode::TokyoNight);
+    }
+
+    #[test]
+    fn test_theme_palettes_distinct() {
+        let tokyo = Theme::new(ThemeMode::TokyoNight).palette();
+        let hc_dark = Theme::new(ThemeMode::HighContrastDark).palette();
+        let hc_light = Theme::new(ThemeMode::HighContrastLight).palette();
+        let cb = Theme::new(ThemeMode::ColorBlind).palette();
+
+        assert_ne!(tokyo.bg_dark, hc_dark.bg_dark);
+        assert_ne!(hc_dark.bg_dark, hc_light.bg_dark);
+        assert_ne!(tokyo.accent_green, cb.accent_green);
     }
 }

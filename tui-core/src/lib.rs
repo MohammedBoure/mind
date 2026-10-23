@@ -21,7 +21,7 @@ pub use pty::{CellColor, PtyConfig, PtyMaster, PtyProcess, ScreenBuffer, ScreenC
 pub use session::{SessionManager, WorkerSession, WorkerState};
 pub use ui::{
     AlertBadge, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget, StatusBarWidget,
-    TerminalScreenWidget, Theme, WorkerListItem, WorkerListWidget,
+    TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem, WorkerListWidget,
 };
 
 /// High-performance compiled TUI core engine binding PTY master processes,
@@ -108,5 +108,10 @@ impl TuiEngine {
     /// Broadcast terminal dimensions update across all PTY sessions.
     pub fn resize_all(&self, rows: u16, cols: u16) {
         self.session_manager.broadcast_resize(rows, cols);
+    }
+
+    /// Gracefully shutdown all running worker PTY processes and clean up child sessions.
+    pub fn shutdown(&self) {
+        self.session_manager.shutdown_all();
     }
 }

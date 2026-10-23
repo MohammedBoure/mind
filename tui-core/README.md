@@ -19,8 +19,14 @@
 |   │     └── WorkerSession ("agy3")        -> PtyProcess -> ScreenBuffer     |
 |   ├── EventLoop (Tokio async stream)                                        |
 |   │     ├── Crossterm Events (Keys, Mouse, Resize)                          |
+|   │     ├── POSIX SIGWINCH Handler (SignalKind::window_change)              |
 |   │     ├── PTY I/O Streams (<1ms async channel)                            |
 |   │     └── Alarms & Periodic Ticks                                         |
+|   ├── Theme & Accessibility System                                          |
+|   │     ├── Tokyo Night (Default)                                           |
+|   │     ├── High Contrast Dark (WCAG AAA)                                   |
+|   │     ├── High Contrast Light (Daylight visible)                          |
+|   │     └── Color-Blind Accessible (Okabe-Ito universal design)             |
 |   └── MCP Bridge                                                            |
 |         ├── EmbeddedMcpServer (Stdio / JSON-RPC 2.0 tool dispatcher)        |
 |         └── McpClient (HTTP SSE / REST connector to port 8765)              |
@@ -29,12 +35,71 @@
 
 ---
 
-## 2. Directory & Module Structure
+## 2. Keyboard Navigation & Ergonomics
+
+The interactive compiled TUI interface offers ergonomic, single-keystroke navigation controls across all sessions, views, themes, and scrollback histories:
+
+| Hotkey / Shortcut | Action | Description |
+|---|---|---|
+| `Tab` | Next Tab | Cycles focus forward through active agent sessions. |
+| `Shift+Tab` / `BackTab` | Previous Tab | Cycles focus backward through active agent sessions. |
+| `Alt+1` through `Alt+9` | Direct Tab Jump | Directly switches active focus to worker #1 through #9. |
+| `F2` or `Alt+S` | Cycle Split Mode | Cycles multiplexer layout: Single -> Horizontal -> Vertical -> 2x2 Grid. |
+| `F1` or `Alt+B` | Toggle Sidebar | Shows or hides the left worker list and compact quota sidebar. |
+| `F4` or `Alt+T` | Cycle Theme Mode | Switches active color palette: Tokyo Night -> HC Dark -> HC Light -> Color-Blind. |
+| `PageUp` / `Shift+Up` | Scroll History Up | Scrolls active terminal history backward (5 lines per step). |
+| `PageDown` / `Shift+Down` | Scroll History Down | Scrolls active terminal history forward toward live bottom. |
+| Any Typing / Enter | Terminal Input | Delivers keystroke to child PTY and automatically resets scroll offset to live bottom. |
+| `Ctrl+C` | Send SIGINT | Delivers interrupt signal (0x03) to the currently active worker PTY. |
+| `Ctrl+Q` | Clean Quit | Gracefully restores raw terminal mode and terminates child worker PTYs. |
+
+---
+
+## 3. Responsive Terminal Resizing (SIGWINCH Architecture)
+
+The engine implements robust, tearing-free terminal resizing capable of dynamically adapting to arbitrary window dimensions:
+
+1. **Dual Resize Detection**:
+   - Captures standard POSIX `SIGWINCH` signals via `tokio::signal::unix::{signal, SignalKind::window_change()}`.
+   - Concurrently monitors Crossterm `Event::Resize(cols, rows)`.
+   - Queries system terminal geometry with zero lag.
+
+2. **PTY Worker Propagation**:
+   - Broadcasts updated terminal geometry (`portable_pty::PtySize`) across all active worker PTYs via `session_manager.broadcast_resize(rows, cols)`.
+   - Signals running child shells and processes to reformat output to the new geometry.
+
+3. **ANSI Virtual Screen Buffer Resizing (`ScreenBuffer::resize`)**:
+   - **No Character Clipping**: When the viewport shrinks vertically, overflow rows from the top of the viewport are shifted into `scrollback` history, keeping active command lines and prompts in view.
+   - **No Text Tearing**: Cursor coordinates are shifted proportionally with the viewport shift to maintain cursor alignment.
+   - **History Unrolling**: When expanding vertically, lines from recent `scrollback` are restored into the viewport, avoiding blank gaps.
+   - **Column Dynamic Padding / Truncation**: Columns are resized across both live cells and scrollback history.
+   - **Memory Leak Prevention**: Scrollback history is strictly capped at `max_scrollback` (2000 lines).
+
+---
+
+## 4. Accessibility Palettes & Themes
+
+The UI provides four comprehensive theme palettes via `ThemeMode` and `ThemePalette`:
+
+1. **Tokyo Night (Default)**:
+   - Deep background `#1a1b26`, surface `#24283b`, foreground `#c0caf5`, and neon accents (cyan `#7dcfff`, magenta `#bb9af7`, blue `#7aa2f7`).
+2. **High Contrast Dark**:
+   - Pitch-black background `#000000`, pure white text `#ffffff`, and hyper-saturated borders/badges. Meets WCAG AAA contrast ratios for low-vision users.
+3. **High Contrast Light**:
+   - Pure white background `#ffffff`, dark ink text `#0f0f14`, and deep saturated accents. Engineered for bright sunlight and daylight environments.
+4. **Color-Blind Accessible (Protanopia / Deuteranopia Safe)**:
+   - Built on Okabe & Ito (2008) universal color design.
+   - Eliminates red-green confusion by utilizing Sky Blue (`#56B4E9`), Amber/Yellow (`#F0E442`), and Vermilion (`#D55E00`).
+   - Reinforced with distinct text badges: `[!] Assistance Needed`, `[⚡] Worker Finished`, and `[OK] Normal`.
+
+---
+
+## 5. Directory & Module Structure
 
 ```
 tui-core/
 ├── Cargo.toml          # Rust package dependencies & configuration
-├── README.md           # Architecture, component APIs & agy51 UI guide
+├── README.md           # Architecture, component APIs & UX guide
 ├── BENCHMARKS.md       # Empirical benchmark results & comparative analysis vs Python
 ├── benches/
 │   ├── README.md       # Benchmark harness documentation & instructions
@@ -46,206 +111,46 @@ tui-core/
 │   ├── benchmarks.rs   # Comprehensive performance benchmark implementation
 │   ├── error.rs        # Error taxonomy (TuiError, Result)
 │   ├── pty/            # Low-level PTY execution & ANSI virtual screen
-│   │   ├── README.md
+│   │   ├── README.md   # PTY master, screen buffer, and resizing docs
 │   │   ├── mod.rs
 │   │   ├── master.rs   # Native PTY master loop (portable-pty)
 │   │   ├── process.rs  # PtyProcess wrapper with async buffer updates
 │   │   └── buffer.rs   # ScreenBuffer 2D character matrix & vte parser
 │   ├── events/         # Tokio event loop & Crossterm input multiplexer
-│   │   ├── README.md
+│   │   ├── README.md   # Tokio event loop, POSIX SIGWINCH, and event types
 │   │   ├── mod.rs
 │   │   ├── types.rs    # AppEvent (Key, Mouse, Resize, Alarm, Tick)
-│   │   └── event_loop.rs # Async event loop stream
+│   │   └── event_loop.rs # Async event loop stream with SIGWINCH handler
 │   ├── ipc/            # MCP client/server & JSON-RPC 2.0
-│   │   ├── README.md
+│   │   ├── README.md   # JSON-RPC 2.0 and MCP tool bridge
 │   │   ├── mod.rs
 │   │   ├── types.rs    # JSON-RPC & MCP protocol structures
 │   │   ├── jsonrpc.rs  # Framing & parsing helpers
 │   │   ├── mcp_client.rs # Async HTTP/SSE client
 │   │   └── mcp_server.rs # Embedded stdio/in-memory MCP server
 │   ├── session/        # Agent session orchestration & tab switching
-│   │   ├── README.md
+│   │   ├── README.md   # Session manager, worker sessions, and scrolling docs
 │   │   ├── mod.rs
-│   │   ├── worker.rs   # WorkerSession (state, PTY, idle detection)
+│   │   ├── worker.rs   # WorkerSession (state, PTY, scrollback offset, idle detection)
 │   │   └── manager.rs  # SessionManager & McpBackend implementation
-│   └── ui/             # Tokyo Night visual Ratatui widgets (built by agy51)
+│   └── ui/             # Accessible visual Ratatui widgets
 │       ├── README.md   # Comprehensive UI documentation & API specifications
 │       ├── mod.rs      # Public exports & widget facade
-│       ├── theme.rs    # Tokyo Night colors, typography & glyphs
-│       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid)
-│       ├── status_bar.rs  # Sleek status bar with metrics & alert badges
+│       ├── theme.rs    # Accessible themes (Tokyo Night, HC Dark, HC Light, Color-Blind)
+│       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid) with history badges
+│       ├── status_bar.rs  # Accessible status bar with metrics & alert badges
 │       ├── gauges.rs      # Quota consumption & CPU/RAM progress gauges
-│       ├── worker_list.rs # Dynamic navigable session list
-│       └── terminal_screen.rs # High-efficiency ANSI ScreenCell renderer
+│       ├── worker_list.rs # Dynamic navigable session list with accessible badges
+│       └── terminal_screen.rs # High-efficiency ANSI ScreenCell renderer with scrollback support
 └── tests/
     ├── README.md       # Integration test framework documentation
     ├── pty_test.rs     # Virtual buffer & PTY spawn tests
     ├── pty_burst_test.rs # PTY rapid burst, UTF-8 split chunks & interrupt stress
-    ├── ui_widgets_test.rs # Ratatui ANSI cell matrix & widget rendering
+    ├── ui_widgets_test.rs # Ratatui ANSI cell matrix, themes, & scrollback tests
     ├── concurrency_multiplex_test.rs # Concurrent worker session multiplexing
     ├── ipc_test.rs     # JSON-RPC & MCP tool dispatch tests
-    └── session_test.rs # Session lifecycle & tab switching tests
+    └── session_test.rs # Session lifecycle, direct Alt jump, & resize tests
 ```
-
----
-
-## 3. Component APIs for UI Engineer (`agy51`)
-
-`agy51` can directly utilize the following public APIs to build visual widgets (split panes, status bars, real-time gauges, and dynamic lists):
-
-### 3.1 Initializing the Engine
-
-```rust
-use tui_core::TuiEngine;
-
-let engine = TuiEngine::new(50, "http://127.0.0.1:8765");
-```
-
-### 3.2 Spawning Worker Sessions
-
-```rust
-use std::collections::HashMap;
-
-let session = engine.spawn_worker(
-    "agy2",              // ID
-    "agy2",              // Slot ID
-    "bash",              // Command ("powershell.exe" on Windows)
-    vec![],              // Args
-    None,                // Working directory
-    HashMap::new(),      // Isolated environment variables
-    24,                  // Initial rows
-    80,                  // Initial cols
-)?;
-```
-
-### 3.3 Querying Sessions & Active Tab
-
-```rust
-// Get all registered sessions in tab order:
-let sessions = engine.sessions();
-
-// Get the index of the currently focused tab:
-let active_idx = engine.session_manager.active_index();
-
-// Switch to a specific tab:
-engine.session_manager.select_index(target_index);
-
-// Tab cycling:
-engine.session_manager.next_session();
-engine.session_manager.prev_session();
-
-// Access the currently active session:
-if let Some(active) = engine.active_session() {
-    println!("Active worker: {}", active.id);
-}
-```
-
-### 3.4 Rendering Terminal Content in Ratatui
-
-`agy51` has two ways to render terminal content:
-
-1. **Clean Plain Text (Fast & Simple):**
-   ```rust
-   let lines_to_render = 30;
-   let text = session.get_screen_text(lines_to_render);
-   let widget = ratatui::widgets::Paragraph::new(text);
-   ```
-
-2. **Full ANSI Character Grid (Direct Cell Matrix):**
-   ```rust
-   let buf_lock = session.pty.lock().buffer();
-   let buffer = buf_lock.lock();
-   let cells: &[Vec<ScreenCell>] = buffer.cells();
-   // ScreenCell contains: c (char), fg (CellColor), bg (CellColor), bold, italic, underline
-   ```
-
-3. **Dirty-Frame Checking ($O(1)$ Version Counter):**
-   ```rust
-   let current_version = session.version();
-   // Only recalculate layout/styling if current_version != cached_version
-   ```
-
-### 3.5 Handling Keyboard & Terminal Events
-
-```rust
-use tui_core::events::AppEvent;
-use crossterm::event::KeyCode;
-
-while let Some(event) = engine.next_event().await {
-    match event {
-        AppEvent::Key(key) => {
-            if key.code == KeyCode::Tab {
-                engine.session_manager.next_session();
-            } else if let KeyCode::Char(c) = key.code {
-                // Pass keystroke to active worker's terminal:
-                engine.send_input_to_active(&c.to_string(), false).ok();
-            }
-        }
-        AppEvent::Resize(rows, cols) => {
-            // Propagate terminal resize to all active PTY processes:
-            engine.resize_all(rows, cols);
-        }
-        AppEvent::Alarm(alarm) => {
-            // Display visual badge (e.g. ⚡ Worker Finished or 🚨 Help Needed):
-            println!("Alarm from {}: {}", alarm.worker_id, alarm.message);
-        }
-        AppEvent::Tick => {
-            // Periodic UI animation / gauge refresh
-        }
-        _ => {}
-    }
-}
-```
-
----
-
-## 4. UI Widgets & Visual Architecture (Built by `agy51`)
-
-`tui-core/src/ui` provides Tokyo-Night styled visual components for terminal multiplexing:
-
-### 4.1 Split Panes Widget (`SplitPanesWidget`)
-- Supports layout modes: `SplitMode::Single` (1-pane), `SplitMode::Horizontal` (side-by-side), `SplitMode::Vertical` (stacked), and `SplitMode::Grid` (2x2 quad multiplexer).
-- Highlights the active focused pane with glowing Tokyo Night cyan/magenta borders and title focus indicators.
-
-### 4.2 Status Bar Widget (`StatusBarWidget`)
-- Displays active worker ID, slot ID, PID, AI model (`claude-3-5-sonnet`), and token consumption status (`18.5k / 200k`).
-- Dynamic visual alert badges:
-  - `⚡ Worker Finished`: Triggered upon agent task completion or idle detection.
-  - `🚨 Assistance Needed`: Triggered on agent blocker alarms.
-
-### 4.3 Real-Time Gauges (`QuotaGaugesWidget`)
-- Progress gauges for hourly remaining quota and weekly remaining quota.
-- Real-time CPU and Memory utilization meters with adaptive green -> yellow -> red threshold styling.
-- Flexible layouts: `GaugeLayout::Horizontal` (top banner) and `GaugeLayout::Vertical` (sidebar monitor).
-
-### 4.4 Dynamic Lists (`WorkerListWidget`)
-- Navigable worker session list displaying status indicators (`●` Running, `○` Idle, `⚡` Done, `🚨` Alert, `⏸` Interrupted, `⏹` Exited), process IDs, and current tasks.
-
-### 4.5 Terminal Screen Widget (`TerminalScreenWidget`)
-- Renders the virtual ANSI character matrix (`ScreenCell`) directly to double-buffered Ratatui cells.
-- Features $O(1)$ dirty-frame checking to eliminate redundant re-renders when the screen version counter is unchanged.
-
-See [`tui-core/src/ui/README.md`](file:///home/pluto/projects/mind/tui-core/src/ui/README.md) for detailed widget APIs and props.
-
----
-
-## 5. MCP & JSON-RPC Connectivity
-
-`tui-core` provides dual MCP integration:
-
-1. **Embedded MCP Server (`EmbeddedMcpServer`):**
-   Can be run over Stdio (`cargo run -- --mcp-stdio`) to expose real-time worker controls directly to `agy`:
-   - `list_workers`: Query all worker PIDs, statuses, and slots.
-   - `get_terminal_screen`: Query rendered text for any worker.
-   - `send_terminal_input`: Inject input into any worker.
-   - `interrupt_and_inject`: Send SIGINT pause and inject priority directives.
-   - `check_account_quotas`: Query remaining quota steps.
-   - `notify_coordinator_worker_idle`: Emit completion alarms.
-   - `notify_coordinator_help`: Request coordinator assistance.
-   - `check_coordinator_alarms`: Read pending alarm notifications.
-
-2. **MCP Client (`McpClient`):**
-   Connects to existing `mind-mcp` HTTP servers running on port 8765.
 
 ---
 
@@ -256,20 +161,9 @@ See [`tui-core/src/ui/README.md`](file:///home/pluto/projects/mind/tui-core/src/
 cargo test
 ```
 
-To run individual test suites:
-```bash
-cargo test --test pty_burst_test          # PTY rapid burst & stress tests
-cargo test --test ui_widgets_test         # Tokyo Night widgets & ANSI rendering
-cargo test --test concurrency_multiplex_test # Concurrent worker multiplexing
-```
-
 ### Run Performance Benchmarks
 ```bash
-# Run release benchmark suite via CLI
 cargo run --release -- bench
-
-# Or via cargo bench
-cargo bench
 ```
 
 ### Run Interactive TUI Multiplexer
@@ -284,9 +178,7 @@ cargo run -- --mcp-stdio
 
 ---
 
-## 7. Performance Benchmarks & Empirical Results
-
-The compiled Rust architecture (`tui-core`) replaces the legacy Python implementation (`Textual`, `Rich`, `Pyte`), achieving order-of-magnitude gains in rendering latency, memory efficiency, and throughput:
+## 7. Performance Benchmarks Summary
 
 | Benchmark Metric | Compiled Rust Core (`tui-core`) | Legacy Python Textual Baseline | Real-World Improvement |
 |---|---|---|---|
@@ -300,5 +192,4 @@ The compiled Rust architecture (`tui-core`) replaces the legacy Python implement
 | **Marginal Memory per Worker** | **~56 KB** / worker | ~15 - 20 MB / worker | **~260x Less Memory** |
 | **CPU Load @ 100 FPS Updates** | **6.28% CPU** | ~45% – 75% CPU (GIL-bound) | **~7x – 12x Less CPU** |
 
-> For the comprehensive benchmark methodology, statistical percentile distributions, and technical breakdown, see [`BENCHMARKS.md`](file:///home/pluto/projects/mind/tui-core/BENCHMARKS.md).
-
+> For complete statistical analysis and comparative graphs, see [`BENCHMARKS.md`](file:///home/pluto/projects/mind/tui-core/BENCHMARKS.md).

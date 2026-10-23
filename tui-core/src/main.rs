@@ -19,8 +19,8 @@ use tracing_subscriber::FmtSubscriber;
 
 use tui_core::events::{AlarmEvent, AppEvent};
 use tui_core::ui::{
-    colors, glyphs, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget,
-    StatusBarWidget, Theme, WorkerListWidget,
+    glyphs, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget,
+    StatusBarWidget, Theme, ThemeMode, WorkerListWidget,
 };
 use tui_core::TuiEngine;
 
@@ -115,6 +115,7 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut split_mode = SplitMode::Horizontal;
     let mut show_sidebar = true;
+    let mut theme = Theme::new(ThemeMode::TokyoNight);
     let hourly_quota = 85.0;
     let weekly_quota = 92.0;
     let mut cpu_usage = 18.5;
@@ -123,6 +124,7 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let sessions = engine.sessions();
         let active_idx = engine.session_manager.active_index();
+        let p = theme.palette();
 
         terminal.draw(|f| {
             let root_chunks = Layout::default()
@@ -149,28 +151,29 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|(i, s)| {
                     let is_active = i == active_idx;
                     let style = if is_active {
-                        Style::default().fg(colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)
+                        Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(colors::FG_MUTED)
+                        Style::default().fg(p.fg_muted)
                     };
                     let icon = if is_active { glyphs::POINTER } else { " " };
                     Line::from(vec![
-                        Span::raw(format!(" {} {}:{} ", icon, s.id, s.slot_id)),
+                        Span::raw(format!(" {} {}:{}[Alt+{}] ", icon, s.id, s.slot_id, i + 1)),
                     ]).style(style)
                 })
                 .collect();
 
+            let tabs_title = format!(" Mind TUI Engine [{}] ", theme.mode.label());
             let tabs = Tabs::new(tab_titles)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(Theme::inactive_border())
-                        .title(" Mind TUI Engine (Compiled Rust Core) "),
+                        .border_style(theme.inactive_border_style())
+                        .title(tabs_title),
                 )
                 .select(active_idx)
                 .highlight_style(
                     Style::default()
-                        .fg(colors::ACCENT_YELLOW)
+                        .fg(p.accent_yellow)
                         .add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
                 );
             f.render_widget(tabs, header_chunks[0]);
@@ -180,11 +183,12 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                 .weekly_remaining(weekly_quota)
                 .cpu_usage(cpu_usage)
                 .memory(mem_mb.0, mem_mb.1)
+                .theme(theme)
                 .layout(GaugeLayout::Horizontal)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(Theme::inactive_border())
+                        .border_style(theme.inactive_border_style())
                         .title(" Real-Time Quotas & Resources "),
                 );
             f.render_widget(top_gauges, header_chunks[1]);
@@ -209,10 +213,11 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                     .split(workspace_chunks[0]);
 
                 let worker_list = WorkerListWidget::from_sessions(&sessions, Some(active_idx))
+                    .theme(theme)
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(Theme::inactive_border())
+                            .border_style(theme.inactive_border_style())
                             .title(" Active Swarm Workers "),
                     );
                 f.render_widget(worker_list, sidebar_chunks[0]);
@@ -222,11 +227,12 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                     .weekly_remaining(weekly_quota)
                     .cpu_usage(cpu_usage)
                     .memory(mem_mb.0, mem_mb.1)
+                    .theme(theme)
                     .layout(GaugeLayout::Vertical)
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(Theme::inactive_border())
+                            .border_style(theme.inactive_border_style())
                             .title(" Quota Monitor "),
                     );
                 f.render_widget(side_gauges, sidebar_chunks[1]);
@@ -234,27 +240,32 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                 // Split Panes in main area
                 let split_panes = SplitPanesWidget::new(split_mode)
                     .sessions(sessions.clone())
-                    .focused_index(active_idx);
+                    .focused_index(active_idx)
+                    .theme(theme);
                 f.render_widget(split_panes, workspace_chunks[1]);
             } else {
                 // Fullscreen Split Panes
                 let split_panes = SplitPanesWidget::new(split_mode)
                     .sessions(sessions.clone())
-                    .focused_index(active_idx);
+                    .focused_index(active_idx)
+                    .theme(theme);
                 f.render_widget(split_panes, root_chunks[1]);
             }
 
             // 3. Status Bar at Bottom
             let active_session = engine.active_session();
             let model_name = active_session.as_ref().map(|s| s.model()).unwrap_or_else(|| "none".to_string());
+            let hint_text = "Tab/Shift+Tab: Tab │ Alt+1-9: Worker │ F2/Alt+S: Split │ F1/Alt+B: Side │ F4/Alt+T: Theme │ PgUp/Dn: Scroll │ ^C: Int │ ^Q: Quit";
             let status_bar = if let Some(ref session) = active_session {
                 StatusBarWidget::from_session(session, &model_name)
                     .split_mode(split_mode.label())
-                    .custom_hint("Tab: Next │ F2: Split │ F1: Sidebar │ F3: Alarm Demo │ ^C: Int │ ^Q: Quit")
+                    .theme(theme)
+                    .custom_hint(hint_text)
             } else {
                 StatusBarWidget::new("idle", "none")
                     .split_mode(split_mode.label())
-                    .custom_hint("Tab: Next │ F2: Split │ F1: Sidebar │ ^C: Int │ ^Q: Quit")
+                    .theme(theme)
+                    .custom_hint(hint_text)
             };
             f.render_widget(status_bar, root_chunks[2]);
         })?;
@@ -262,9 +273,20 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(event) = engine.next_event().await {
             match event {
                 AppEvent::Key(key) => {
-                    // Quit application
+                    // Quit application: Ctrl+Q
                     if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                         break;
+                    }
+
+                    // Direct worker selection: Alt+1 through Alt+9
+                    if key.modifiers.contains(KeyModifiers::ALT) {
+                        if let KeyCode::Char(c) = key.code {
+                            if ('1'..='9').contains(&c) {
+                                let target_idx = (c as usize) - ('1' as usize);
+                                engine.session_manager.select_index(target_idx);
+                                continue;
+                            }
+                        }
                     }
 
                     // Toggle Split Mode: F2 or Alt+S
@@ -276,6 +298,12 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                     // Toggle Sidebar: F1 or Alt+B
                     if key.code == KeyCode::F(1) || (key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::ALT)) {
                         show_sidebar = !show_sidebar;
+                        continue;
+                    }
+
+                    // Toggle Theme Mode: F4 or Alt+T
+                    if key.code == KeyCode::F(4) || (key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::ALT)) {
+                        theme = Theme::new(theme.mode.next());
                         continue;
                     }
 
@@ -297,14 +325,39 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
 
-                    // Tab navigation
-                    if key.code == KeyCode::Tab {
-                        engine.session_manager.next_session();
-                    } else if key.code == KeyCode::BackTab {
+                    // Scrollback history: PageUp or Shift+Up
+                    if key.code == KeyCode::PageUp || (key.code == KeyCode::Up && key.modifiers.contains(KeyModifiers::SHIFT)) {
+                        if let Some(session) = engine.active_session() {
+                            session.scroll_up(5);
+                        }
+                        continue;
+                    }
+
+                    // Scrollback history: PageDown or Shift+Down
+                    if key.code == KeyCode::PageDown || (key.code == KeyCode::Down && key.modifiers.contains(KeyModifiers::SHIFT)) {
+                        if let Some(session) = engine.active_session() {
+                            session.scroll_down(5);
+                        }
+                        continue;
+                    }
+
+                    // Tab navigation: Tab / Shift+Tab / BackTab
+                    if (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT)) || key.code == KeyCode::BackTab {
                         engine.session_manager.prev_session();
-                    } else if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        continue;
+                    } else if key.code == KeyCode::Tab {
+                        engine.session_manager.next_session();
+                        continue;
+                    }
+
+                    // Interrupt active worker: Ctrl+C
+                    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                         engine.interrupt_active().ok();
-                    } else if let KeyCode::Char(c) = key.code {
+                        continue;
+                    }
+
+                    // Worker input delivery (automatically resets scrollback offset)
+                    if let KeyCode::Char(c) = key.code {
                         engine.send_input_to_active(&c.to_string(), false).ok();
                     } else if key.code == KeyCode::Enter {
                         engine.send_input_to_active("\n", false).ok();
@@ -338,6 +391,7 @@ async fn run_tui_app() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    engine.shutdown();
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)?;
     Ok(())

@@ -96,6 +96,12 @@ impl ScreenBuffer {
     }
 
     /// Resize the virtual screen dimensions.
+    ///
+    /// Preserves content and prevents text tearing or character clipping:
+    /// - Column shrinkage truncates cells; column expansion pads with default blank cells.
+    /// - Row shrinkage shifts overflow rows from the top of the viewport into scrollback history,
+    ///   preserving active command lines and output while capping at `max_scrollback` to prevent memory leaks.
+    /// - Row expansion pulls recent lines from scrollback back into the viewport if available.
     pub fn resize(&mut self, new_rows: usize, new_cols: usize) {
         let new_rows = new_rows.max(1);
         let new_cols = new_cols.max(1);
@@ -103,22 +109,123 @@ impl ScreenBuffer {
             return;
         }
 
-        let mut new_cells = vec![vec![ScreenCell::default(); new_cols]; new_rows];
-        let copy_rows = self.rows.min(new_rows);
-        let copy_cols = self.cols.min(new_cols);
+        // 1. Column adjustment across current cells
+        for row in &mut self.cells {
+            if new_cols > self.cols {
+                row.resize(new_cols, ScreenCell::default());
+            } else if new_cols < self.cols {
+                row.truncate(new_cols);
+            }
+        }
 
-        for r in 0..copy_rows {
-            for c in 0..copy_cols {
-                new_cells[r][c] = self.cells[r][c];
+        // Column adjustment across scrollback history
+        for row in &mut self.scrollback {
+            if new_cols > self.cols {
+                row.resize(new_cols, ScreenCell::default());
+            } else if new_cols < self.cols {
+                row.truncate(new_cols);
+            }
+        }
+
+        // 2. Row adjustment
+        if new_rows < self.rows {
+            // Viewport is shrinking vertically.
+            // Find lowest active row to keep cursor and active content in view without clipping.
+            let last_active = self
+                .cells
+                .iter()
+                .rposition(|row| row.iter().any(|c| c.c != ' ' && c.c != '\0'))
+                .unwrap_or(0);
+            let active_extent = (self.cursor_row + 1).max(last_active + 1);
+
+            if active_extent > new_rows {
+                let shift = (active_extent - new_rows).min(self.cells.len());
+                for _ in 0..shift {
+                    let top = self.cells.remove(0);
+                    if self.scrollback.len() >= self.max_scrollback {
+                        self.scrollback.pop_front();
+                    }
+                    self.scrollback.push_back(top);
+                }
+                self.cursor_row = self.cursor_row.saturating_sub(shift);
+            }
+
+            // Truncate any remaining excess blank rows at the bottom
+            self.cells.truncate(new_rows);
+            while self.cells.len() < new_rows {
+                self.cells.push(vec![ScreenCell::default(); new_cols]);
+            }
+        } else if new_rows > self.rows {
+            // Viewport is expanding vertically.
+            // Pull lines from recent scrollback into the top of the viewport if available.
+            let deficit = new_rows - self.cells.len();
+            let pull_count = deficit.min(self.scrollback.len());
+
+            for _ in 0..pull_count {
+                if let Some(restored_row) = self.scrollback.pop_back() {
+                    self.cells.insert(0, restored_row);
+                }
+            }
+            self.cursor_row = (self.cursor_row + pull_count).min(new_rows.saturating_sub(1));
+
+            // Pad remaining bottom space with blank lines
+            while self.cells.len() < new_rows {
+                self.cells.push(vec![ScreenCell::default(); new_cols]);
             }
         }
 
         self.rows = new_rows;
         self.cols = new_cols;
-        self.cells = new_cells;
         self.cursor_row = self.cursor_row.min(new_rows.saturating_sub(1));
         self.cursor_col = self.cursor_col.min(new_cols.saturating_sub(1));
         self.touch();
+    }
+
+    /// Retrieve rows for rendering in a viewport with given `scroll_offset` (0 = live screen bottom)
+    /// and `height`. Also returns relative cursor coordinate `(row, col)` if visible in the viewport.
+    pub fn viewport_cells(
+        &self,
+        scroll_offset: usize,
+        height: usize,
+    ) -> (Vec<Vec<ScreenCell>>, Option<(usize, usize)>) {
+        let history_len = self.scrollback.len();
+        let total_lines = history_len + self.rows;
+        let view_height = height.min(self.rows).max(1);
+        let max_offset = history_len;
+        let clamped_offset = scroll_offset.min(max_offset);
+
+        let end_idx = total_lines.saturating_sub(clamped_offset);
+        let start_idx = end_idx.saturating_sub(view_height);
+
+        let mut result = Vec::with_capacity(view_height);
+        for idx in start_idx..end_idx {
+            if idx < history_len {
+                result.push(self.scrollback[idx].clone());
+            } else {
+                let screen_r = idx - history_len;
+                if screen_r < self.cells.len() {
+                    result.push(self.cells[screen_r].clone());
+                } else {
+                    result.push(vec![ScreenCell::default(); self.cols]);
+                }
+            }
+        }
+
+        // Relative cursor position if cursor falls within [start_idx, end_idx)
+        let cursor_abs_idx = history_len + self.cursor_row;
+        let rel_cursor = if clamped_offset == 0 {
+            if self.cursor_row < view_height {
+                Some((self.cursor_row, self.cursor_col))
+            } else {
+                None
+            }
+        } else if cursor_abs_idx >= start_idx && cursor_abs_idx < end_idx {
+            Some((cursor_abs_idx - start_idx, self.cursor_col))
+        } else {
+            None
+        };
+
+        (result, rel_cursor)
     }
 
     /// Move cursor down by 1 line, scrolling the screen buffer if reaching bottom.
@@ -415,5 +522,80 @@ impl ScreenBuffer {
         self.current_dim = false;
         self.current_italic = false;
         self.current_underline = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resize_shrink_preserves_content_in_scrollback() {
+        let mut buf = ScreenBuffer::new(5, 20);
+        buf.process_bytes(b"line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5");
+        assert_eq!(buf.history_count(), 0);
+
+        // Shrink from 5 rows to 3 rows
+        buf.resize(3, 20);
+        assert_eq!(buf.rows, 3);
+        // Top 2 lines should have been pushed to scrollback
+        assert_eq!(buf.history_count(), 2);
+
+        let rendered = buf.render_plain_text(0);
+        assert!(rendered.contains("line 1"));
+        assert!(rendered.contains("line 5"));
+    }
+
+    #[test]
+    fn test_resize_expand_restores_from_scrollback() {
+        let mut buf = ScreenBuffer::new(3, 20);
+        buf.process_bytes(b"line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5");
+        // Due to linefeeds, lines 1 and 2 are in scrollback
+        assert_eq!(buf.history_count(), 2);
+
+        // Expand to 5 rows
+        buf.resize(5, 20);
+        assert_eq!(buf.rows, 5);
+        // Both lines restored from scrollback into the viewport
+        assert_eq!(buf.history_count(), 0);
+        let visible = buf.get_visible_text();
+        assert!(visible.contains("line 1"));
+        assert!(visible.contains("line 5"));
+    }
+
+    #[test]
+    fn test_resize_column_padding_and_truncation() {
+        let mut buf = ScreenBuffer::new(3, 10);
+        buf.process_bytes(b"1234567890");
+        assert_eq!(buf.cells[0].len(), 10);
+
+        // Expand columns
+        buf.resize(3, 20);
+        assert_eq!(buf.cols, 20);
+        assert_eq!(buf.cells[0].len(), 20);
+        assert_eq!(buf.cells[0][0].c, '1');
+        assert_eq!(buf.cells[0][15].c, ' ');
+
+        // Shrink columns
+        buf.resize(3, 5);
+        assert_eq!(buf.cols, 5);
+        assert_eq!(buf.cells[0].len(), 5);
+        assert_eq!(buf.cells[0][4].c, '5');
+    }
+
+    #[test]
+    fn test_viewport_cells_with_scrollback() {
+        let mut buf = ScreenBuffer::new(3, 20);
+        buf.process_bytes(b"first\r\nsecond\r\nthird\r\nfourth\r\nfifth");
+        // Viewport at bottom (offset = 0)
+        let (live_cells, cursor) = buf.viewport_cells(0, 3);
+        assert_eq!(live_cells.len(), 3);
+        assert!(cursor.is_some());
+
+        // Scrolled up into history (offset = 2)
+        let (hist_cells, _) = buf.viewport_cells(2, 3);
+        assert_eq!(hist_cells.len(), 3);
+        let s: String = hist_cells[0].iter().map(|c| c.c).collect();
+        assert!(s.contains("first"));
     }
 }

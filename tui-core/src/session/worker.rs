@@ -32,6 +32,7 @@ pub struct WorkerSession {
     pub token_usage: Arc<Mutex<(u64, u64)>>,
     pub last_alarm: Arc<Mutex<Option<AlarmEvent>>>,
     pub pty: Arc<Mutex<PtyProcess>>,
+    pub scroll_offset: Arc<Mutex<usize>>,
 }
 
 impl WorkerSession {
@@ -70,11 +71,14 @@ impl WorkerSession {
             token_usage: Arc::new(Mutex::new((12_450, 200_000))),
             last_alarm: Arc::new(Mutex::new(None)),
             pty: Arc::new(Mutex::new(pty)),
+            scroll_offset: Arc::new(Mutex::new(0)),
         })
     }
 
     /// Deliver text directly to worker stdin with optional carriage return / Enter.
+    /// Resets scroll offset to live view (0).
     pub fn send_input(&self, text: &str, press_enter: bool) -> Result<()> {
+        self.reset_scroll();
         let pty = self.pty.lock();
         pty.write_str(text)?;
         if press_enter {
@@ -96,6 +100,40 @@ impl WorkerSession {
     pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
         let mut pty = self.pty.lock();
         pty.resize(rows, cols)
+    }
+
+    /// Scroll up in terminal history by `delta` lines.
+    pub fn scroll_up(&self, delta: usize) {
+        let max_history = {
+            let pty = self.pty.lock();
+            let buf = pty.buffer();
+            let count = buf.lock().history_count();
+            count
+        };
+        let mut offset = self.scroll_offset.lock();
+        *offset = (*offset + delta).min(max_history);
+    }
+
+    /// Scroll down in terminal history towards live output by `delta` lines.
+    pub fn scroll_down(&self, delta: usize) {
+        let mut offset = self.scroll_offset.lock();
+        *offset = offset.saturating_sub(delta);
+    }
+
+    /// Reset scroll offset to live view (0).
+    pub fn reset_scroll(&self) {
+        *self.scroll_offset.lock() = 0;
+    }
+
+    /// Current scroll offset (0 = live view at bottom).
+    pub fn scroll_offset(&self) -> usize {
+        *self.scroll_offset.lock()
+    }
+
+    /// Terminate the underlying child PTY process.
+    pub fn kill(&self) -> Result<()> {
+        let pty = self.pty.lock();
+        pty.kill()
     }
 
     /// Read clean ANSI-free rendered text from the worker's screen buffer.
@@ -143,7 +181,7 @@ impl WorkerSession {
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty())
-            .last()
+            .next_back()
             .unwrap_or_default();
 
         let idle_markers = [

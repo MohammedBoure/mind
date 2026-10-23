@@ -30,4 +30,35 @@ async fn test_session_manager_lifecycle_and_switching() {
     s1.send_input("echo HELLO_SESSION\n", true).expect("Send input");
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     assert!(s1.get_screen_text(5).contains("HELLO_SESSION"));
+
+    // Test direct index selection (Alt+1, Alt+2)
+    assert!(manager.select_index(1));
+    assert_eq!(manager.active_index(), 1);
+    assert_eq!(manager.active_session().unwrap().id, "worker1");
+
+    assert!(manager.select_index(0));
+    assert_eq!(manager.active_index(), 0);
+    assert_eq!(manager.active_session().unwrap().id, "coordinator");
+
+    assert!(!manager.select_index(99)); // Out of bounds
+    assert_eq!(manager.active_index(), 0);
+
+    // Test previous session (Shift+Tab)
+    manager.prev_session();
+    assert_eq!(manager.active_index(), 1);
+    manager.prev_session();
+    assert_eq!(manager.active_index(), 0);
+
+    // Test broadcast resize propagation
+    manager.broadcast_resize(35, 100);
+    for session in manager.list_sessions() {
+        let pty = session.pty.lock();
+        let buf = pty.buffer();
+        let b = buf.lock();
+        assert_eq!(b.rows, 35);
+        assert_eq!(b.cols, 100);
+    }
+
+    // Clean shutdown of all sessions
+    manager.shutdown_all();
 }

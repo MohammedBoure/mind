@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::session::worker::{WorkerSession, WorkerState};
-use crate::ui::theme::{colors, glyphs, Theme};
+use crate::ui::theme::{glyphs, Theme};
 
 /// Visual alert badge types displayed on the status bar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub enum AlertBadge {
     Custom(String, Style),
 }
 
-/// Sleek, Tokyo-Night styled status bar widget displaying active worker ID,
+/// Sleek, accessible styled status bar widget displaying active worker ID,
 /// slot ID, PID, model, token status, and visual alert badges.
 pub struct StatusBarWidget<'a> {
     worker_id: &'a str,
@@ -35,6 +35,7 @@ pub struct StatusBarWidget<'a> {
     alert_badge: AlertBadge,
     split_mode: Option<&'a str>,
     custom_hint: Option<&'a str>,
+    theme: Theme,
 }
 
 impl<'a> StatusBarWidget<'a> {
@@ -51,6 +52,7 @@ impl<'a> StatusBarWidget<'a> {
             alert_badge: AlertBadge::None,
             split_mode: None,
             custom_hint: None,
+            theme: Theme::default(),
         }
     }
 
@@ -83,7 +85,14 @@ impl<'a> StatusBarWidget<'a> {
             alert_badge,
             split_mode: None,
             custom_hint: None,
+            theme: Theme::default(),
         }
+    }
+
+    /// Set active theme for colors and alert badges.
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
     }
 
     /// Set PID.
@@ -150,7 +159,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
         // Fill background
         for x in area.left()..area.right() {
             let cell = &mut buf[(x, area.top())];
-            cell.set_style(Theme::status_bar());
+            cell.set_style(self.theme.status_bar_style());
             cell.set_char(' ');
         }
 
@@ -167,7 +176,7 @@ impl<'a> Widget for StatusBarWidget<'a> {
 
         left_spans.push(Span::styled(
             format!(" {} {}:{} ", state_icon, self.worker_id, self.slot_id),
-            Theme::status_bar_worker(),
+            self.theme.status_bar_worker_style(),
         ));
         left_spans.push(Span::raw(" "));
 
@@ -176,15 +185,15 @@ impl<'a> Widget for StatusBarWidget<'a> {
             Some(p) => format!(" PID: {} ", p),
             None => " PID: -- ".to_string(),
         };
-        left_spans.push(Span::styled(pid_text, Theme::status_bar_pid()));
-        left_spans.push(Span::styled(format!(" {} ", glyphs::SEPARATOR), Style::default().fg(colors::FG_MUTED)));
+        left_spans.push(Span::styled(pid_text, self.theme.status_bar_pid_style()));
+        left_spans.push(Span::styled(format!(" {} ", glyphs::SEPARATOR), Style::default().fg(self.theme.palette().fg_muted)));
 
         // 3. Model Identifier
         left_spans.push(Span::styled(
             format!(" 🤖 {} ", self.model),
-            Theme::status_bar_model(),
+            self.theme.status_bar_model_style(),
         ));
-        left_spans.push(Span::styled(format!(" {} ", glyphs::SEPARATOR), Style::default().fg(colors::FG_MUTED)));
+        left_spans.push(Span::styled(format!(" {} ", glyphs::SEPARATOR), Style::default().fg(self.theme.palette().fg_muted)));
 
         // 4. Token Usage Status
         let used_str = Self::format_tokens(self.token_used);
@@ -196,23 +205,30 @@ impl<'a> Widget for StatusBarWidget<'a> {
         };
         left_spans.push(Span::styled(
             format!(" 📊 Tokens: {}/{} ({:.1}%) ", used_str, total_str, pct),
-            Theme::status_bar_tokens(),
+            self.theme.status_bar_tokens_style(),
         ));
 
         // 5. Visual Alert Badges (⚡ Worker Finished or 🚨 Assistance Needed)
+        // With explicit accessible glyphs in ColorBlind mode
+        let (finished_badge_text, help_badge_text) = if self.theme.mode == crate::ui::theme::ThemeMode::ColorBlind {
+            (glyphs::BADGE_CB_FINISHED, glyphs::BADGE_CB_ASSISTANCE)
+        } else {
+            (glyphs::BADGE_WORKER_FINISHED, glyphs::BADGE_ASSISTANCE_NEEDED)
+        };
+
         match &self.alert_badge {
             AlertBadge::WorkerFinished(msg) => {
                 left_spans.push(Span::raw(" "));
                 left_spans.push(Span::styled(
-                    format!(" {} {} ", glyphs::BADGE_WORKER_FINISHED, msg.chars().take(20).collect::<String>()),
-                    Theme::badge_worker_finished(),
+                    format!(" {} {} ", finished_badge_text, msg.chars().take(20).collect::<String>()),
+                    self.theme.badge_worker_finished_style(),
                 ));
             }
             AlertBadge::AssistanceNeeded(msg) => {
                 left_spans.push(Span::raw(" "));
                 left_spans.push(Span::styled(
-                    format!(" {} {} ", glyphs::BADGE_ASSISTANCE_NEEDED, msg.chars().take(20).collect::<String>()),
-                    Theme::badge_assistance_needed(),
+                    format!(" {} {} ", help_badge_text, msg.chars().take(20).collect::<String>()),
+                    self.theme.badge_assistance_needed_style(),
                 ));
             }
             AlertBadge::Custom(msg, style) => {
@@ -222,21 +238,21 @@ impl<'a> Widget for StatusBarWidget<'a> {
             AlertBadge::None => {}
         }
 
-        // 6. Right side: Split Mode and Navigation Shortcuts
+        // 6. Right side: Split Mode, Theme, and Navigation Shortcuts
         let mut right_spans: Vec<Span> = Vec::new();
         if let Some(mode) = self.split_mode {
             right_spans.push(Span::styled(
                 format!(" [SPLIT: {}] ", mode),
-                Style::default().fg(colors::ACCENT_MAGENTA).add_modifier(Modifier::BOLD),
+                Style::default().fg(self.theme.palette().accent_magenta).add_modifier(Modifier::BOLD),
             ));
         }
 
         let hint = self
             .custom_hint
-            .unwrap_or("Tab: Next Session │ Alt+S: Split │ ^C: Int │ ^Q: Quit");
+            .unwrap_or("Tab: Next │ F2: Split │ F1: Sidebar │ F4: Theme │ PageUp/Down: Scroll │ ^Q: Quit");
         right_spans.push(Span::styled(
             format!(" {} ", hint),
-            Style::default().fg(colors::FG_MUTED),
+            Style::default().fg(self.theme.palette().fg_muted),
         ));
 
         let left_line = Line::from(left_spans);
