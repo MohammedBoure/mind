@@ -23,7 +23,7 @@
       "role": "Testing & Benchmarking",
       "branch": "test/agy100-perf-benchmarks",
       "scope": "Automated test suites and performance benchmarks (latency, CPU, memory vs Python)",
-      "status": "PENDING_COMPONENTS"
+      "status": "COMPLETED"
     },
     {
       "agent_id": "agy151",
@@ -31,7 +31,7 @@
       "role": "Polish & Ergonomics",
       "branch": "ux/agy151-tui-ergonomics",
       "scope": "SIGWINCH terminal resizing, keyboard navigation, accessibility palettes, sub-README documentation",
-      "status": "PENDING_TESTS"
+      "status": "READY"
     }
   ]
 }

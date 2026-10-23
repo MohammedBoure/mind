@@ -35,10 +35,15 @@
 tui-core/
 ├── Cargo.toml          # Rust package dependencies & configuration
 ├── README.md           # Architecture, component APIs & agy51 UI guide
+├── BENCHMARKS.md       # Empirical benchmark results & comparative analysis vs Python
+├── benches/
+│   ├── README.md       # Benchmark harness documentation & instructions
+│   └── benchmarks.rs   # Standalone benchmark binary harness
 ├── src/
 │   ├── README.md       # Source root documentation
 │   ├── lib.rs          # TuiEngine root exports and unified facade
 │   ├── main.rs         # Compiled CLI binary (TUI runner, MCP server, benchmarks)
+│   ├── benchmarks.rs   # Comprehensive performance benchmark implementation
 │   ├── error.rs        # Error taxonomy (TuiError, Result)
 │   ├── pty/            # Low-level PTY execution & ANSI virtual screen
 │   │   ├── README.md
@@ -73,8 +78,11 @@ tui-core/
 │       ├── worker_list.rs # Dynamic navigable session list
 │       └── terminal_screen.rs # High-efficiency ANSI ScreenCell renderer
 └── tests/
-    ├── README.md
+    ├── README.md       # Integration test framework documentation
     ├── pty_test.rs     # Virtual buffer & PTY spawn tests
+    ├── pty_burst_test.rs # PTY rapid burst, UTF-8 split chunks & interrupt stress
+    ├── ui_widgets_test.rs # Ratatui ANSI cell matrix & widget rendering
+    ├── concurrency_multiplex_test.rs # Concurrent worker session multiplexing
     ├── ipc_test.rs     # JSON-RPC & MCP tool dispatch tests
     └── session_test.rs # Session lifecycle & tab switching tests
 ```
@@ -248,9 +256,20 @@ See [`tui-core/src/ui/README.md`](file:///home/pluto/projects/mind/tui-core/src/
 cargo test
 ```
 
+To run individual test suites:
+```bash
+cargo test --test pty_burst_test          # PTY rapid burst & stress tests
+cargo test --test ui_widgets_test         # Tokyo Night widgets & ANSI rendering
+cargo test --test concurrency_multiplex_test # Concurrent worker multiplexing
+```
+
 ### Run Performance Benchmarks
 ```bash
-cargo run -- bench
+# Run release benchmark suite via CLI
+cargo run --release -- bench
+
+# Or via cargo bench
+cargo bench
 ```
 
 ### Run Interactive TUI Multiplexer
@@ -262,3 +281,24 @@ cargo run -- run
 ```bash
 cargo run -- --mcp-stdio
 ```
+
+---
+
+## 7. Performance Benchmarks & Empirical Results
+
+The compiled Rust architecture (`tui-core`) replaces the legacy Python implementation (`Textual`, `Rich`, `Pyte`), achieving order-of-magnitude gains in rendering latency, memory efficiency, and throughput:
+
+| Benchmark Metric | Compiled Rust Core (`tui-core`) | Legacy Python Textual Baseline | Real-World Improvement |
+|---|---|---|---|
+| **Frame Latency (80x24)** | **104.75 µs (0.10 ms)** | ~15,000 - 30,000 µs (15-30 ms) | **~150x – 280x Faster** |
+| **High-Res Latency (160x50)** | **422.38 µs (0.42 ms)** | ~40,000 - 85,000 µs (40-85 ms) | **~95x – 200x Faster** |
+| **Dashboard Frame (Full UI)** | **267.46 µs (0.27 ms)** | ~25,000 - 45,000 µs (25-45 ms) | **~93x – 168x Faster** |
+| **Dirty-Frame Checking** | **0.00 ns** ($O(1)$ integer check) | Not Supported (Full re-layout) | **Zero-Cost Bypass** |
+| **PTY Ingestion Rate** | **951,750 ops/sec** | ~35,000 - 60,000 ops/sec | **~16x – 27x Faster** |
+| **ANSI Parser Throughput** | **78.97 MB/sec** | ~2.5 – 5.0 MB/sec | **~16x – 31x Higher** |
+| **Memory Footprint (8 Workers)** | **6.58 MB RSS** | ~150 - 240 MB (GIL runtime) | **>95% Memory Reduction** |
+| **Marginal Memory per Worker** | **~56 KB** / worker | ~15 - 20 MB / worker | **~260x Less Memory** |
+| **CPU Load @ 100 FPS Updates** | **6.28% CPU** | ~45% – 75% CPU (GIL-bound) | **~7x – 12x Less CPU** |
+
+> For the comprehensive benchmark methodology, statistical percentile distributions, and technical breakdown, see [`BENCHMARKS.md`](file:///home/pluto/projects/mind/tui-core/BENCHMARKS.md).
+

@@ -4,6 +4,7 @@ pub mod ipc;
 pub mod pty;
 pub mod session;
 pub mod ui;
+pub mod benchmarks;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io::stdout;
-use std::time::Instant;
 use crossterm::{
     cursor,
     event::{KeyCode, KeyModifiers},
@@ -54,53 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_benchmarks() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== TUI Core Architecture Performance Benchmarks ===");
-
-    // Benchmark 1: Virtual Screen Buffer Throughput
-    let mut buffer = tui_core::ScreenBuffer::new(24, 80);
-    let sample_ansi = b"\x1b[31;1mHello \x1b[32mWorld\x1b[0m \x1b[2J\x1b[1;1HWelcome to Mind TUI Core Engine!\n";
-    let start = Instant::now();
-    let iterations = 100_000;
-    for _ in 0..iterations {
-        buffer.process_bytes(sample_ansi);
-    }
-    let elapsed = start.elapsed();
-    let throughput = (iterations as f64) / elapsed.as_secs_f64();
-    println!("1. Buffer Ingestion & Parser Throughput: {:.2} ops/sec ({:.2?} total)", throughput, elapsed);
-    println!("   Plain text extraction preview:\n   '{}'", buffer.get_visible_text().lines().next().unwrap_or_default());
-
-    // Benchmark 2: JSON-RPC Parsing Latency
-    let sample_rpc = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_terminal_screen","arguments":{"worker_id":"agy1","lines":50}}}"#;
-    let start_rpc = Instant::now();
-    let rpc_iterations = 200_000;
-    for _ in 0..rpc_iterations {
-        let _ = tui_core::ipc::parse_jsonrpc(sample_rpc);
-    }
-    let elapsed_rpc = start_rpc.elapsed();
-    let rpc_throughput = (rpc_iterations as f64) / elapsed_rpc.as_secs_f64();
-    println!("2. JSON-RPC 2.0 Deserialization Latency: {:.2} msgs/sec ({:.2?} total)", rpc_throughput, elapsed_rpc);
-
-    // Benchmark 3: PTY Spawning and Lifecycle
-    let start_pty = Instant::now();
-    let engine = TuiEngine::default();
-    let shell_cmd = if cfg!(windows) { "cmd.exe" } else { "bash" };
-    let session = engine.spawn_worker(
-        "bench_worker",
-        "bench_slot",
-        shell_cmd,
-        vec![],
-        None,
-        HashMap::new(),
-        24,
-        80,
-    )?;
-    println!("3. Native PTY Spawning Latency: {:.2?} (PID: {:?})", start_pty.elapsed(), session.pid());
-    session.send_input("echo BENCHMARK_OK\n", true)?;
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    let text = session.get_screen_text(5);
-    println!("   PTY Output Verified: {}", text.contains("BENCHMARK_OK"));
-
-    println!("=== All Benchmarks Passed Successfully ===");
+    tui_core::benchmarks::run_full_benchmark_suite().await?;
     Ok(())
 }
 
