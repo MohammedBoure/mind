@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::error::Result;
+use crate::events::types::AlarmEvent;
 use crate::ipc::types::WorkerSummary;
+use crate::pty::buffer::ScreenBuffer;
 use crate::pty::master::PtyConfig;
 use crate::pty::process::PtyProcess;
 
@@ -26,7 +28,10 @@ pub struct WorkerSession {
     pub slot_id: String,
     pub task: Arc<Mutex<Option<String>>>,
     pub state: Arc<Mutex<WorkerState>>,
-    pty: Arc<Mutex<PtyProcess>>,
+    pub model: Arc<Mutex<String>>,
+    pub token_usage: Arc<Mutex<(u64, u64)>>,
+    pub last_alarm: Arc<Mutex<Option<AlarmEvent>>>,
+    pub pty: Arc<Mutex<PtyProcess>>,
 }
 
 impl WorkerSession {
@@ -61,6 +66,9 @@ impl WorkerSession {
             slot_id,
             task: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(WorkerState::Running)),
+            model: Arc::new(Mutex::new("claude-3-5-sonnet".to_string())),
+            token_usage: Arc::new(Mutex::new((12_450, 200_000))),
+            last_alarm: Arc::new(Mutex::new(None)),
             pty: Arc::new(Mutex::new(pty)),
         })
     }
@@ -178,5 +186,46 @@ impl WorkerSession {
     /// Set current active task description for this worker.
     pub fn set_task(&self, task: Option<String>) {
         *self.task.lock() = task;
+    }
+
+    /// Access reference to the thread-safe virtual screen buffer.
+    pub fn buffer(&self) -> Arc<Mutex<ScreenBuffer>> {
+        let pty = self.pty.lock();
+        pty.buffer()
+    }
+
+    /// Access reference to the inner PTY process handle.
+    pub fn pty(&self) -> Arc<Mutex<PtyProcess>> {
+        Arc::clone(&self.pty)
+    }
+
+    /// Set model identifier for this worker session (e.g. "claude-3-5-sonnet").
+    pub fn set_model(&self, model: impl Into<String>) {
+        *self.model.lock() = model.into();
+    }
+
+    /// Get current model identifier.
+    pub fn model(&self) -> String {
+        self.model.lock().clone()
+    }
+
+    /// Set token usage metrics (used, total).
+    pub fn set_tokens(&self, used: u64, total: u64) {
+        *self.token_usage.lock() = (used, total);
+    }
+
+    /// Get token usage metrics (used, total).
+    pub fn tokens(&self) -> (u64, u64) {
+        *self.token_usage.lock()
+    }
+
+    /// Record or clear the most recent alarm event for this worker.
+    pub fn set_last_alarm(&self, alarm: Option<AlarmEvent>) {
+        *self.last_alarm.lock() = alarm;
+    }
+
+    /// Retrieve the most recent alarm event for this worker.
+    pub fn last_alarm(&self) -> Option<AlarmEvent> {
+        self.last_alarm.lock().clone()
     }
 }

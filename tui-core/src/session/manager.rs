@@ -124,8 +124,11 @@ impl SessionManager {
         }
     }
 
-    /// Push an alarm event into the coordinator queue.
+    /// Push an alarm event into the coordinator queue and update the target session.
     pub fn push_alarm(&self, alarm: AlarmEvent) {
+        if let Some(session) = self.get_session(&alarm.worker_id) {
+            session.set_last_alarm(Some(alarm.clone()));
+        }
         self.alarms.lock().push(alarm);
     }
 }

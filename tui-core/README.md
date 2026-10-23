@@ -58,11 +58,20 @@ tui-core/
 │   │   ├── jsonrpc.rs  # Framing & parsing helpers
 │   │   ├── mcp_client.rs # Async HTTP/SSE client
 │   │   └── mcp_server.rs # Embedded stdio/in-memory MCP server
-│   └── session/        # Agent session orchestration & tab switching
-│       ├── README.md
-│       ├── mod.rs
-│       ├── worker.rs   # WorkerSession (state, PTY, idle detection)
-│       └── manager.rs  # SessionManager & McpBackend implementation
+│   ├── session/        # Agent session orchestration & tab switching
+│   │   ├── README.md
+│   │   ├── mod.rs
+│   │   ├── worker.rs   # WorkerSession (state, PTY, idle detection)
+│   │   └── manager.rs  # SessionManager & McpBackend implementation
+│   └── ui/             # Tokyo Night visual Ratatui widgets (built by agy51)
+│       ├── README.md   # Comprehensive UI documentation & API specifications
+│       ├── mod.rs      # Public exports & widget facade
+│       ├── theme.rs    # Tokyo Night colors, typography & glyphs
+│       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid)
+│       ├── status_bar.rs  # Sleek status bar with metrics & alert badges
+│       ├── gauges.rs      # Quota consumption & CPU/RAM progress gauges
+│       ├── worker_list.rs # Dynamic navigable session list
+│       └── terminal_screen.rs # High-efficiency ANSI ScreenCell renderer
 └── tests/
     ├── README.md
     ├── pty_test.rs     # Virtual buffer & PTY spawn tests
@@ -182,7 +191,37 @@ while let Some(event) = engine.next_event().await {
 
 ---
 
-## 4. MCP & JSON-RPC Connectivity
+## 4. UI Widgets & Visual Architecture (Built by `agy51`)
+
+`tui-core/src/ui` provides Tokyo-Night styled visual components for terminal multiplexing:
+
+### 4.1 Split Panes Widget (`SplitPanesWidget`)
+- Supports layout modes: `SplitMode::Single` (1-pane), `SplitMode::Horizontal` (side-by-side), `SplitMode::Vertical` (stacked), and `SplitMode::Grid` (2x2 quad multiplexer).
+- Highlights the active focused pane with glowing Tokyo Night cyan/magenta borders and title focus indicators.
+
+### 4.2 Status Bar Widget (`StatusBarWidget`)
+- Displays active worker ID, slot ID, PID, AI model (`claude-3-5-sonnet`), and token consumption status (`18.5k / 200k`).
+- Dynamic visual alert badges:
+  - `⚡ Worker Finished`: Triggered upon agent task completion or idle detection.
+  - `🚨 Assistance Needed`: Triggered on agent blocker alarms.
+
+### 4.3 Real-Time Gauges (`QuotaGaugesWidget`)
+- Progress gauges for hourly remaining quota and weekly remaining quota.
+- Real-time CPU and Memory utilization meters with adaptive green -> yellow -> red threshold styling.
+- Flexible layouts: `GaugeLayout::Horizontal` (top banner) and `GaugeLayout::Vertical` (sidebar monitor).
+
+### 4.4 Dynamic Lists (`WorkerListWidget`)
+- Navigable worker session list displaying status indicators (`●` Running, `○` Idle, `⚡` Done, `🚨` Alert, `⏸` Interrupted, `⏹` Exited), process IDs, and current tasks.
+
+### 4.5 Terminal Screen Widget (`TerminalScreenWidget`)
+- Renders the virtual ANSI character matrix (`ScreenCell`) directly to double-buffered Ratatui cells.
+- Features $O(1)$ dirty-frame checking to eliminate redundant re-renders when the screen version counter is unchanged.
+
+See [`tui-core/src/ui/README.md`](file:///home/pluto/projects/mind/tui-core/src/ui/README.md) for detailed widget APIs and props.
+
+---
+
+## 5. MCP & JSON-RPC Connectivity
 
 `tui-core` provides dual MCP integration:
 
@@ -202,7 +241,7 @@ while let Some(event) = engine.next_event().await {
 
 ---
 
-## 5. Build, Test & Benchmark Commands
+## 6. Build, Test & Benchmark Commands
 
 ### Run Integration Tests
 ```bash

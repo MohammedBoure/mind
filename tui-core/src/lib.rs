@@ -3,6 +3,7 @@ pub mod events;
 pub mod ipc;
 pub mod pty;
 pub mod session;
+pub mod ui;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +18,10 @@ pub use ipc::{
 };
 pub use pty::{CellColor, PtyConfig, PtyMaster, PtyProcess, ScreenBuffer, ScreenCell};
 pub use session::{SessionManager, WorkerSession, WorkerState};
+pub use ui::{
+    AlertBadge, GaugeLayout, QuotaGaugesWidget, SplitMode, SplitPanesWidget, StatusBarWidget,
+    TerminalScreenWidget, Theme, WorkerListItem, WorkerListWidget,
+};
 
 /// High-performance compiled TUI core engine binding PTY master processes,
 /// Tokio event loop, and Model Context Protocol (MCP) bridge.

@@ -1,0 +1,37 @@
+{
+  "target_integration_branch": "AGI",
+  "assignments": [
+    {
+      "agent_id": "agy11",
+      "worker_id": "1",
+      "role": "Backend / Systems",
+      "branch": "backend/agy11-tui-engine",
+      "scope": "Scaffold compiled TUI engine (Rust Ratatui/Tokio/portable-pty), PTY master event loop, async IO, IPC/MCP connectivity",
+      "status": "COMPLETED"
+    },
+    {
+      "agent_id": "agy51",
+      "worker_id": "2",
+      "role": "Frontend & UI/UX",
+      "branch": "frontend/agy51-tui-components",
+      "scope": "Visual widget components (split panes, status bars, real-time gauges, dynamic lists) with high-efficiency terminal rendering",
+      "status": "COMPLETED"
+    },
+    {
+      "agent_id": "agy100",
+      "worker_id": "3",
+      "role": "Testing & Benchmarking",
+      "branch": "test/agy100-perf-benchmarks",
+      "scope": "Automated test suites and performance benchmarks (latency, CPU, memory vs Python)",
+      "status": "PENDING_COMPONENTS"
+    },
+    {
+      "agent_id": "agy151",
+      "worker_id": "4",
+      "role": "Polish & Ergonomics",
+      "branch": "ux/agy151-tui-ergonomics",
+      "scope": "SIGWINCH terminal resizing, keyboard navigation, accessibility palettes, sub-README documentation",
+      "status": "PENDING_TESTS"
+    }
+  ]
+}
