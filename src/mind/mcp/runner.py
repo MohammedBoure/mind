@@ -91,7 +91,7 @@ class MCPServerRunner:
                     loop.run_until_complete(self._uvicorn_server.serve())
                 except asyncio.CancelledError:
                     pass
-                except Exception as exc:
+                except (Exception, SystemExit, BaseException) as exc:
                     logger.debug("MCP background server thread encountered error: %s", exc)
                 finally:
                     try:

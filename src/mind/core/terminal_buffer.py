@@ -495,6 +495,9 @@ class TerminalBuffer:
                 if y_render < self._lines - 1:
                     rich_text.append("\n")
 
+            rich_text.no_wrap = True
+            rich_text.overflow = "crop"
+
             self._cached_rich_text = rich_text
             self._cached_rich_key = cache_key
             return rich_text.copy()

@@ -535,6 +535,23 @@ class UnixPtyProcess(BasePtyProcess):
         winsize = struct.pack("HHHH", max(5, lines), max(20, columns), 0, 0)
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
+        def _child_preexec() -> None:
+            if hasattr(os, "login_tty"):
+                try:
+                    os.login_tty(slave_fd)
+                    return
+                except Exception:
+                    pass
+            if hasattr(os, "setsid"):
+                try:
+                    os.setsid()
+                except Exception:
+                    pass
+            try:
+                fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            except Exception:
+                pass
+
         args = list(command) if isinstance(command, (list, tuple)) else command.split()
         self._proc: subprocess.Popen | None = subprocess.Popen(
             args,
@@ -543,7 +560,7 @@ class UnixPtyProcess(BasePtyProcess):
             stderr=slave_fd,
             cwd=cwd,
             env=env,
-            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            preexec_fn=_child_preexec,
             close_fds=True,
         )
         os.close(slave_fd)
@@ -579,10 +596,12 @@ class UnixPtyProcess(BasePtyProcess):
                 events = self._selector.select()
                 for key, mask in events:
                     if key.data == "wakeup":
-                        try:
-                            os.read(self._wakeup_r, 128)
-                        except OSError:
-                            pass
+                        r_fd = self._wakeup_r
+                        if r_fd is not None:
+                            try:
+                                os.read(r_fd, 128)
+                            except OSError:
+                                pass
                         self._is_alive = False
                         return
                     elif key.data == "pty":

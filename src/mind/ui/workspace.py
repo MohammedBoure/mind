@@ -38,7 +38,11 @@ from mind.core.directives import (
     resolve_directive_path,
     save_directive,
 )
-from mind.core.session_storage import record_session_activity
+from mind.core.session_storage import (
+    get_session,
+    record_session_activity,
+    update_session_worker_config,
+)
 from mind.ui.agent_config_modal import AgentConfigModal
 from mind.ui.bottom_bar import BottomBar
 from mind.ui.directive_editor_modal import DirectiveEditorModal
@@ -166,21 +170,44 @@ class WorkspaceScreen(Screen):
         # 2. Inter-agent interrupt banner (hidden until directive arrives)
         yield InterruptBanner()
 
+        # Check persistent session storage for saved agent configurations
+        stored_session = get_session(self._session_name)
+        saved_configs = stored_session.agent_configs if (stored_session and stored_session.agent_configs) else {}
+
         # 3. Main Workspace: Primary coordinator pane (left) + Worker PTYs (right)
         coordinator_cmd = self._resolve_coordinator_command()
         coordinator_task = self._goal or "Idle - Standing by for user prompt"
+
+        coord_cfg = saved_configs.get("coordinator") or saved_configs.get("primary") or {}
+        coord_agent = coord_cfg.get("assigned_agent") or "agy1"
+        coord_model = coord_cfg.get("model") or "gemini-3.8-flash-high"
+        coord_mode = coord_cfg.get("cli_mode") or "auto"
+        coord_effort = coord_cfg.get("reasoning_effort") or "high"
+        coord_flags = coord_cfg.get("extra_flags") or ""
+        coord_name = coord_cfg.get("name") or "Primary-Coordinator"
+
         coordinator_session = self._terminal_manager.create_worker(
             worker_id="coordinator",
             agent_id="coordinator",
-            name="Primary-Coordinator",
+            name=coord_name,
             role="coordinator",
-            assigned_agent="agy1",
-            model="gemini-3.8-flash-high",
+            assigned_agent=coord_agent,
+            model=coord_model,
             task=coordinator_task,
             command=coordinator_cmd,
             cwd=self._working_dir,
             autostart=True,
         )
+        if coord_mode:
+            coordinator_session.cli_mode = coord_mode
+            coordinator_session.profile.cli_mode = coord_mode
+        if coord_effort:
+            coordinator_session.reasoning_effort = coord_effort
+            coordinator_session.profile.reasoning_effort = coord_effort
+        if coord_flags:
+            coordinator_session.extra_flags = coord_flags
+            coordinator_session.profile.extra_flags = coord_flags
+
         self._coordinator_tab = WorkerTerminalTab(
             worker_session=coordinator_session,
             mode=self.mode,
@@ -204,8 +231,11 @@ class WorkspaceScreen(Screen):
 
                     for idx, agent in enumerate(self._agents[1:]):
                         worker_id = str(agent.id)
-                        assigned_slot = available_slots[idx % len(available_slots)]
-                        agent.name = f"Worker-{worker_id}"
+                        w_saved = saved_configs.get(worker_id) or {}
+                        assigned_slot = w_saved.get("assigned_agent") or available_slots[idx % len(available_slots)]
+                        agent.name = w_saved.get("name") or f"Worker-{worker_id}"
+                        if w_saved.get("model"):
+                            agent.model = w_saved["model"]
 
                     # Visible Tab Bar at top showing all active workers
                     yield WorkerTabBar(
@@ -220,16 +250,33 @@ class WorkspaceScreen(Screen):
                             worker_id = str(agent.id)
                             # Start only the active worker at boot; others spawn lazily upon activation
                             is_initial = (worker_id == initial_worker_id)
-                            assigned_slot = available_slots[idx % len(available_slots)]
+                            w_saved = saved_configs.get(worker_id) or {}
+                            assigned_slot = w_saved.get("assigned_agent") or available_slots[idx % len(available_slots)]
+                            w_model = w_saved.get("model") or agent.model
+                            w_mode = w_saved.get("cli_mode") or "auto"
+                            w_effort = w_saved.get("reasoning_effort") or "high"
+                            w_flags = w_saved.get("extra_flags") or ""
+                            w_name = w_saved.get("name") or agent.name
+
                             session = self._terminal_manager.create_worker(
                                 worker_id=worker_id,
-                                name=agent.name,
-                                model=agent.model,
+                                name=w_name,
+                                model=w_model,
                                 task=agent.task,
                                 assigned_agent=assigned_slot,
                                 cwd=self._working_dir,
                                 autostart=is_initial,
                             )
+                            if w_mode:
+                                session.cli_mode = w_mode
+                                session.profile.cli_mode = w_mode
+                            if w_effort:
+                                session.reasoning_effort = w_effort
+                                session.profile.reasoning_effort = w_effort
+                            if w_flags:
+                                session.extra_flags = w_flags
+                                session.profile.extra_flags = w_flags
+
                             tab_widget = WorkerTerminalTab(
                                 worker_session=session,
                                 mode=self.mode,
@@ -699,6 +746,21 @@ class WorkspaceScreen(Screen):
             if new_model:
                 worker.model = new_model
                 worker.profile.model = new_model
+            if new_config.get("cli_mode"):
+                worker.cli_mode = new_config["cli_mode"]
+                worker.profile.cli_mode = new_config["cli_mode"]
+            if new_config.get("reasoning_effort"):
+                worker.reasoning_effort = new_config["reasoning_effort"]
+                worker.profile.reasoning_effort = new_config["reasoning_effort"]
+            if "extra_flags" in new_config:
+                worker.extra_flags = new_config["extra_flags"]
+                worker.profile.extra_flags = new_config["extra_flags"]
+
+        # Persist this worker's configuration to the session record on disk
+        try:
+            update_session_worker_config(self._session_name, str(worker_id), new_config)
+        except Exception:
+            pass
 
         if new_name:
             if str(worker_id) in ("coordinator", "primary"):
@@ -953,7 +1015,7 @@ class WorkspaceScreen(Screen):
                 else f"agy{next_id_int + 1}"
             )
 
-        agent_name = assigned_agent or f"Worker-{new_id}"
+        agent_name = f"Worker-{new_id}"
         new_agent = AgentInfo(
             id=next_id_int,
             name=agent_name,
@@ -973,6 +1035,22 @@ class WorkspaceScreen(Screen):
             cwd=self._working_dir,
             autostart=True,
         )
+
+        try:
+            update_session_worker_config(
+                self._session_name,
+                new_id,
+                {
+                    "name": new_agent.name,
+                    "assigned_agent": assigned_agent,
+                    "model": new_agent.model,
+                    "cli_mode": "auto",
+                    "reasoning_effort": "high",
+                    "extra_flags": "--dangerously-skip-permissions",
+                },
+            )
+        except Exception:
+            pass
         tab_widget = WorkerTerminalTab(
             worker_session=session,
             mode=self.mode,

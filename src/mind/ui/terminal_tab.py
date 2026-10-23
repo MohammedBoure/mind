@@ -68,7 +68,7 @@ class TerminalScreenWidget(Widget):
         min-height: 15;
         background: #0f141c;
         border: round #3b4261;
-        padding: 0 1;
+        padding: 0;
         overflow-y: hidden;
         overflow-x: hidden;
     }
@@ -289,6 +289,8 @@ class TerminalScreenWidget(Widget):
                 show_cursor=self.has_focus,
                 scroll_offset=self.term_scroll_offset,
             )
+            text.no_wrap = True
+            text.overflow = "crop"
             if self.has_selection:
                 self._apply_selection_styling(text)
             return text
@@ -299,6 +301,8 @@ class TerminalScreenWidget(Widget):
                 show_cursor=self.has_focus,
                 scroll_offset=self.term_scroll_offset,
             )
+            text.no_wrap = True
+            text.overflow = "crop"
             if self.has_selection:
                 self._apply_selection_styling(text)
             return text
@@ -432,8 +436,11 @@ class TerminalScreenWidget(Widget):
 
     def on_resize(self, event: events.Resize) -> None:
         """Sync virtual screen buffer and PTY dimensions with widget size."""
-        cols = max(30, event.size.width - 2)
-        rows = max(5, event.size.height - 2)
+        # Use exact content_size inside borders and padding to prevent soft-wrapping
+        cols = self.content_size.width if self.content_size.width > 0 else max(20, event.size.width - 2)
+        rows = self.content_size.height if self.content_size.height > 0 else max(5, event.size.height - 2)
+        cols = max(20, cols)
+        rows = max(5, rows)
         self.worker_session.buffer.resize(columns=cols, lines=rows)
         if self.worker_session.process:
             self.worker_session.process.resize(columns=cols, lines=rows)

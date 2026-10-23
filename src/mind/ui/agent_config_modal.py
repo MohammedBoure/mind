@@ -32,6 +32,7 @@ from mind.core.directives import (
     resolve_directive_path,
     save_directive,
 )
+from mind.core.session_storage import load_global_config, save_global_config
 from mind.core.terminal_manager import TerminalManager
 from mind.ui.directive_editor_modal import DirectiveEditorModal
 
@@ -625,6 +626,16 @@ class AgentConfigModal(ModalScreen[None]):
             ),
         ]
 
+        # Apply global user preferences from persistent config
+        global_cfg = load_global_config()
+        for opt in self.options:
+            if not opt.is_worker_specific and opt.key in global_cfg:
+                val = global_cfg[opt.key]
+                if isinstance(val, bool):
+                    opt.set_value("on" if val else "off")
+                else:
+                    opt.set_value(str(val))
+
         # Apply worker defaults to options
         for opt in self.options:
             if opt.key == "agent_mode" and cur_mode:
@@ -917,9 +928,19 @@ class AgentConfigModal(ModalScreen[None]):
         }
 
     def _apply_saved_configs(self) -> None:
-        """Apply all pending draft configurations to TerminalManager workers."""
+        """Apply all pending draft configurations to TerminalManager workers and persist global preferences."""
         if self._last_selected_worker_id:
             self._worker_drafts[self._last_selected_worker_id] = self._gather_config_dict()
+
+        # Persist global settings across app sessions
+        global_settings: dict[str, Any] = {}
+        for opt in self.options:
+            if not opt.is_worker_specific:
+                global_settings[opt.key] = opt.value
+        try:
+            save_global_config(global_settings)
+        except Exception:
+            pass
 
         for w_id, cfg in self._worker_drafts.items():
             worker = self._terminal_manager.get_worker(w_id)

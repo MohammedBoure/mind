@@ -274,6 +274,10 @@ class WorkerSession:
         if self.last_cwd:
             worker_env["PWD"] = str(self.last_cwd)
 
+        # Standard terminal emulator environment variables for accurate color and layout rendering
+        worker_env["TERM"] = "xterm-256color"
+        worker_env["COLORTERM"] = "truecolor"
+
         self.last_env = worker_env
         resolved_command = self._resolve_command(command)
 

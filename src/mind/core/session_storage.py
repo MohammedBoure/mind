@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Default persistent sessions storage path in the user's home directory
 _DEFAULT_DIR = Path.home() / ".mind"
 _DEFAULT_SESSIONS_FILE = _DEFAULT_DIR / "sessions.json"
+_DEFAULT_CONFIG_FILE = _DEFAULT_DIR / "config.json"
 
 
 @dataclass
@@ -38,6 +39,8 @@ class SessionRecord:
     total_interactions: int = 0
     status: str = "active"
     working_dir: str = ""
+    agent_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    global_settings: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize session record to JSON-safe dictionary."""
@@ -52,6 +55,8 @@ class SessionRecord:
             "total_interactions": self.total_interactions,
             "status": self.status,
             "working_dir": self.working_dir,
+            "agent_configs": self.agent_configs,
+            "global_settings": self.global_settings,
         }
 
     @classmethod
@@ -75,6 +80,8 @@ class SessionRecord:
             total_interactions=int(data.get("total_interactions", 0)),
             status=str(data.get("status", "active")),
             working_dir=str(data.get("working_dir", "")),
+            agent_configs=data.get("agent_configs", {}) or {},
+            global_settings=data.get("global_settings", {}) or {},
         )
 
     def to_session_info(self) -> SessionInfo:
@@ -152,7 +159,10 @@ def load_all_sessions(storage_path: Path | None = None) -> list[SessionRecord]:
             raw_list = json.load(f)
         if not isinstance(raw_list, list):
             return _get_initial_seed_sessions()
-        return [SessionRecord.from_dict(item) for item in raw_list]
+        loaded = [SessionRecord.from_dict(item) for item in raw_list]
+        if not any(s.name == "default" for s in loaded):
+            loaded.append(_get_initial_seed_sessions()[0])
+        return loaded
     except Exception as e:
         logger.error(f"Error loading sessions from {file_path}: {e}")
         return _get_initial_seed_sessions()
@@ -246,4 +256,63 @@ def record_session_activity(
     if status is not None:
         session.status = status
 
+    return save_session(session, storage_path=storage_path)
+
+
+def get_default_config_path() -> Path:
+    """Return default path to global configuration file (~/.mind/config.json)."""
+    _DEFAULT_DIR.mkdir(parents=True, exist_ok=True)
+    return _DEFAULT_CONFIG_FILE
+
+
+def load_global_config(config_path: Path | None = None) -> dict[str, Any]:
+    """Load global user preferences and configuration from disk."""
+    file_path = config_path or get_default_config_path()
+    if not file_path.exists():
+        return {}
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.warning(f"Failed to load global config from {file_path}: {e}")
+        return {}
+
+
+def save_global_config(config: dict[str, Any], config_path: Path | None = None) -> None:
+    """Persist global user preferences and configuration to disk."""
+    file_path = config_path or get_default_config_path()
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        # Merge with existing config
+        existing = load_global_config(config_path=file_path)
+        existing.update(config)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save global config to {file_path}: {e}")
+
+
+def update_global_config(config_path: Path | None = None, **kwargs: Any) -> None:
+    """Convenience helper to update specific global configuration keys."""
+    save_global_config(kwargs, config_path=config_path)
+
+
+def update_session_worker_config(
+    session_name: str,
+    worker_id: str,
+    config: dict[str, Any],
+    storage_path: Path | None = None,
+) -> SessionRecord | None:
+    """Persist updated worker/coordinator configuration for a session."""
+    session = get_session(session_name, storage_path=storage_path)
+    if not session:
+        # Create session record if not found
+        session = SessionRecord(name=session_name)
+
+    if not isinstance(session.agent_configs, dict):
+        session.agent_configs = {}
+
+    session.agent_configs[str(worker_id)] = dict(config)
+    session.last_activity = datetime.now()
     return save_session(session, storage_path=storage_path)

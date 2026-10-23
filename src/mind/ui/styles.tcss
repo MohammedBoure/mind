@@ -191,7 +191,7 @@ HeaderBar {
 
 #primary-pane .terminal-header {
     dock: top;
-    height: 1;
+    height: 2;
     background: #1e1e2e;
     color: #c0caf5;
     padding: 0 1;
@@ -220,7 +220,7 @@ HeaderBar {
     min-height: 15;
     background: #13141f;
     border: round #413d63;
-    padding: 0 1;
+    padding: 0;
     overflow-y: hidden;
     overflow-x: hidden;
 }
@@ -378,7 +378,7 @@ WorkerTabBar, #worker-tab-bar {
 
 /* Worker Tab Top Status Header */
 #workers-pane .terminal-header {
-    height: 1;
+    height: 2;
     dock: top;
     background: #1a2030;
     color: #c0caf5;
@@ -409,7 +409,7 @@ WorkerTabBar, #worker-tab-bar {
     min-height: 15;
     background: #0f141c;
     border: round #3b4261;
-    padding: 0 1;
+    padding: 0;
     overflow-y: hidden;
     overflow-x: hidden;
 }
@@ -437,7 +437,7 @@ TerminalScreenWidget {
     min-height: 15;
     background: #0f141c;
     border: round #3b4261;
-    padding: 0 1;
+    padding: 0;
     overflow-y: hidden;
     overflow-x: hidden;
 }
@@ -504,6 +504,7 @@ BottomBar {
     width: 1fr;
     height: 1;
     layout: horizontal;
+    overflow-x: hidden;
 }
 
 #bottom-normal-actions {
@@ -535,6 +536,7 @@ BottomBar {
 }
 
 #bottom-status-pill {
+    dock: right;
     width: auto;
     color: #7aa2f7;
     text-style: bold;
