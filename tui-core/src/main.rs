@@ -873,11 +873,25 @@ async fn run_tui_app(
                                 engine.send_input_to_active(&c.to_string(), false).ok();
                             }
                         } else if key.code == KeyCode::Enter {
-                            engine.send_input_to_active("\n", false).ok();
+                            engine.send_input_to_active("\r", false).ok();
                         } else if key.code == KeyCode::Backspace {
-                            engine.send_input_to_active("\x08", false).ok();
+                            engine.send_input_to_active("\x7f", false).ok();
                         } else if key.code == KeyCode::Tab {
                             engine.send_input_to_active("\t", false).ok();
+                        } else if key.code == KeyCode::BackTab {
+                            engine.send_input_to_active("\x1b[Z", false).ok();
+                        } else if key.code == KeyCode::Delete {
+                            engine.send_input_to_active("\x1b[3~", false).ok();
+                        } else if key.code == KeyCode::Home {
+                            engine.send_input_to_active("\x1b[H", false).ok();
+                        } else if key.code == KeyCode::End {
+                            engine.send_input_to_active("\x1b[F", false).ok();
+                        } else if key.code == KeyCode::PageUp {
+                            engine.send_input_to_active("\x1b[5~", false).ok();
+                        } else if key.code == KeyCode::PageDown {
+                            engine.send_input_to_active("\x1b[6~", false).ok();
+                        } else if key.code == KeyCode::Insert {
+                            engine.send_input_to_active("\x1b[2~", false).ok();
                         } else if key.code == KeyCode::Up {
                             engine.send_input_to_active("\x1b[A", false).ok();
                         } else if key.code == KeyCode::Down {

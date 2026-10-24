@@ -136,7 +136,7 @@ impl WorkerSession {
         let pty = self.pty.lock();
         pty.write_str(text)?;
         if press_enter {
-            pty.write_bytes(b"\n")?;
+            pty.write_bytes(b"\r")?;
         }
         *self.state.lock() = WorkerState::Running;
         Ok(())
