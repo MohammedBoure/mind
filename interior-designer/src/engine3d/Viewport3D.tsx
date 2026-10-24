@@ -234,6 +234,17 @@ export const Viewport3D = forwardRef<Viewport3DHandle, Viewport3DProps>(({
       orbitState.current.target,
       effectiveCutaway
     );
+
+    // Automatic recovery check: If a wall edit traps the camera inside solid geometry
+    if (isWalkthrough && walkthroughControllerRef.current) {
+      walkthroughControllerRef.current.recoverIfTrapped(
+        rooms,
+        walls,
+        openings,
+        vertices,
+        furniture
+      );
+    }
   }, [vertices, walls, openings, furniture, rooms, selection, isWalkthrough, cutawayMode]);
 
   // When switching to walkthrough mode: auto-position player into room center
@@ -396,8 +407,24 @@ export const Viewport3D = forwardRef<Viewport3DHandle, Viewport3DProps>(({
               : 'Click canvas to Lock Mouse & Walk (WASD)'}
           </span>
           <button
+            onClick={() => {
+              walkthroughControllerRef.current?.recoverIfTrapped(
+                rooms,
+                walls,
+                openings,
+                vertices,
+                furniture,
+                true
+              );
+            }}
+            title="Teleport to safe center of room"
+            className="bg-sky-900 hover:bg-sky-800 text-sky-200 text-xs px-2.5 py-1 rounded border border-sky-600/50 transition cursor-pointer"
+          >
+            Recover View
+          </button>
+          <button
             onClick={() => onToggleWalkthrough(false)}
-            className="ml-2 bg-slate-800 hover:bg-slate-700 text-white font-medium px-2.5 py-1 rounded text-xs border border-slate-700 transition"
+            className="ml-1 bg-slate-800 hover:bg-slate-700 text-white font-medium px-2.5 py-1 rounded text-xs border border-slate-700 transition cursor-pointer"
           >
             Exit Walkthrough
           </button>

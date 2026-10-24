@@ -10,7 +10,7 @@ This directory contains modular React UI components that comprise the MindSpace 
 - `PropertyInspector.tsx`: Contextual real-time sidebar providing parametric inputs for selected walls (thickness, height, finishes), openings (dimensions, sill elevation, swing angles, hinge side, collision warnings), furniture (rotation gizmo, dimensions, pricing, rug non-blocking clearance indicators), and rooms (name, area readout in m², floor finish materials).
 - `BoQModal.tsx`: Comprehensive Bill of Quantities modal presenting KPI summaries (Flooring area, net wall finish area, door/window counts, furniture count, grand total budget), categorized item tables, and CSV export.
 - `AlternativesModal.tsx`: Side-by-side design branch comparison modal calculating variance deltas between Alternative A and Alternative B, with tools to create new layout branches.
-- `ExportModal.tsx`: Asset export dialog generating scaled 1:50 vector SVG blueprints, BoQ CSV schedules, cross-browser JSON backup files, 3D WebGL PNG canvas snapshots, and file upload restoration.
+- `ExportModal.tsx`: Asset export dialog generating scaled 1:10 vector SVG blueprints, BoQ CSV schedules, cross-browser JSON backup files, 3D WebGL PNG canvas snapshots, and file upload restoration.
 - `README.md`: This comprehensive English documentation file.
 
 ## Exposed Interfaces & Utilities

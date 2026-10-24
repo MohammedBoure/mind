@@ -10,7 +10,8 @@ import { getFurnitureFootprint } from '../core/collision.js';
 
 export function exportBlueprintToSVG(
   design: AlternativeDesign,
-  scale = 50 // 50 pixels per meter (1:50 blueprint scale)
+  scale = 100, // 100 pixels per meter (1:10 architectural blueprint scale)
+  scaleLabel = '1:10'
 ): string {
   const { vertices, walls, openings, furniture, rooms } = design;
 
@@ -235,7 +236,7 @@ export function exportBlueprintToSVG(
   <g id="title-block" transform="translate(15, ${svgH - 65})">
     <rect width="260" height="50" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1"/>
     <text x="12" y="20" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="#38bdf8">${design.name}</text>
-    <text x="12" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">Metric Blueprint | Scale 1:50 | MindSpace</text>
+    <text x="12" y="38" font-family="system-ui, sans-serif" font-size="10" fill="#94a3b8">Metric Blueprint | Scale ${scaleLabel} | MindSpace</text>
   </g>
   </svg>`);
 

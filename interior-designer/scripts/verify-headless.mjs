@@ -414,15 +414,19 @@ console.log('\n[Test Suite 7: Export Formats & Zero-Data-Loss Portability]');
   const defaultProj = createDefaultProject();
   const alt = defaultProj.alternatives[0];
 
-  // 1. Vector SVG
-  const svg = exportBlueprintToSVG(alt, 50);
+  // 1. Vector SVG (1:10 Scaled Architectural Blueprint)
+  const svg1_10 = exportBlueprintToSVG(alt, 100, '1:10');
   assert(
-    svg.startsWith('<?xml') && svg.includes('<svg') && svg.includes('</svg>'),
+    svg1_10.startsWith('<?xml') && svg1_10.includes('<svg') && svg1_10.includes('</svg>'),
     `Exported SVG blueprint is valid XML starting with <svg> and ending with </svg>`
   );
   assert(
-    svg.includes('door-arc') && svg.includes('wall-thick') && svg.includes('Main Dining Hall'),
+    svg1_10.includes('door-arc') && svg1_10.includes('wall-thick') && svg1_10.includes('Main Dining Hall'),
     `SVG blueprint contains door swing arcs, wall thickness paths, and room label tags`
+  );
+  assert(
+    svg1_10.includes('Scale 1:10'),
+    `SVG blueprint includes 1:10 metric scale specification in title block`
   );
 
   // 2. BoQ CSV

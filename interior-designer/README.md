@@ -65,7 +65,7 @@ MindSpace is a production-grade, local-first web application designed for high-p
     - `projectStore.ts`: Central React state store, 100-step undo/redo, and localStorage auto-save.
     - `README.md`: English documentation for state persistence.
   - `export/`:
-    - `svgExporter.ts`: Scaled 1:50 vector SVG blueprint generator.
+    - `svgExporter.ts`: Scaled 1:10 vector SVG blueprint generator.
     - `csvExporter.ts`: Itemized BoQ CSV generator.
     - `jsonExporter.ts`: JSON project serialization and schema-validated restore.
     - `README.md`: English documentation for export generators.

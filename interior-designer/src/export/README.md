@@ -4,7 +4,7 @@
 This directory implements zero-data-loss export and import modules for the MindSpace studio. It generates scaled vector blueprints, itemized CSV financial schedules for construction estimation, schema-validated JSON project backup files, and camera snapshots.
 
 ## Itemized File Breakdown
-- `svgExporter.ts`: Synthesizes 1:50 architectural-standard vector SVG blueprints containing metric coordinate grids, room boundary fills with square-meter tags, walls with core and thickness strokes, dimension markers, door swing arcs, window double-lines, furniture footprints, and title blocks.
+- `svgExporter.ts`: Synthesizes 1:10 architectural-standard vector SVG blueprints (100 px/meter, with configurable scale factors) containing metric coordinate grids, room boundary fills with square-meter tags, walls with core and thickness strokes, dimension markers, door swing arcs, window double-lines, furniture footprints, and title blocks.
 - `csvExporter.ts`: Synthesizes Bill of Quantities (BoQ) spreadsheets formatted with item descriptions, specifications, metric quantities, units, and integer-cent prices converted to decimal dollars, complete with category subtotals and grand totals.
 - `jsonExporter.ts`: Serializes and deserializes the full multi-alternative project tree with schema sanitization for cross-browser backup and restore.
 - `README.md`: This comprehensive English documentation file.

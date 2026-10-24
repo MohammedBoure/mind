@@ -38,11 +38,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // 1. Scaled Vector SVG Blueprint Export
+  // 1. Scaled Vector SVG Blueprint Export (1:10 metric scale)
   const handleExportSVG = () => {
-    const svgStr = exportBlueprintToSVG(activeAlternative, 50);
+    const svgStr = exportBlueprintToSVG(activeAlternative, 100, '1:10');
     triggerDownload(
-      `Blueprint_${activeAlternative.name.replace(/\s+/g, '_')}_1-50.svg`,
+      `Blueprint_${activeAlternative.name.replace(/\s+/g, '_')}_1-10.svg`,
       svgStr,
       'image/svg+xml;charset=utf-8'
     );
@@ -130,7 +130,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-400 mt-2">
-              Scaled 1:50 metric blueprint with dimension lines, room tags, and door swing arcs.
+              Scaled 1:10 metric blueprint with dimension lines, room tags, and door swing arcs.
             </p>
           </button>
 

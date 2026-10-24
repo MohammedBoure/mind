@@ -151,16 +151,17 @@ export class WalkthroughController {
   }
 
   /**
-   * Automatic recovery mechanism: If camera is trapped inside solid geometry,
-   * teleports safely to the center of the largest cleared room.
+   * Automatic recovery mechanism: If camera is trapped inside solid geometry
+   * (e.g. wall edit or initial spawn), teleports safely to the center of the largest cleared room.
    */
   public recoverIfTrapped(
     rooms: Room[],
     walls: Record<string, Wall>,
     openings: Record<string, Opening>,
     vertices: Record<string, Point2D>,
-    furniture: Record<string, FurnitureItem>
-  ) {
+    furniture: Record<string, FurnitureItem>,
+    force = false
+  ): boolean {
     const curPlanPos = { x: this.position.x, y: -this.position.z };
     const col = checkWalkthroughCollision(
       curPlanPos,
@@ -171,7 +172,9 @@ export class WalkthroughController {
       furniture
     );
 
-    if (col.hasCollision || rooms.length > 0) {
+    const isInitialZero = Math.abs(this.position.x) < 0.01 && Math.abs(this.position.z) < 0.01;
+
+    if (force || col.hasCollision || isInitialZero) {
       // Find largest cleared room
       let bestRoom = rooms[0];
       for (const r of rooms) {
@@ -183,8 +186,10 @@ export class WalkthroughController {
       if (bestRoom && bestRoom.polygon.length >= 3) {
         const centroid = calculatePolygonCentroid(bestRoom.polygon);
         this.teleport(centroid.x, -centroid.y);
+        return true;
       }
     }
+    return false;
   }
 
   public getIsLocked(): boolean {
