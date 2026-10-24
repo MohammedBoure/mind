@@ -126,6 +126,7 @@ impl Widget for &HelpModal {
                 ShortcutEntry { key: "1..9", description: "Jump directly to Worker tab N" },
                 ShortcutEntry { key: "h / l", description: "Switch to previous / next worker tab" },
                 ShortcutEntry { key: "e / Ctrl+E", description: "Open Agent & Tab Settings (Assign agy slot per tab)" },
+                ShortcutEntry { key: "r / Ctrl+R", description: "Restart active tab PTY with currently assigned agy slot" },
                 ShortcutEntry { key: "c / n", description: "Spawn a new worker agent tab" },
                 ShortcutEntry { key: "x", description: "Terminate and close active worker tab" },
                 ShortcutEntry { key: "s", description: "Toggle split layout (Side-by-side 50/50 vs Fullscreen)" },

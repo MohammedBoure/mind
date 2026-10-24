@@ -99,6 +99,11 @@ fn test_agent_config_modal_workflow() {
         }
         _ => panic!("Expected Save action with restart"),
     }
+
+    // Press 'a' to Save & Restart All
+    modal.open();
+    let action_all = modal.handle_key(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert_eq!(action_all, AgentConfigModalAction::RestartAll);
 }
 
 #[test]
@@ -112,11 +117,19 @@ fn test_bottom_bar_includes_shortcuts_and_settings_pills() {
         normal_pills.iter().any(|p| p.key == "e" && p.label.contains("Settings")),
         "Normal pills must contain [e] Settings"
     );
+    assert!(
+        normal_pills.iter().any(|p| p.key == "r" && p.label.contains("Restart")),
+        "Normal pills must contain [r] Restart"
+    );
 
     let pty_pills = BottomBar::pty_action_pills();
     assert!(
         pty_pills.iter().any(|p| p.key == "Ctrl+E" && p.label.contains("Settings")),
         "PTY pills must contain [Ctrl+E] Settings"
+    );
+    assert!(
+        pty_pills.iter().any(|p| p.key == "Ctrl+R" && p.label.contains("Restart")),
+        "PTY pills must contain [Ctrl+R] Restart"
     );
     assert!(
         pty_pills.iter().any(|p| p.key == "?" && (p.label.contains("Help") || p.label.contains("Shortcuts"))),
@@ -144,4 +157,7 @@ async fn test_session_manager_reassign_and_restart() {
     // Restart worker 1 with slot 12
     let restarted = manager.restart_worker_with_slot("worker-1", "agy12", rows, cols).unwrap();
     assert_eq!(restarted.slot_id, "agy12");
+
+    // Restart all sessions
+    assert!(manager.restart_all_sessions(24, 80, 20, 80).is_ok());
 }

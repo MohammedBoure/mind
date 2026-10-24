@@ -381,6 +381,10 @@ impl SessionManager {
         self.workers.lock().clear();
         *self.focused_pane.lock() = FocusedPane::Coordinator;
 
+        let half_cols = (cols / 2).saturating_sub(2).max(10);
+        let coord_rows = rows.saturating_sub(4).max(5);
+        let worker_rows = rows.saturating_sub(7).max(5);
+
         for (idx, w_cfg) in session_record.workers.iter().enumerate() {
             let (cmd, args) = self.resolve_worker_command(w_cfg, default_cmd);
             let env = w_cfg.env.clone().unwrap_or_default();
@@ -391,6 +395,12 @@ impl SessionManager {
                 std::env::current_dir().ok()
             };
 
+            let (p_rows, p_cols) = if idx == 0 {
+                (coord_rows, half_cols)
+            } else {
+                (worker_rows, half_cols)
+            };
+
             let worker = self.spawn_session(
                 &w_cfg.id,
                 &w_cfg.slot_id,
@@ -398,8 +408,8 @@ impl SessionManager {
                 args,
                 cwd,
                 env,
-                rows,
-                cols,
+                p_rows,
+                p_cols,
             )?;
 
             worker.set_role(&w_cfg.role);
@@ -616,6 +626,25 @@ impl SessionManager {
         }
     }
 
+    /// Restart all sessions (coordinator and workers) with their current assigned agy slots.
+    pub fn restart_all_sessions(
+        &self,
+        coord_rows: u16,
+        coord_cols: u16,
+        worker_rows: u16,
+        worker_cols: u16,
+    ) -> Result<()> {
+        if let Some(coord) = self.coordinator() {
+            let slot = coord.slot_id.clone();
+            let _ = self.restart_worker_with_slot("coordinator", &slot, coord_rows, coord_cols);
+        }
+        let workers: Vec<(String, String)> = self.workers().iter().map(|w| (w.id.clone(), w.slot_id.clone())).collect();
+        for (id, slot) in workers {
+            let _ = self.restart_worker_with_slot(&id, &slot, worker_rows, worker_cols);
+        }
+        Ok(())
+    }
+
     /// Update assigned agy slot metadata without restarting the current PTY process.
     pub fn reassign_worker_slot(&self, worker_id: &str, new_slot_id: &str) -> Result<()> {
         let is_coord = worker_id == "coordinator" || worker_id == "agy1";
@@ -748,6 +777,23 @@ impl SessionManager {
         for session in list.iter() {
             if let Err(e) = session.resize(rows, cols) {
                 warn!("Failed to resize session '{}': {}", session.id, e);
+            }
+        }
+    }
+
+    /// Resize panes according to their specific layout geometry:
+    /// - Coordinator gets dedicated `(coord_rows, coord_cols)`
+    /// - All Workers get dedicated `(worker_rows, worker_cols)`
+    pub fn resize_panes(&self, coord_rows: u16, coord_cols: u16, worker_rows: u16, worker_cols: u16) {
+        if let Some(coord) = self.coordinator() {
+            if let Err(e) = coord.resize(coord_rows, coord_cols) {
+                warn!("Failed to resize coordinator PTY: {}", e);
+            }
+        }
+        let workers = self.workers();
+        for worker in workers.iter() {
+            if let Err(e) = worker.resize(worker_rows, worker_cols) {
+                warn!("Failed to resize worker '{}' PTY: {}", worker.id, e);
             }
         }
     }

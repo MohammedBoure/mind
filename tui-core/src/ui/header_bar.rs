@@ -158,9 +158,9 @@ impl Widget for &HeaderBar {
         ));
         left_spans.push(Span::styled(" ", Style::default().bg(bg_color)));
 
-        // 2. Active Session Pill: [dim/cyan session_name]
+        // 2. Active Session Pill: [session: name]
         left_spans.push(Span::styled(
-            format!(" {} ", self.session_name),
+            format!(" session: {} ", self.session_name),
             Style::default()
                 .fg(bar_colors::SESSION_FG)
                 .bg(bar_colors::SESSION_BG)

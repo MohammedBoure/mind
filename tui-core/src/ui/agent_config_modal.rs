@@ -67,6 +67,8 @@ pub enum AgentConfigModalAction {
         new_role: String,
         restart: bool,
     },
+    /// Save all changes and restart all tabs (Coordinator and all Workers).
+    RestartAll,
     /// Dismiss modal without saving.
     Cancel,
     /// Internal key handled without closing.
@@ -245,9 +247,22 @@ impl AgentConfigModal {
             return AgentConfigModalAction::Cancel;
         }
 
-        // Save & Restart: Ctrl+R
-        if (key.code == KeyCode::Char('r') || key.code == KeyCode::Char('R'))
-            && key.modifiers.contains(KeyModifiers::CONTROL)
+        // Save & Restart All Tabs: 'a', 'A', or Ctrl+A
+        if key.code == KeyCode::Char('a')
+            || key.code == KeyCode::Char('A')
+            || ((key.code == KeyCode::Char('a') || key.code == KeyCode::Char('A'))
+                && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            self.close();
+            return AgentConfigModalAction::RestartAll;
+        }
+
+        // Save & Restart Active Tab: Enter, 'r', 'R', or Ctrl+R
+        if key.code == KeyCode::Enter
+            || key.code == KeyCode::Char('r')
+            || key.code == KeyCode::Char('R')
+            || ((key.code == KeyCode::Char('r') || key.code == KeyCode::Char('R'))
+                && key.modifiers.contains(KeyModifiers::CONTROL))
         {
             if let Some(tab) = self.current_tab() {
                 let action = AgentConfigModalAction::Save {
@@ -261,8 +276,9 @@ impl AgentConfigModal {
             }
         }
 
-        // Save (No Restart): Ctrl+S or Enter
-        if key.code == KeyCode::Enter
+        // Save Only (Without Restart): 's', 'S', or Ctrl+S
+        if key.code == KeyCode::Char('s')
+            || key.code == KeyCode::Char('S')
             || ((key.code == KeyCode::Char('s') || key.code == KeyCode::Char('S'))
                 && key.modifiers.contains(KeyModifiers::CONTROL))
         {
@@ -529,15 +545,17 @@ impl Widget for &AgentConfigModal {
         let footer_lines = vec![
             Line::from(vec![
                 Span::styled(" [↑/↓/Tab] ", Style::default().fg(config_colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)),
-                Span::styled("Select Tab  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("Tab  ", Style::default().fg(config_colors::FG_LIGHT)),
                 Span::styled("[←/→/Space] ", Style::default().fg(config_colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD)),
                 Span::styled("Change agy  ", Style::default().fg(config_colors::FG_LIGHT)),
-                Span::styled("[Enter/Ctrl+S] ", Style::default().fg(config_colors::ACCENT_GREEN).add_modifier(Modifier::BOLD)),
-                Span::styled("Save  ", Style::default().fg(config_colors::FG_LIGHT)),
-                Span::styled("[Ctrl+R] ", Style::default().fg(config_colors::ACCENT_MAGENTA).add_modifier(Modifier::BOLD)),
+                Span::styled("[Enter/r] ", Style::default().fg(config_colors::ACCENT_GREEN).add_modifier(Modifier::BOLD)),
                 Span::styled("Save & Restart  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("[s] ", Style::default().fg(config_colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)),
+                Span::styled("Save Only  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("[a] ", Style::default().fg(config_colors::ACCENT_MAGENTA).add_modifier(Modifier::BOLD)),
+                Span::styled("Restart All  ", Style::default().fg(config_colors::FG_LIGHT)),
                 Span::styled("[Esc] ", Style::default().fg(config_colors::FG_MUTED).add_modifier(Modifier::BOLD)),
-                Span::styled("Close", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("Cancel", Style::default().fg(config_colors::FG_LIGHT)),
             ]),
         ];
 
@@ -595,7 +613,7 @@ mod tests {
         assert_eq!(action, AgentConfigModalAction::Cancel);
         assert!(!modal.is_open);
 
-        // Save on Enter
+        // Save & Restart on Enter
         modal.open();
         let key_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let action = modal.handle_key(&key_enter);
@@ -603,9 +621,22 @@ mod tests {
             AgentConfigModalAction::Save { tab_id, new_slot_id, restart, .. } => {
                 assert_eq!(tab_id, "coordinator");
                 assert_eq!(new_slot_id, "agy1");
+                assert!(restart);
+            }
+            _ => panic!("Expected Save & Restart action"),
+        }
+
+        // Save only on 's'
+        modal.open();
+        let key_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE);
+        let action = modal.handle_key(&key_s);
+        match action {
+            AgentConfigModalAction::Save { tab_id, new_slot_id, restart, .. } => {
+                assert_eq!(tab_id, "coordinator");
+                assert_eq!(new_slot_id, "agy1");
                 assert!(!restart);
             }
-            _ => panic!("Expected Save action"),
+            _ => panic!("Expected Save only action"),
         }
 
         // Save & Restart on Ctrl+R
@@ -618,5 +649,11 @@ mod tests {
             }
             _ => panic!("Expected Save with restart"),
         }
+
+        // Restart all on 'a'
+        modal.open();
+        let key_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        let action = modal.handle_key(&key_a);
+        assert_eq!(action, AgentConfigModalAction::RestartAll);
     }
 }

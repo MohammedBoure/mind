@@ -105,36 +105,35 @@ impl BottomBar {
     }
 
     /// Build normal mode action pills matching Python `mind`:
-    /// `[?] Shortcuts`, `[e] Settings`, `[i] Type`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit`
+    /// `[?] Shortcuts`, `[e] Settings`, `[r] Restart`, `[i] Type`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit`
     pub fn normal_action_pills() -> Vec<ActionPill> {
         vec![
             ActionPill::new("?", "Help"),
             ActionPill::new("e", "Settings"),
-            ActionPill::new("m", "Directive"),
+            ActionPill::new("r", "Restart"),
+            ActionPill::new("i", "Type"),
             ActionPill::new("s", "Split"),
+            ActionPill::new("m", "Directive"),
             ActionPill::new("d", "Edit"),
             ActionPill::new("c/n", "New"),
             ActionPill::new("x", "Close"),
             ActionPill::new("q", "Quit"),
-            ActionPill::new("i", "Type"),
             ActionPill::new("1..9", "Jump"),
             ActionPill::new("h/l", "Tabs"),
-            ActionPill::new("y", "Copy"),
         ]
     }
 
     /// Build PTY interact mode action pills matching Python `mind`:
-    /// `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+E] Settings`, `[?] Help`, `[Ctrl+C] Interrupt`, `[Ctrl+M] Inject`
+    /// `[?] Help`, `[Ctrl+E] Settings`, `[Ctrl+R] Restart`, `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+C] Interrupt`
     pub fn pty_action_pills() -> Vec<ActionPill> {
         vec![
-            ActionPill::new("Esc Esc / Ctrl+B", "Outer Normal"),
-            ActionPill::new("Ctrl+E", "Settings"),
             ActionPill::new("?", "Help"),
+            ActionPill::new("Ctrl+E", "Settings"),
+            ActionPill::new("Ctrl+R", "Restart"),
+            ActionPill::new("Esc Esc / Ctrl+B", "Outer Normal"),
             ActionPill::new("Ctrl+C", "Interrupt"),
             ActionPill::new("Ctrl+M", "Inject"),
             ActionPill::new("Ctrl+D", "Directive"),
-            ActionPill::new("Ctrl+Shift+C", "Copy"),
-            ActionPill::new("F12", "Normal"),
         ]
     }
 }
@@ -185,36 +184,38 @@ impl Widget for &BottomBar {
         }
         left_spans.push(Span::styled(" ", Style::default().bg(bg_color)));
 
-        // 2. Center Segment: Notice alert OR dynamic action pills
-        if let Some(notice) = &self.active_notice {
+        // 2. Center Segment: Always render action pills for instant shortcut visibility
+        let pills = match self.mode {
+            AppMode::Normal => BottomBar::normal_action_pills(),
+            AppMode::PtyInteract => BottomBar::pty_action_pills(),
+        };
+
+        for pill in pills {
             left_spans.push(Span::styled(
-                format!(" ● {} ", notice),
+                format!("[{}] ", pill.key),
+                Style::default()
+                    .fg(bottom_colors::PILL_KEY_FG)
+                    .bg(bg_color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            left_spans.push(Span::styled(
+                format!("{}  ", pill.label),
+                Style::default()
+                    .fg(bottom_colors::PILL_LABEL_FG)
+                    .bg(bg_color),
+            ));
+        }
+
+        // 3. Transient Notice alert if present
+        if let Some(notice) = &self.active_notice {
+            left_spans.push(Span::styled("│ ", Style::default().fg(bottom_colors::PILL_LABEL_FG)));
+            left_spans.push(Span::styled(
+                format!("● {} ", notice),
                 Style::default()
                     .fg(bottom_colors::NOTICE_FG)
                     .bg(bottom_colors::BG_BAR)
                     .add_modifier(Modifier::BOLD),
             ));
-        } else {
-            let pills = match self.mode {
-                AppMode::Normal => BottomBar::normal_action_pills(),
-                AppMode::PtyInteract => BottomBar::pty_action_pills(),
-            };
-
-            for pill in pills {
-                left_spans.push(Span::styled(
-                    format!("[{}] ", pill.key),
-                    Style::default()
-                        .fg(bottom_colors::PILL_KEY_FG)
-                        .bg(bg_color)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                left_spans.push(Span::styled(
-                    format!("{}  ", pill.label),
-                    Style::default()
-                        .fg(bottom_colors::PILL_LABEL_FG)
-                        .bg(bg_color),
-                ));
-            }
         }
 
         // 3. Right Segment: PTY Platform & Encoding status pill
@@ -254,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_bottom_bar_normal_mode_action_pills() {
-        let backend = TestBackend::new(140, 1);
+        let backend = TestBackend::new(180, 1);
         let mut terminal = Terminal::new(backend).unwrap();
 
         let bar = BottomBar::new(AppMode::Normal).pty_backend("POSIX PTY");
@@ -266,11 +267,12 @@ mod tests {
             .unwrap();
 
         let term_buf = terminal.backend().buffer();
-        let content: String = (0..140).map(|x| term_buf[(x, 0)].symbol()).collect();
+        let content: String = (0..180).map(|x| term_buf[(x, 0)].symbol()).collect();
 
         assert!(content.contains("NORMAL MODE"), "Must contain mode indicator");
         assert!(content.contains("[?]"), "Must contain help pill");
         assert!(content.contains("[e]"), "Must contain settings pill");
+        assert!(content.contains("[r]"), "Must contain restart pill");
         assert!(content.contains("[m]"), "Must contain directive pill");
         assert!(content.contains("[s]"), "Must contain split pill");
         assert!(content.contains("[d]"), "Must contain edit pill");
@@ -282,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_bottom_bar_pty_mode_action_pills() {
-        let backend = TestBackend::new(160, 1);
+        let backend = TestBackend::new(180, 1);
         let mut terminal = Terminal::new(backend).unwrap();
 
         let bar = BottomBar::new(AppMode::PtyInteract).pty_backend("ConPTY");
@@ -294,7 +296,7 @@ mod tests {
             .unwrap();
 
         let term_buf = terminal.backend().buffer();
-        let content: String = (0..160).map(|x| term_buf[(x, 0)].symbol()).collect();
+        let content: String = (0..180).map(|x| term_buf[(x, 0)].symbol()).collect();
 
         assert!(content.contains("PTY INTERACT"), "Must contain PTY mode indicator");
         assert!(content.contains("Esc Esc / Ctrl+B"), "Must contain outer normal exit pill");

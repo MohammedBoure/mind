@@ -72,6 +72,8 @@ The engine operates in two modal states:
 | `i` / `Enter` / `a` | Normal | `enter_pty` | Enter PTY Insert Mode |
 | `Ctrl+B` / `F12` / `Esc Esc` | PtyInteract | `enter_normal` | Exit to Normal Command Mode |
 | `Tab` / `Shift+Tab` | Normal | `switch_pane_focus` | Switch focus between Coordinator & Worker pane |
+| `e` / `Ctrl+E` | Normal / Pty | `agent_config_modal` | Open Agent Settings Modal (Enter/r to restart tab, s save, a restart all) |
+| `r` / `Ctrl+R` | Normal / Pty | `restart_tab` | Restart focused tab with its assigned agy instance |
 | `1`..`9` | Normal | `jump_worker_tab` | Fast jump to worker tab #1..#9 |
 | `h` / `l` | Normal | `cycle_worker_tab` | Cycle worker tabs left / right |
 | `s` | Normal | `toggle_split` | Toggle 50/50 Dual-Pane vs Full-Screen |

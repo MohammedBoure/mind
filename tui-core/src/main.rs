@@ -424,6 +424,37 @@ async fn run_benchmarks() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// ── Pane Geometry Calculation ────────────────────────────────────────
+
+fn compute_pane_geometries(
+    width: u16,
+    height: u16,
+    is_split_view: bool,
+    _focused_pane: FocusedPane,
+) -> ((u16, u16), (u16, u16)) {
+    let workspace_height = height.saturating_sub(2);
+    let workspace_width = width;
+
+    if is_split_view {
+        let left_width = workspace_width / 2;
+        let right_width = workspace_width.saturating_sub(left_width);
+
+        let coord_cols = left_width.saturating_sub(2).max(10);
+        let coord_rows = workspace_height.saturating_sub(2).max(5);
+
+        let worker_cols = right_width.saturating_sub(2).max(10);
+        let worker_rows = workspace_height.saturating_sub(3 + 2).max(5);
+
+        ((coord_rows, coord_cols), (worker_rows, worker_cols))
+    } else {
+        let coord_cols = workspace_width.saturating_sub(2).max(10);
+        let coord_rows = workspace_height.saturating_sub(2).max(5);
+        let worker_cols = workspace_width.saturating_sub(2).max(10);
+        let worker_rows = workspace_height.saturating_sub(3 + 2).max(5);
+        ((coord_rows, coord_cols), (worker_rows, worker_cols))
+    }
+}
+
 // ── Interactive Dual-Pane TUI Workspace (`agi`) ─────────────────────
 
 async fn run_tui_app(
@@ -448,6 +479,10 @@ async fn run_tui_app(
             list.first().map(|s| s.name.clone()).unwrap_or_else(|| "default".to_string())
         });
 
+    let (init_w, init_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+    let ((init_c_r, init_c_c), (init_w_r, init_w_c)) =
+        compute_pane_geometries(init_w, init_h, true, FocusedPane::Coordinator);
+
     // Restore existing session or provision new default
     if engine.session_manager.store().get_session(&target_name)?.is_some() {
         let _ = engine.session_manager.load_and_restore_session(&target_name, shell_cmd, rows, cols);
@@ -455,7 +490,7 @@ async fn run_tui_app(
         let _ = engine.session_manager.create_and_launch_session(&target_name, shell_cmd, rows, cols);
     }
 
-    engine.resize_all(rows, cols);
+    engine.resize_panes(init_c_r, init_c_c, init_w_r, init_w_c);
 
     let mut current_screen = if start_in_picker {
         AppScreen::SessionPicker
@@ -586,8 +621,21 @@ async fn run_tui_app(
                     if let Some(ref mut modal) = agent_config_modal {
                         match modal.handle_key(&key) {
                             AgentConfigModalAction::Save { tab_id, new_slot_id, restart, .. } => {
+                                let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                                let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                                    t_w,
+                                    t_h,
+                                    is_split_view,
+                                    engine.session_manager.focused_pane(),
+                                );
+                                let (p_r, p_c) = if tab_id == "coordinator" || tab_id == "agy1" {
+                                    (c_r, c_c)
+                                } else {
+                                    (w_r, w_c)
+                                };
+
                                 if restart {
-                                    match engine.session_manager.restart_worker_with_slot(&tab_id, &new_slot_id, rows, cols) {
+                                    match engine.session_manager.restart_worker_with_slot(&tab_id, &new_slot_id, p_r, p_c) {
                                         Ok(_) => {
                                             active_modal_notice = Some(format!("Tab '{}' updated & restarted with {}", tab_id, new_slot_id));
                                         }
@@ -597,7 +645,25 @@ async fn run_tui_app(
                                     }
                                 } else {
                                     let _ = engine.session_manager.reassign_worker_slot(&tab_id, &new_slot_id);
-                                    active_modal_notice = Some(format!("Tab '{}' assigned to {}", tab_id, new_slot_id));
+                                    active_modal_notice = Some(format!("Tab '{}' assigned to {} (press 'r' to restart)", tab_id, new_slot_id));
+                                }
+                                agent_config_modal = None;
+                            }
+                            AgentConfigModalAction::RestartAll => {
+                                let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                                let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                                    t_w,
+                                    t_h,
+                                    is_split_view,
+                                    engine.session_manager.focused_pane(),
+                                );
+                                match engine.session_manager.restart_all_sessions(c_r, c_c, w_r, w_c) {
+                                    Ok(_) => {
+                                        active_modal_notice = Some("All tabs saved & restarted successfully".into());
+                                    }
+                                    Err(e) => {
+                                        active_modal_notice = Some(format!("Error restarting all tabs: {}", e));
+                                    }
                                 }
                                 agent_config_modal = None;
                             }
@@ -734,6 +800,44 @@ async fn run_tui_app(
                             continue;
                         }
 
+                        // Leader Key 6: Ctrl+R -> Restart currently focused tab
+                        if (key.code == KeyCode::Char('r') || key.code == KeyCode::Char('R'))
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                            let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                                t_w,
+                                t_h,
+                                is_split_view,
+                                engine.session_manager.focused_pane(),
+                            );
+                            let (tab_id, slot_id, p_r, p_c) = match engine.session_manager.focused_pane() {
+                                FocusedPane::Coordinator => {
+                                    let s = engine.session_manager.coordinator().map(|c| c.slot_id.clone()).unwrap_or_else(|| "agy1".into());
+                                    ("coordinator".to_string(), s, c_r, c_c)
+                                }
+                                FocusedPane::Workers(idx) => {
+                                    let workers = engine.session_manager.workers();
+                                    if let Some(w) = workers.get(idx) {
+                                        (w.id.clone(), w.slot_id.clone(), w_r, w_c)
+                                    } else {
+                                        ("".to_string(), "".to_string(), 24, 80)
+                                    }
+                                }
+                            };
+                            if !tab_id.is_empty() {
+                                match engine.session_manager.restart_worker_with_slot(&tab_id, &slot_id, p_r, p_c) {
+                                    Ok(_) => {
+                                        active_modal_notice = Some(format!("Restarted {} ({})", tab_id, slot_id));
+                                    }
+                                    Err(e) => {
+                                        active_modal_notice = Some(format!("Error restarting {}: {}", tab_id, e));
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
                         // Leader Key 5: F1 -> Open Shortcuts Reference
                         if key.code == KeyCode::F(1) {
                             help_modal = Some(HelpModal::new(theme));
@@ -818,6 +922,46 @@ async fn run_tui_app(
                         continue;
                     }
 
+                    // 'r', 'R', or Ctrl+R: Restart active focused tab with its assigned agy slot
+                    if key.code == KeyCode::Char('r')
+                        || key.code == KeyCode::Char('R')
+                        || ((key.code == KeyCode::Char('r') || key.code == KeyCode::Char('R'))
+                            && key.modifiers.contains(KeyModifiers::CONTROL))
+                    {
+                        let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                        let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                            t_w,
+                            t_h,
+                            is_split_view,
+                            engine.session_manager.focused_pane(),
+                        );
+                        let (tab_id, slot_id, p_r, p_c) = match engine.session_manager.focused_pane() {
+                            FocusedPane::Coordinator => {
+                                let s = engine.session_manager.coordinator().map(|c| c.slot_id.clone()).unwrap_or_else(|| "agy1".into());
+                                ("coordinator".to_string(), s, c_r, c_c)
+                            }
+                            FocusedPane::Workers(idx) => {
+                                let workers = engine.session_manager.workers();
+                                if let Some(w) = workers.get(idx) {
+                                    (w.id.clone(), w.slot_id.clone(), w_r, w_c)
+                                } else {
+                                    ("".to_string(), "".to_string(), 24, 80)
+                                }
+                            }
+                        };
+                        if !tab_id.is_empty() {
+                            match engine.session_manager.restart_worker_with_slot(&tab_id, &slot_id, p_r, p_c) {
+                                Ok(_) => {
+                                    active_modal_notice = Some(format!("Restarted {} ({})", tab_id, slot_id));
+                                }
+                                Err(e) => {
+                                    active_modal_notice = Some(format!("Error restarting {}: {}", tab_id, e));
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     // 'i', Enter, 'a': Enter PTY_INTERACT (Insert) mode
                     if key.code == KeyCode::Char('i')
                         || key.code == KeyCode::Char('I')
@@ -833,6 +977,14 @@ async fn run_tui_app(
                     // Tab / Shift+Tab: Cycle focus between Coordinator pane and Worker pane
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         engine.session_manager.switch_pane_focus();
+                        let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                        let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                            t_w,
+                            t_h,
+                            is_split_view,
+                            engine.session_manager.focused_pane(),
+                        );
+                        engine.resize_panes(c_r, c_c, w_r, w_c);
                         let pane_name = match engine.session_manager.focused_pane() {
                             FocusedPane::Coordinator => "Primary Coordinator",
                             FocusedPane::Workers(_) => "Worker Tab Viewport",
@@ -844,6 +996,14 @@ async fn run_tui_app(
                     // 's': Toggle between 50/50 Dual-Pane Split and Full-Screen Focused Pane
                     if key.code == KeyCode::Char('s') || key.code == KeyCode::Char('S') {
                         is_split_view = !is_split_view;
+                        let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                        let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                            t_w,
+                            t_h,
+                            is_split_view,
+                            engine.session_manager.focused_pane(),
+                        );
+                        engine.resize_panes(c_r, c_c, w_r, w_c);
                         active_modal_notice = Some(if is_split_view {
                             "Split View: 50/50 Dual-Pane Active".into()
                         } else {
@@ -965,7 +1125,13 @@ async fn run_tui_app(
                     }
                 }
                 AppEvent::Resize(r, c) => {
-                    engine.resize_all(r, c);
+                    let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                        c,
+                        r,
+                        is_split_view,
+                        engine.session_manager.focused_pane(),
+                    );
+                    engine.resize_panes(c_r, c_c, w_r, w_c);
                 }
                 AppEvent::Tick => {}
                 AppEvent::Alarm(alarm) => {

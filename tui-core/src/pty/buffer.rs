@@ -37,7 +37,6 @@ impl Default for ScreenCell {
 }
 
 /// Virtual screen buffer with in-memory ANSI state machine and scrollback history.
-#[derive(Debug)]
 pub struct ScreenBuffer {
     pub rows: usize,
     pub cols: usize,
@@ -52,7 +51,23 @@ pub struct ScreenBuffer {
     current_dim: bool,
     current_italic: bool,
     current_underline: bool,
+    saved_cursor: Option<(usize, usize)>,
+    stream_parser: Option<Parser>,
     version: u64,
+}
+
+impl std::fmt::Debug for ScreenBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScreenBuffer")
+            .field("rows", &self.rows)
+            .field("cols", &self.cols)
+            .field("cursor_row", &self.cursor_row)
+            .field("cursor_col", &self.cursor_col)
+            .field("cells_count", &self.cells.len())
+            .field("scrollback_len", &self.scrollback.len())
+            .field("version", &self.version)
+            .finish()
+    }
 }
 
 impl ScreenBuffer {
@@ -74,6 +89,8 @@ impl ScreenBuffer {
             current_dim: false,
             current_italic: false,
             current_underline: false,
+            saved_cursor: None,
+            stream_parser: Some(Parser::new()),
             version: 0,
         }
     }
@@ -89,9 +106,12 @@ impl ScreenBuffer {
     }
 
     /// Process incoming raw byte slice from PTY master stream.
+    /// Preserves internal parser state across chunk boundaries so multi-byte sequences
+    /// and split ANSI escape codes (e.g. \x1b[2K, cursor moves, multibyte UTF-8) are never corrupted.
     pub fn process_bytes(&mut self, bytes: &[u8]) {
-        let mut parser = Parser::new();
+        let mut parser = std::mem::take(&mut self.stream_parser).unwrap_or_else(Parser::new);
         parser.advance(self, bytes);
+        self.stream_parser = Some(parser);
         self.touch();
     }
 
@@ -311,6 +331,11 @@ impl ScreenBuffer {
 
 impl Perform for ScreenBuffer {
     fn print(&mut self, c: char) {
+        // Deferred autowrap: only wrap when another character is output past column bounds
+        if self.cursor_col >= self.cols {
+            self.cursor_col = 0;
+            self.linefeed();
+        }
         if self.cursor_row < self.rows && self.cursor_col < self.cols {
             self.cells[self.cursor_row][self.cursor_col] = ScreenCell {
                 c,
@@ -322,16 +347,12 @@ impl Perform for ScreenBuffer {
                 underline: self.current_underline,
             };
             self.cursor_col += 1;
-            if self.cursor_col >= self.cols {
-                self.cursor_col = 0;
-                self.linefeed();
-            }
         }
     }
 
     fn execute(&mut self, byte: u8) {
         match byte {
-            b'\n' => self.linefeed(),
+            b'\n' | 0x0b | 0x0c => self.linefeed(),
             b'\r' => self.carriage_return(),
             b'\t' => {
                 let tab_stop = 8;
@@ -350,7 +371,33 @@ impl Perform for ScreenBuffer {
     fn put(&mut self, _byte: u8) {}
     fn unhook(&mut self) {}
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+        match byte {
+            b'7' => {
+                // DECSC - Save cursor
+                self.saved_cursor = Some((self.cursor_row, self.cursor_col));
+            }
+            b'8' => {
+                // DECRC - Restore cursor
+                if let Some((r, c)) = self.saved_cursor {
+                    self.cursor_row = r.min(self.rows.saturating_sub(1));
+                    self.cursor_col = c.min(self.cols.saturating_sub(1));
+                }
+            }
+            b'M' => {
+                // Reverse index (scroll down if at top)
+                if self.cursor_row == 0 {
+                    if !self.cells.is_empty() {
+                        self.cells.pop();
+                        self.cells.insert(0, vec![ScreenCell::default(); self.cols]);
+                    }
+                } else {
+                    self.cursor_row = self.cursor_row.saturating_sub(1);
+                }
+            }
+            _ => {}
+        }
+    }
 
     fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, action: char) {
         let p: Vec<u16> = params.iter().map(|sub| sub[0]).collect();
@@ -381,6 +428,30 @@ impl Perform for ScreenBuffer {
                 // Cursor backward
                 let n = p.first().copied().unwrap_or(1).max(1) as usize;
                 self.cursor_col = self.cursor_col.saturating_sub(n);
+            }
+            'G' | '\'' => {
+                // CHA / HPA - Cursor Horizontal Absolute (1-based column)
+                let c = p.first().copied().unwrap_or(1).max(1) as usize - 1;
+                self.cursor_col = c.min(self.cols.saturating_sub(1));
+            }
+            'd' => {
+                // VPA - Vertical Position Absolute (1-based row)
+                let r = p.first().copied().unwrap_or(1).max(1) as usize - 1;
+                self.cursor_row = r.min(self.rows.saturating_sub(1));
+            }
+            'E' => {
+                // CNL - Cursor Next Line
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                for _ in 0..n {
+                    self.linefeed();
+                }
+                self.cursor_col = 0;
+            }
+            'F' => {
+                // CPL - Cursor Previous Line
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                self.cursor_row = self.cursor_row.saturating_sub(n);
+                self.cursor_col = 0;
             }
             'J' => {
                 // Erase in display
@@ -448,6 +519,96 @@ impl Perform for ScreenBuffer {
                         }
                         _ => {}
                     }
+                }
+            }
+            'X' => {
+                // ECH - Erase Character (clear n characters from cursor without moving cursor)
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                if self.cursor_row < self.rows {
+                    let end = (self.cursor_col + n).min(self.cols);
+                    for c in self.cursor_col..end {
+                        self.cells[self.cursor_row][c] = ScreenCell::default();
+                    }
+                }
+            }
+            'P' => {
+                // DCH - Delete Character
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                if self.cursor_row < self.rows && self.cursor_col < self.cols {
+                    let row = &mut self.cells[self.cursor_row];
+                    for i in self.cursor_col..self.cols {
+                        if i + n < self.cols {
+                            row[i] = row[i + n];
+                        } else {
+                            row[i] = ScreenCell::default();
+                        }
+                    }
+                }
+            }
+            '@' => {
+                // ICH - Insert Character
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                if self.cursor_row < self.rows && self.cursor_col < self.cols {
+                    let row = &mut self.cells[self.cursor_row];
+                    for i in (self.cursor_col..self.cols).rev() {
+                        if i >= self.cursor_col + n {
+                            row[i] = row[i - n];
+                        } else {
+                            row[i] = ScreenCell::default();
+                        }
+                    }
+                }
+            }
+            'L' => {
+                // IL - Insert Line
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                if self.cursor_row < self.rows {
+                    for _ in 0..n {
+                        if self.cursor_row < self.cells.len() {
+                            self.cells.insert(self.cursor_row, vec![ScreenCell::default(); self.cols]);
+                            self.cells.truncate(self.rows);
+                        }
+                    }
+                }
+            }
+            'M' => {
+                // DL - Delete Line
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                if self.cursor_row < self.rows {
+                    for _ in 0..n {
+                        if self.cursor_row < self.cells.len() {
+                            self.cells.remove(self.cursor_row);
+                            self.cells.push(vec![ScreenCell::default(); self.cols]);
+                        }
+                    }
+                }
+            }
+            'S' => {
+                // SU - Scroll Up
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                for _ in 0..n {
+                    self.linefeed();
+                }
+            }
+            'T' => {
+                // SD - Scroll Down
+                let n = p.first().copied().unwrap_or(1).max(1) as usize;
+                for _ in 0..n {
+                    if !self.cells.is_empty() {
+                        self.cells.pop();
+                        self.cells.insert(0, vec![ScreenCell::default(); self.cols]);
+                    }
+                }
+            }
+            's' => {
+                // ANSI.SYS Save cursor position
+                self.saved_cursor = Some((self.cursor_row, self.cursor_col));
+            }
+            'u' => {
+                // ANSI.SYS Restore cursor position
+                if let Some((r, c)) = self.saved_cursor {
+                    self.cursor_row = r.min(self.rows.saturating_sub(1));
+                    self.cursor_col = c.min(self.cols.saturating_sub(1));
                 }
             }
             'm' => {

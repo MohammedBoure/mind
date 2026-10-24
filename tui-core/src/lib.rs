@@ -121,6 +121,11 @@ impl TuiEngine {
         self.session_manager.broadcast_resize(rows, cols);
     }
 
+    /// Resize panes according to their specific layout geometry.
+    pub fn resize_panes(&self, coord_rows: u16, coord_cols: u16, worker_rows: u16, worker_cols: u16) {
+        self.session_manager.resize_panes(coord_rows, coord_cols, worker_rows, worker_cols);
+    }
+
     /// Gracefully shutdown all running worker PTY processes and clean up child sessions.
     pub fn shutdown(&self) {
         self.session_manager.shutdown_all();
