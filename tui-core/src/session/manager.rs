@@ -11,7 +11,9 @@ use crate::error::{Result, TuiError};
 use crate::events::types::AlarmEvent;
 use crate::ipc::mcp_server::McpBackend;
 use crate::ipc::types::WorkerSummary;
+use crate::session::identity::IdentityDiscovery;
 use crate::session::session_store::{SessionRecord, SessionStore, SessionWorkerConfig};
+use crate::session::shortcuts::{AgiConfig, ShortcutEngine};
 use crate::session::worker::{WorkerSession, WorkerState};
 
 /// Pane focus tracking between Primary Coordinator terminal and Worker tab multiplexer.
@@ -49,6 +51,7 @@ pub struct SessionManager {
     alarms: Arc<Mutex<Vec<AlarmEvent>>>,
     store: Arc<SessionStore>,
     current_session_name: Arc<Mutex<Option<String>>>,
+    auto_spawn_agy: Arc<Mutex<bool>>,
 }
 
 impl Default for SessionManager {
@@ -58,22 +61,25 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
-    /// Initialize an empty session manager with default session store.
+    /// Initialize a session manager with default session store and configuration.
     pub fn new() -> Self {
-        Self {
-            sessions: Arc::new(Mutex::new(Vec::new())),
-            coordinator: Arc::new(Mutex::new(None)),
-            workers: Arc::new(Mutex::new(Vec::new())),
-            focused_pane: Arc::new(Mutex::new(FocusedPane::Coordinator)),
-            app_mode: Arc::new(Mutex::new(AppMode::Normal)),
-            alarms: Arc::new(Mutex::new(Vec::new())),
-            store: Arc::new(SessionStore::new()),
-            current_session_name: Arc::new(Mutex::new(None)),
-        }
+        let config = ShortcutEngine::load_or_default();
+        Self::with_config(config.config())
     }
 
-    /// Initialize session manager with a custom session store.
+    /// Initialize session manager with a custom session store and default configuration.
     pub fn with_store(store: SessionStore) -> Self {
+        let config = ShortcutEngine::load_or_default();
+        Self::with_store_and_config(store, config.config())
+    }
+
+    /// Initialize session manager with custom configuration.
+    pub fn with_config(config: &AgiConfig) -> Self {
+        Self::with_store_and_config(SessionStore::new(), config)
+    }
+
+    /// Initialize session manager with custom session store and custom configuration.
+    pub fn with_store_and_config(store: SessionStore, config: &AgiConfig) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(Vec::new())),
             coordinator: Arc::new(Mutex::new(None)),
@@ -83,7 +89,73 @@ impl SessionManager {
             alarms: Arc::new(Mutex::new(Vec::new())),
             store: Arc::new(store),
             current_session_name: Arc::new(Mutex::new(None)),
+            auto_spawn_agy: Arc::new(Mutex::new(config.general.auto_spawn_agy)),
         }
+    }
+
+    /// Whether automatic spawning of real agy CLI inside PTY terminals is enabled.
+    pub fn auto_spawn_agy(&self) -> bool {
+        *self.auto_spawn_agy.lock()
+    }
+
+    /// Set automatic spawning of real agy CLI.
+    pub fn set_auto_spawn_agy(&self, enabled: bool) {
+        *self.auto_spawn_agy.lock() = enabled;
+    }
+
+    /// Resolve effective command and arguments for a session worker.
+    /// If `auto_spawn_agy` is enabled and no custom non-agy command was requested,
+    /// attempts to locate executable `agy` binary, falling back to system shell.
+    pub fn resolve_worker_command(
+        &self,
+        w_cfg: &SessionWorkerConfig,
+        fallback_shell: &str,
+    ) -> (String, Vec<String>) {
+        if let Some(ref explicit_cmd) = w_cfg.command {
+            if explicit_cmd != "agy" && !explicit_cmd.is_empty() {
+                return (explicit_cmd.clone(), w_cfg.args.clone().unwrap_or_default());
+            }
+        }
+
+        if self.auto_spawn_agy() {
+            if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
+                return (
+                    agy_bin.to_string_lossy().to_string(),
+                    w_cfg.args.clone().unwrap_or_default(),
+                );
+            }
+        }
+
+        (
+            fallback_shell.to_string(),
+            w_cfg.args.clone().unwrap_or_default(),
+        )
+    }
+
+    /// Spawn dedicated coordinator session with automatic agy spawning or fallback shell.
+    pub fn spawn_coordinator_auto(
+        &self,
+        fallback_shell: Option<&str>,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Arc<WorkerSession>> {
+        let shell = fallback_shell.unwrap_or(if cfg!(windows) { "powershell.exe" } else { "bash" });
+        let cmd = if self.auto_spawn_agy() { "agy" } else { shell };
+        self.spawn_session("coordinator", "agy1", cmd, vec![], None, HashMap::new(), rows, cols)
+    }
+
+    /// Spawn a worker session with automatic agy spawning or fallback shell.
+    pub fn spawn_worker_auto(
+        &self,
+        id: impl Into<String>,
+        slot_id: impl Into<String>,
+        fallback_shell: Option<&str>,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Arc<WorkerSession>> {
+        let shell = fallback_shell.unwrap_or(if cfg!(windows) { "powershell.exe" } else { "bash" });
+        let cmd = if self.auto_spawn_agy() { "agy" } else { shell };
+        self.spawn_session(id, slot_id, cmd, vec![], None, HashMap::new(), rows, cols)
     }
 
     /// Access reference to underlying persistent SessionStore.
@@ -298,8 +370,7 @@ impl SessionManager {
         *self.focused_pane.lock() = FocusedPane::Coordinator;
 
         for (idx, w_cfg) in session_record.workers.iter().enumerate() {
-            let cmd = w_cfg.command.as_deref().unwrap_or(default_cmd);
-            let args = w_cfg.args.clone().unwrap_or_default();
+            let (cmd, args) = self.resolve_worker_command(w_cfg, default_cmd);
             let env = w_cfg.env.clone().unwrap_or_default();
 
             let worker = self.spawn_session(
@@ -401,12 +472,27 @@ impl SessionManager {
     ) -> Result<Arc<WorkerSession>> {
         let id_str = id.into();
         let slot_str = slot_id.into();
+        let cmd_str = command.into();
+
+        let (final_cmd, final_args) = if cmd_str == "agy"
+            || cmd_str == "auto"
+            || (cmd_str.is_empty() && self.auto_spawn_agy())
+        {
+            if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
+                (agy_bin.to_string_lossy().to_string(), args)
+            } else {
+                let fallback = if cfg!(windows) { "powershell.exe" } else { "bash" };
+                (fallback.to_string(), vec![])
+            }
+        } else {
+            (cmd_str, args)
+        };
 
         let session = Arc::new(WorkerSession::spawn(
             id_str.clone(),
             slot_str.clone(),
-            command,
-            args,
+            final_cmd,
+            final_args,
             cwd,
             env,
             rows,

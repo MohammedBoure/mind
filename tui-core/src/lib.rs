@@ -51,11 +51,11 @@ impl Default for TuiEngine {
 impl TuiEngine {
     /// Initialize a new TUI engine instance with specified tick interval and MCP bridge URL.
     pub fn new(tick_ms: u64, mcp_url: impl Into<String>) -> Self {
-        let session_manager = Arc::new(SessionManager::new());
+        let shortcut_engine = Arc::new(ShortcutEngine::load_or_default());
+        let session_manager = Arc::new(SessionManager::with_config(shortcut_engine.config()));
         let event_loop = Arc::new(Mutex::new(EventLoop::new(tick_ms)));
         let mcp_client = McpClient::new(mcp_url);
         let mcp_server = Arc::new(EmbeddedMcpServer::new(Arc::clone(&session_manager) as Arc<dyn McpBackend>));
-        let shortcut_engine = Arc::new(ShortcutEngine::load_or_default());
 
         Self {
             session_manager,

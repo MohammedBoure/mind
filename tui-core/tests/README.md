@@ -33,6 +33,7 @@ Target system modules covered:
 | [`shortcut_parity_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/shortcut_parity_test.rs) | Shortcut Engine & Python Parity | `session::shortcuts` | Exact Python-parity shortcuts (`q`, `?`, `Tab`, `Shift+Tab`, `BackTab`, `m`, `d`, `o`, `s`, `n`, `1`..`9`), pass-through for unmapped keys, custom TOML configuration loading (`~/.config/mind/agi.toml`), and conflict-free tab switching. |
 | [`modal_state_machine_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/modal_state_machine_test.rs) | Modal State Transitions & Screen Flow | `ui::*` | Modal open/close state transitions (`HelpModal`), `DirectiveModal` priority cycling (Normal -> High -> Critical -> Low) and input submission/cancellation, `DirectiveEditorModal` multiline buffer navigation, line editing, saving, and cancelling, `NewWorkerModal` slot selection & spawn dispatch, and `SessionPickerScreen` list navigation, creation, opening, deleting, and exit actions. |
 | [`parity_e2e_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/parity_e2e_test.rs) | Python 1:1 Parity End-to-End Suite | `ui::workspace`, `ui::header_bar`, `ui::bottom_bar`, `session::manager`, `main` | End-to-end verification of dual-pane coordinator/worker multiplexer, Vim dual-mode (`NORMAL` vs `PTY_INTERACT`) and leader exits (`Esc Esc` within 350ms, `Ctrl+B`, `F12`), Zellij-style 1-line top dock pills (brand logo, session pill, mode badge, active worker count, quota progress bar, MCP status), bottom action pills and architecture badge, and CLI subcommands (`doctor`, `usage`, `usage --json`, `sessions`, `sessions --clean`, `bench`). |
+| [`auto_spawn_agy_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/auto_spawn_agy_test.rs) | Auto-Spawn Real `agy` CLI & Slot Isolation | `session::identity`, `session::worker`, `session::manager`, `session::shortcuts` | Verification of automatic `agy` CLI detection (`/home/pluto/.local/bin/agy`, `/usr/local/bin/agy`, `which agy`), Coordinator slot 1 environment isolation (`USERPROFILE`, `HOME`, `AGY_SLOT=1`, `AGY_INSTANCE_DIR`), Worker slot [x] environment isolation, `AgiConfig` `auto_spawn_agy` option, command resolution, and graceful fallback to system shell. |
 
 ---
 
@@ -71,6 +72,9 @@ cargo test --test modal_state_machine_test --manifest-path tui-core/Cargo.toml
 
 # Run Python 1:1 Parity End-to-End Tests
 cargo test --test parity_e2e_test --manifest-path tui-core/Cargo.toml
+
+# Run Auto-Spawn Real agy CLI & Slot Isolation Tests
+cargo test --test auto_spawn_agy_test --manifest-path tui-core/Cargo.toml
 ```
 
 ### Run Tests with Full Tracing Output
@@ -102,4 +106,7 @@ RUST_LOG=debug cargo test --test pty_burst_test -- --nocapture
    - Modal dialogs (`HelpModal`, `DirectiveModal`, `DirectiveEditorModal`, `NewWorkerModal`) manage encapsulated lifecycle states. Modals safely capture input while active and cleanly return control to the underlying screen upon submission or dismissal (`Esc`), preventing trapped focus states.
 10. **Vim Dual-Mode State Machine & 350ms Leader Exit Threshold:**
     - Modal engine transitions between `NORMAL` and `PTY_INTERACT`. Escaping raw PTY pass-through without dropping single Esc commands (e.g., in vim inside child PTY) is handled through an exact 350ms double-escape detection window, or immediate `Ctrl+B` / `F12` escape keys.
+11. **Auto-Spawning Real `agy` CLI & Slot Isolation Provisioning:**
+    - Automatic detection locates executable `agy` binary across standard host locations (`/home/pluto/.local/bin/agy`, `/usr/local/bin/agy`, `which agy`). If unavailable or non-executable, the session manager transparently falls back to the system shell. When slot instance directories do not yet exist, they are automatically provisioned to prevent child process `chdir(HOME)` `ENOENT` failures.
+
 

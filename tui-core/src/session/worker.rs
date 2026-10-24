@@ -39,6 +39,16 @@ pub struct WorkerSession {
 }
 
 impl WorkerSession {
+    /// Discover host agy executable binary across system paths.
+    pub fn find_agy_binary() -> Option<PathBuf> {
+        IdentityDiscovery::find_agy_binary()
+    }
+
+    /// Check if agy binary is executable on this system.
+    pub fn is_agy_available() -> bool {
+        IdentityDiscovery::find_agy_binary().is_some()
+    }
+
     /// Spawn a new worker session with dedicated PTY process and dynamic slot identity linking.
     pub fn spawn(
         id: impl Into<String>,
@@ -52,14 +62,27 @@ impl WorkerSession {
     ) -> Result<Self> {
         let id = id.into();
         let slot_id = slot_id.into();
+        let command_str = command.into();
 
-        // Discover host slot metadata
+        // 1. Resolve command: if "agy" or "auto", resolve via find_agy_binary with fallback shell
+        let (resolved_cmd, resolved_args) = if command_str == "agy" || command_str == "auto" {
+            if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
+                (agy_bin.to_string_lossy().to_string(), args)
+            } else {
+                let fallback = if cfg!(windows) { "powershell.exe" } else { "bash" };
+                (fallback.to_string(), vec![])
+            }
+        } else {
+            (command_str, args)
+        };
+
+        // 2. Discover host slot metadata
         let discovered_slot = IdentityDiscovery::find_slot(&slot_id);
         let default_role = discovered_slot
             .as_ref()
             .map(|s| s.role.clone())
             .unwrap_or_else(|| match slot_id.as_str() {
-                "agy1" | "1" => "Lead Orchestrator".to_string(),
+                "coordinator" | "agy1" | "1" => "Lead Orchestrator".to_string(),
                 "agy11" | "11" => "Backend Logic & Systems".to_string(),
                 "agy51" | "51" => "Frontend & UI/UX".to_string(),
                 "agy100" | "100" => "Testing & Verification".to_string(),
@@ -72,18 +95,16 @@ impl WorkerSession {
             .unwrap_or_else(|| "gemini-3.8-flash-high".to_string());
         let default_task = discovered_slot.as_ref().and_then(|s| s.task.clone());
 
-        // Merge slot isolation environment
+        // 3. Build & merge slot isolation environment (guaranteeing USERPROFILE, HOME, AGY_SLOT, AGY_INSTANCE_DIR)
         let mut final_env = env;
-        if let Some(slot) = &discovered_slot {
-            let isolation = IdentityDiscovery::build_slot_isolation_env(slot);
-            for (k, v) in isolation {
-                final_env.entry(k).or_insert(v);
-            }
+        let isolation = IdentityDiscovery::build_slot_env_by_id(&slot_id);
+        for (k, v) in isolation {
+            final_env.entry(k).or_insert(v);
         }
 
         let config = PtyConfig {
-            command: command.into(),
-            args,
+            command: resolved_cmd,
+            args: resolved_args,
             cwd,
             env: final_env,
             rows,

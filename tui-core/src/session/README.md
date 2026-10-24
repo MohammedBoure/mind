@@ -107,7 +107,55 @@ Exiting back to `Normal` mode is governed by explicit Leader keys:
 
 ---
 
-## 6. Environment & Configuration
+## 6. Auto-Spawning Real `agy` CLI & Slot Environment Isolation
+
+`SessionManager` and `WorkerSession` natively support automatically launching the real Google Antigravity (`agy`) CLI inside PTY terminals for both the Primary Coordinator and interactive Worker tabs, with full filesystem and identity isolation per agent slot.
+
+### A. Detection Flow for `agy` Binary (`find_agy_binary`)
+The engine discovers the executable binary through priority-ordered paths:
+1. `/home/pluto/.local/bin/agy` (and real host user's `~/.local/bin/agy`).
+2. `/usr/local/bin/agy`.
+3. `/usr/bin/agy`.
+4. PATH environment resolution via `which agy` (POSIX) or `where agy` (Windows).
+5. Instance slot fallback under `~/.local/share/agy-instances/agy11/bin/agy`.
+6. Verified executable permissions check (`mode & 0o111 != 0`).
+
+### B. Coordinator Isolated Environment (Slot 1 / `#primary-pane`)
+When spawning or restoring the Primary Coordinator:
+- Automatically launches `agy` with Coordinator environment:
+  - `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy1`
+  - `HOME`: `/home/pluto/.local/share/agy-instances/agy1`
+  - `AGY_SLOT`: `1`
+  - `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy1`
+  - `ANTIGRAVITY_APP_DATA_DIR`: `/home/pluto/.local/share/agy-instances/agy1/.gemini/antigravity-cli`
+  - `MIND_REAL_USER_HOME`: `/home/pluto`
+- Falls back cleanly to system shell (`bash` or `powershell.exe`) only if `agy` binary is not executable.
+
+### C. Worker Isolated Environments (Slot [x] / `#workers-pane`)
+When spawning or restoring interactive worker slots (e.g. `agy11`, `agy51`, `agy100`):
+- Automatically launches `agy` with the specific worker's isolated slot environment:
+  - `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy[x]`
+  - `HOME`: `/home/pluto/.local/share/agy-instances/agy[x]`
+  - `AGY_SLOT`: `[x]`
+  - `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]`
+  - `ANTIGRAVITY_APP_DATA_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]/.gemini/antigravity-cli`
+  - `MIND_REAL_USER_HOME`: `/home/pluto`
+
+### D. Configuration Option in `~/.config/mind/agi.toml`
+Controlled via the `[general]` configuration section:
+```toml
+[general]
+theme = "tokyo_night"
+tick_rate_ms = 50
+default_model = "gemini-3.8-flash-high"
+auto_spawn_agy = true  # (default: true). If false, spawns user default shell.
+```
+- When `auto_spawn_agy = true`: Spawns the detected `agy` CLI in all coordinator and worker PTYs.
+- When `auto_spawn_agy = false`: Spawns the user's default shell (`bash` or `powershell.exe`).
+
+---
+
+## 7. Environment & Configuration
 
 - Configuration files searched: `~/.config/mind/agi.toml` and `~/.mind/config.toml`.
 - Persistent session directory: `~/.mind/sessions/` and `~/.mind/sessions.json`.

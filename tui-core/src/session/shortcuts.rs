@@ -162,6 +162,10 @@ impl Default for ShortcutConfig {
     }
 }
 
+fn default_auto_spawn_agy() -> bool {
+    true
+}
+
 /// General settings section in `agi.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -169,6 +173,8 @@ pub struct GeneralConfig {
     pub tick_rate_ms: u64,
     pub default_session: Option<String>,
     pub default_model: String,
+    #[serde(default = "default_auto_spawn_agy")]
+    pub auto_spawn_agy: bool,
 }
 
 impl Default for GeneralConfig {
@@ -178,6 +184,7 @@ impl Default for GeneralConfig {
             tick_rate_ms: 50,
             default_session: None,
             default_model: "gemini-3.8-flash-high".to_string(),
+            auto_spawn_agy: true,
         }
     }
 }
@@ -185,7 +192,9 @@ impl Default for GeneralConfig {
 /// Root AGI configuration mapping `~/.config/mind/agi.toml` and `~/.mind/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgiConfig {
+    #[serde(default)]
     pub general: GeneralConfig,
+    #[serde(default)]
     pub shortcuts: ShortcutConfig,
 }
 

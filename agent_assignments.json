@@ -8,7 +8,7 @@
       "role": "Backend / Systems",
       "branch": "backend/agy11-auto-spawn-agy",
       "scope": "Auto-spawn real agy CLI inside PTY terminals: Coordinator spawns agy in slot 1 (agy1) environment, workers auto-spawn agy in their isolated slot directories (agy[x]) with complete environment isolation",
-      "status": "IN_PROGRESS"
+      "status": "COMPLETED"
     },
     {
       "agent_id": "agy51",

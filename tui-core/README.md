@@ -86,17 +86,29 @@ The engine operates in two modal states:
 
 ---
 
-## 3. Persistent Sessions & Real Slot Discovery
+## 3. Persistent Sessions, Real Slot Discovery & Auto-Spawning `agy` CLI
 
 1. **Persistent Sessions (`~/.mind/sessions/<name>.json`)**:
    - `SessionStore` persists multi-agent sessions, activity telemetry (`total_steps`, `total_interactions`, `last_activity`), and worker configurations.
    - Provides atomic write guarantees using sibling temporary files before atomic renames.
    - Automatically prunes stale/inactive sessions with `clean_sessions()`.
 
-2. **Real Agent Slot Identity (`IdentityDiscovery`)**:
+2. **Real Agent Slot Identity & Isolation (`IdentityDiscovery`)**:
    - Dynamically scans `/home/pluto/.local/share/agy-instances/agy[x]`.
    - Parses real roles from `.gemini/GEMINI.md` and models from `antigravity-cli/settings.json`.
-   - Proactively builds slot-isolated environments (`USERPROFILE`, `HOME`, `AGY_SLOT`, `ANTIGRAVITY_APP_DATA_DIR`).
+   - Proactively builds slot-isolated environments:
+     * `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy[x]`
+     * `HOME`: `/home/pluto/.local/share/agy-instances/agy[x]`
+     * `AGY_SLOT`: `[x]`
+     * `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]`
+     * `ANTIGRAVITY_APP_DATA_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]/.gemini/antigravity-cli`
+     * `MIND_REAL_USER_HOME`: `/home/pluto`
+
+3. **Auto-Spawning Real `agy` CLI (`auto_spawn_agy = true`)**:
+   - Automatically detects real `agy` binary across `/home/pluto/.local/bin/agy`, `/usr/local/bin/agy`, and `which agy`.
+   - Automatically spawns `agy` in the Coordinator (#primary-pane, Slot 1) and all interactive Worker tabs (#workers-pane, Slot [x]) with full slot isolation.
+   - Configurable via `[general] auto_spawn_agy = true` in `~/.config/mind/agi.toml` (defaults to true; if false, spawns user default shell).
+   - Graceful fallback: automatically falls back to system shell if `agy` binary is not executable.
 
 ---
 

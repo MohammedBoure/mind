@@ -166,6 +166,85 @@ impl IdentityDiscovery {
         }
     }
 
+    /// Detect real `agy` executable binary across standard host locations:
+    /// 1. `/home/pluto/.local/bin/agy` (and real user's `.local/bin/agy`)
+    /// 2. `/usr/local/bin/agy`
+    /// 3. PATH discovery (`which agy` / `where agy`)
+    /// 4. Instance slot bin fallbacks
+    pub fn find_agy_binary() -> Option<PathBuf> {
+        let real_home = Self::get_real_user_home();
+        let direct_candidates = [
+            PathBuf::from("/home/pluto/.local/bin/agy"),
+            real_home.join(".local").join("bin").join("agy"),
+            PathBuf::from("/usr/local/bin/agy"),
+            PathBuf::from("/usr/bin/agy"),
+        ];
+
+        for path in &direct_candidates {
+            if is_executable_binary(path) {
+                return Some(path.clone());
+            }
+        }
+
+        // Check via PATH using which/where
+        let which_cmd = if cfg!(windows) { "where" } else { "which" };
+        for name in &["agy", "agy.exe"] {
+            if let Ok(output) = std::process::Command::new(which_cmd).arg(name).output() {
+                if output.status.success() {
+                    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !s.is_empty() {
+                        let p = PathBuf::from(&s);
+                        if is_executable_binary(&p) {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Secondary check under agy-instances bin
+        let inst_bin = Self::get_instances_dir().join("agy11").join("bin").join("agy");
+        if is_executable_binary(&inst_bin) {
+            return Some(inst_bin);
+        }
+
+        None
+    }
+
+    /// Build isolated environment variables for spawning an agent process in a slot by ID string.
+    /// Supports slot string formats like "agy1", "1", "coordinator", "agy11", "51".
+    pub fn build_slot_env_by_id(slot_id: &str) -> HashMap<String, String> {
+        if let Some(slot) = Self::find_slot(slot_id) {
+            return Self::build_slot_isolation_env(&slot);
+        }
+
+        let parsed_id = Self::parse_slot_id(slot_id).unwrap_or(if slot_id == "coordinator" { 1 } else { 1 });
+        let inst_dir = Self::get_instances_dir().join(format!("agy{}", parsed_id));
+        if !inst_dir.exists() {
+            let _ = fs::create_dir_all(&inst_dir);
+        }
+        let inst_str = if inst_dir.is_dir() {
+            inst_dir.to_string_lossy().to_string()
+        } else {
+            Self::get_real_user_home().to_string_lossy().to_string()
+        };
+
+        let mut env = HashMap::new();
+        env.insert("USERPROFILE".to_string(), inst_str.clone());
+        env.insert("HOME".to_string(), inst_str.clone());
+        env.insert("AGY_SLOT".to_string(), parsed_id.to_string());
+        env.insert("AGY_INSTANCE_DIR".to_string(), inst_str.clone());
+        env.insert(
+            "ANTIGRAVITY_APP_DATA_DIR".to_string(),
+            inst_dir.join(".gemini").join("antigravity-cli").to_string_lossy().to_string(),
+        );
+
+        let real_home = Self::get_real_user_home().to_string_lossy().to_string();
+        env.insert("MIND_REAL_USER_HOME".to_string(), real_home);
+
+        env
+    }
+
     /// Build isolated environment variables for spawning an agent process in a slot.
     pub fn build_slot_isolation_env(slot: &AgentSlot) -> HashMap<String, String> {
         let mut env = HashMap::new();
@@ -361,4 +440,23 @@ fn simple_b64_decode(input: &str) -> std::result::Result<Vec<u8>, ()> {
     }
 
     Ok(out)
+}
+
+/// Check if a path points to an executable file.
+pub fn is_executable_binary(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = path.metadata() {
+            return meta.permissions().mode() & 0o111 != 0;
+        }
+        false
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }

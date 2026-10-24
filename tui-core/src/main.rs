@@ -105,31 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 // ── CLI Diagnostic Doctor (`agi doctor`) ─────────────────────────────
 
 fn which_agy() -> Option<String> {
-    for name in &["agy", "agy.exe"] {
-        if let Ok(output) = std::process::Command::new(if cfg!(windows) { "where" } else { "which" })
-            .arg(name)
-            .output()
-        {
-            if output.status.success() {
-                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !s.is_empty() {
-                    return Some(s);
-                }
-            }
-        }
-    }
-    let home = IdentityDiscovery::get_real_user_home();
-    let local_agy = home
-        .join(".local")
-        .join("share")
-        .join("agy-instances")
-        .join("agy11")
-        .join("bin")
-        .join("agy");
-    if local_agy.is_file() {
-        return Some(local_agy.to_string_lossy().to_string());
-    }
-    None
+    IdentityDiscovery::find_agy_binary().map(|p| p.to_string_lossy().to_string())
 }
 
 fn handle_doctor_cli() -> Result<(), Box<dyn std::error::Error>> {
@@ -645,10 +621,15 @@ async fn run_tui_app(
                                 let worker_name = format!("worker-{}", count);
                                 let slot_str = format!("agy{}", slot.slot_id);
                                 let isolation_env = IdentityDiscovery::build_slot_isolation_env(&slot);
+                                let spawn_cmd = if engine.session_manager.auto_spawn_agy() {
+                                    "agy"
+                                } else {
+                                    shell_cmd
+                                };
                                 let _ = engine.spawn_worker(
                                     worker_name,
                                     slot_str,
-                                    shell_cmd,
+                                    spawn_cmd,
                                     vec![],
                                     None,
                                     isolation_env,
