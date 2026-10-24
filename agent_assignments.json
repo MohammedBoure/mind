@@ -16,7 +16,7 @@
       "role": "Frontend & UI/UX",
       "branch": "frontend/agy51-python-parity-ui",
       "scope": "1:1 Python Mind Visual & Layout Parity: Zellij-style HeaderBar with logo/session/quota pill, dual-pane workspace (Primary Coordinator left, Worker tab switcher right), BottomBar with NORMAL/PTY_INTERACT badge and action pills, Tokyo Night styling, and exact modals",
-      "status": "PENDING_BACKEND"
+      "status": "IN_PROGRESS"
     },
     {
       "agent_id": "agy100",
