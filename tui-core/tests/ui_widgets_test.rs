@@ -13,11 +13,14 @@ use tui_core::pty::buffer::ScreenBuffer;
 use tui_core::session::identity::AgentSlot;
 use tui_core::session::session_store::{SessionRecord, SessionStore};
 use tui_core::session::worker::{WorkerSession, WorkerState};
+use tui_core::session::{AppMode, FocusedPane};
 use tui_core::ui::{
-    AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
-    DirectivePriority, GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction,
-    QuotaGaugesWidget, SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget,
-    StatusBarWidget, TerminalScreenWidget, Theme, WorkerListItem, WorkerListWidget,
+    AlertBadge, BottomBar, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal,
+    DirectiveModalAction, DirectivePriority, GaugeLayout, HeaderBar, HelpModal, NewWorkerModal,
+    NewWorkerModalAction, QuotaGaugesWidget, SelectWorkerModal, SelectWorkerModalAction,
+    SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget, StatusBarWidget,
+    TerminalScreenWidget, Theme, WorkerListItem, WorkerListWidget,
+    WorkspaceScreen,
 };
 
 #[test]
@@ -676,4 +679,153 @@ fn test_session_picker_screen_full_integration() {
         SessionPickerAction::Open(s) => assert_eq!(s.name, "swarm_alpha"),
         _ => panic!("Expected SessionPickerAction::Open"),
     }
+}
+
+#[test]
+fn test_header_bar_parity_integration() {
+    let header = HeaderBar::new("alpha_session")
+        .worker_count(4)
+        .mode(AppMode::Normal)
+        .quota_percent(80)
+        .mcp_port(8765)
+        .mcp_active(true);
+
+    let backend = TestBackend::new(140, 1);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&header, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let text: String = (0..140).map(|x| term_buf[(x, 0)].symbol()).collect();
+
+    assert!(text.contains("mind"), "Header must include 'mind' brand logo in cyan");
+    assert!(text.contains("alpha_session"), "Header must include active session name");
+    assert!(text.contains("NORMAL"), "Header must include mode indicator");
+    assert!(text.contains("4"), "Header must include worker count");
+    assert!(text.contains("active workers"), "Header must include worker telemetry");
+    assert!(text.contains("Quota:"), "Header must include quota label");
+    assert!(text.contains("80%"), "Header must include quota percent");
+    assert!(text.contains("8765"), "Header must include MCP status port");
+}
+
+#[test]
+fn test_bottom_bar_parity_integration() {
+    // 1. Normal mode check
+    let bottom_normal = BottomBar::new(AppMode::Normal).pty_backend("POSIX PTY");
+    let backend = TestBackend::new(160, 1);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&bottom_normal, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let text: String = (0..160).map(|x| term_buf[(x, 0)].symbol()).collect();
+
+    assert!(text.contains("NORMAL MODE"), "Must contain normal mode indicator");
+    assert!(text.contains("[?] Help"), "Must contain help pill");
+    assert!(text.contains("[m] Directive"), "Must contain directive pill");
+    assert!(text.contains("[s] Split"), "Must contain split pill");
+    assert!(text.contains("[d] Edit"), "Must contain edit pill");
+    assert!(text.contains("[c/n] New"), "Must contain new pill");
+    assert!(text.contains("[x] Close"), "Must contain close pill");
+    assert!(text.contains("[q] Quit"), "Must contain quit pill");
+    assert!(text.contains("POSIX PTY · UTF-8"), "Must contain architecture badge");
+
+    // 2. PTY Interact mode check
+    let bottom_pty = BottomBar::new(AppMode::PtyInteract).pty_backend("ConPTY");
+    terminal
+        .draw(|f| {
+            f.render_widget(&bottom_pty, f.area());
+        })
+        .unwrap();
+
+    let term_buf2 = terminal.backend().buffer();
+    let text2: String = (0..160).map(|x| term_buf2[(x, 0)].symbol()).collect();
+
+    assert!(text2.contains("PTY INTERACT"), "Must contain PTY mode indicator");
+    assert!(text2.contains("Esc Esc / Ctrl+B"), "Must contain exit leader pill");
+    assert!(text2.contains("Ctrl+C"), "Must contain interrupt pill");
+    assert!(text2.contains("ConPTY · UTF-8"), "Must contain ConPTY badge");
+}
+
+#[test]
+fn test_workspace_dual_pane_parity_integration() {
+    let area = Rect::new(0, 0, 120, 40);
+
+    // 1. Split view 50/50 side-by-side
+    let ws_split = WorkspaceScreen::new()
+        .split_view(true)
+        .focused_pane(FocusedPane::Coordinator);
+
+    let (left, right) = ws_split.compute_panes(area);
+    assert_eq!(left.width, 60, "Coordinator pane must be 50% width in split view");
+    assert_eq!(right.width, 60, "Worker multiplexer pane must be 50% width in split view");
+
+    // 2. Fullscreen expansion toggle on 's' for Coordinator
+    let ws_full_coord = WorkspaceScreen::new()
+        .split_view(false)
+        .focused_pane(FocusedPane::Coordinator);
+
+    let (left_c, right_c) = ws_full_coord.compute_panes(area);
+    assert_eq!(left_c.width, 120, "Coordinator pane must be 100% width in fullscreen");
+    assert_eq!(right_c.width, 0, "Worker multiplexer pane must be 0% width");
+
+    // 3. Fullscreen expansion toggle on 's' for Workers
+    let ws_full_workers = WorkspaceScreen::new()
+        .split_view(false)
+        .focused_pane(FocusedPane::Workers(0));
+
+    let (left_w, right_w) = ws_full_workers.compute_panes(area);
+    assert_eq!(left_w.width, 0, "Coordinator pane must be 0% width");
+    assert_eq!(right_w.width, 120, "Worker multiplexer pane must be 100% width in fullscreen");
+
+    // 4. Render dual-pane workspace widget
+    let backend = TestBackend::new(120, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            f.render_widget(&ws_split, f.area());
+        })
+        .unwrap();
+
+    let term_buf = terminal.backend().buffer();
+    let mut rendered = String::new();
+    for y in 0..20 {
+        for x in 0..120 {
+            rendered.push_str(term_buf[(x, y)].symbol());
+        }
+        rendered.push('\n');
+    }
+
+    assert!(rendered.contains("Primary Coordinator"), "Must render Coordinator pane title");
+    assert!(rendered.contains("Slot 1 agy1"), "Must display slot 1 agy1");
+    assert!(rendered.contains("Interactive Workers"), "Must render worker tab bar title");
+}
+
+#[test]
+fn test_select_worker_modal_search_filter_integration() {
+    let slots = vec![
+        AgentSlot::new(1, "agy1", std::path::PathBuf::from("/tmp/agy1"), "Coordinator", "gemini-3.8-flash-high", None, true, Some("lead@mind.org".into())),
+        AgentSlot::new(51, "agy51", std::path::PathBuf::from("/tmp/agy51"), "Frontend Engineer", "gemini-3.8-flash-high", None, true, Some("frontend@mind.org".into())),
+        AgentSlot::new(100, "agy100", std::path::PathBuf::from("/tmp/agy100"), "QA Tester", "gemini-3.8-flash-high", None, true, Some("test@mind.org".into())),
+    ];
+
+    let mut modal = SelectWorkerModal::new(slots.clone());
+
+    // Filter by "frontend"
+    for c in "frontend".chars() {
+        modal.handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    assert_eq!(modal.filtered_slots().len(), 1);
+    assert_eq!(modal.filtered_slots()[0].slot_id, 51);
+
+    // Select with Enter
+    let action = modal.handle_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(action, SelectWorkerModalAction::Spawn(slots[1].clone()));
+    assert!(!modal.is_open);
 }

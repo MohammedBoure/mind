@@ -181,15 +181,19 @@ tui-core/
 │   │   ├── shortcuts.rs # Configurable shortcut engine (~/.config/mind/agi.toml)
 │   │   ├── worker.rs   # WorkerSession (state, PTY, scrollback offset, idle detection)
 │   │   └── manager.rs  # SessionManager & McpBackend implementation
-│   └── ui/             # Accessible visual Ratatui widgets
+│   └── ui/             # Accessible visual Ratatui widgets (1:1 Python Mind Parity)
 │       ├── README.md   # Comprehensive UI documentation & API specifications
 │       ├── mod.rs      # Public exports & widget facade
 │       ├── theme.rs    # Accessible themes (Tokyo Night, HC Dark, HC Light, Color-Blind)
-│       ├── session_picker.rs # Interactive session picker screen with inline session creation
-│       ├── help_modal.rs # Accessible shortcuts reference card popup modal
+│       ├── workspace.rs # Dual-pane workspace screen (#primary-pane + #workers-pane) & WorkerTabBar
+│       ├── header_bar.rs # Zellij-style top ribbon (mind logo, session, quota progress, MCP status)
+│       ├── bottom_bar.rs # Multi-segment bottom bar (mode badge, dynamic action pills, arch badge)
+│       ├── select_worker_modal.rs # Slot selector list (agy1..200) with interactive search filter
+│       ├── new_worker_modal.rs # Dynamic slot discovery modal facade (re-exports SelectWorkerModal)
+│       ├── help_modal.rs # Hotkey reference card matching Python Mind (leader exits Esc Esc, Ctrl+B, F12)
 │       ├── directive_modal.rs # Directive injection modal with priority cycling (Low/Normal/High/Critical)
 │       ├── directive_editor.rs # In-app multiline directive editor with line numbers & Ctrl+S save
-│       ├── new_worker_modal.rs # Dynamic slot discovery modal with isolated environment provisioning
+│       ├── session_picker.rs # Interactive session picker screen with formatted session table
 │       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid) with history badges
 │       ├── status_bar.rs  # Accessible status bar with real roles, metrics & alert badges
 │       ├── gauges.rs      # Quota consumption & CPU/RAM progress gauges

@@ -24,11 +24,12 @@ pub use session::{
     ShortcutEngine, WorkerSession, WorkerState,
 };
 pub use ui::{
-    AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
-    DirectivePriority, GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction,
-    QuotaGaugesWidget, SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget,
-    StatusBarWidget, TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem,
-    WorkerListWidget,
+    ActionPill, AlertBadge, BottomBar, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal,
+    DirectiveModalAction, DirectivePriority, GaugeLayout, HeaderBar, HelpModal, NewWorkerModal,
+    NewWorkerModalAction, QuotaGaugesWidget, SelectWorkerModal, SelectWorkerModalAction,
+    SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget, StatusBarWidget,
+    TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem, WorkerListWidget,
+    WorkerTabBar, WorkerTabItem, WorkspaceScreen,
 };
 
 /// High-performance compiled TUI core engine binding PTY master processes,

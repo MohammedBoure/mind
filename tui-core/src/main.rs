@@ -11,9 +11,6 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs},
     Terminal,
 };
 use tracing::Level;
@@ -24,10 +21,9 @@ use tui_core::session::{
     AppMode, FocusedPane, IdentityDiscovery, SessionStore,
 };
 use tui_core::ui::{
-    glyphs, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
-    HelpModal, NewWorkerModal, NewWorkerModalAction,
-    SessionPickerAction, SessionPickerScreen, StatusBarWidget, TerminalScreenWidget,
-    Theme, ThemeMode,
+    BottomBar, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal,
+    DirectiveModalAction, HeaderBar, HelpModal, NewWorkerModal, NewWorkerModalAction,
+    SessionPickerAction, SessionPickerScreen, Theme, ThemeMode, WorkspaceScreen,
 };
 use tui_core::{McpBackend, TuiEngine};
 
@@ -498,8 +494,6 @@ async fn run_tui_app(
 
     loop {
         terminal.draw(|f| {
-            let p = theme.palette();
-
             if current_screen == AppScreen::SessionPicker {
                 f.render_widget(&session_picker, f.area());
                 return;
@@ -519,189 +513,36 @@ async fn run_tui_app(
             let focused_pane = engine.session_manager.focused_pane();
             let workers = engine.session_manager.workers();
             let coordinator = engine.session_manager.coordinator();
+            let session_name_str = engine
+                .session_manager
+                .current_session_name()
+                .unwrap_or_else(|| target_name.clone());
 
-            // 1. Header Bar: Logo | Session Name | Mode Badge | Quotas
-            let mode_badge = match current_mode {
-                AppMode::Normal => Span::styled(
-                    " [NORMAL] ",
-                    Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
-                ),
-                AppMode::PtyInteract => Span::styled(
-                    " [PTY_INTERACT] ",
-                    Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
-                ),
-            };
-
-            let header_spans = vec![
-                Span::styled(" 🧠 mind ", Style::default().fg(p.accent_blue).add_modifier(Modifier::BOLD)),
-                Span::styled("│", Style::default().fg(p.fg_muted)),
-                Span::styled(format!(" session: {} ", engine.session_manager.current_session_name().unwrap_or_else(|| target_name.clone())), Style::default().fg(p.fg_light).add_modifier(Modifier::BOLD)),
-                Span::styled("│", Style::default().fg(p.fg_muted)),
-                mode_badge,
-                Span::styled("│", Style::default().fg(p.fg_muted)),
-                Span::styled(format!(" {} workers ", workers.len()), Style::default().fg(p.accent_magenta)),
-                Span::styled("│", Style::default().fg(p.fg_muted)),
-                Span::styled(" ⚡ FastMCP ", Style::default().fg(p.accent_green)),
-            ];
-            let header_bar = Paragraph::new(Line::from(header_spans)).style(Style::default().bg(p.bg_surface));
+            // 1. Top HeaderBar: Zellij-style top ribbon
+            let header_bar = HeaderBar::new(session_name_str)
+                .worker_count(workers.len())
+                .mode(current_mode)
+                .quota_percent(85)
+                .mcp_port(8765)
+                .mcp_active(true)
+                .theme(theme);
             f.render_widget(header_bar, root_chunks[0]);
 
-            // 2. Dual-Pane PTY Workspace (Coordinator on Left + Worker Tabs on Right)
-            let workspace_chunks = if is_split_view {
-                Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([
-                        Constraint::Percentage(50), // Coordinator Pane
-                        Constraint::Percentage(50), // Worker Multiplexer Pane
-                    ])
-                    .split(root_chunks[1])
-            } else {
-                match focused_pane {
-                    FocusedPane::Coordinator => Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([Constraint::Percentage(100), Constraint::Percentage(0)])
-                        .split(root_chunks[1]),
-                    FocusedPane::Workers(_) => Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([Constraint::Percentage(0), Constraint::Percentage(100)])
-                        .split(root_chunks[1]),
-                }
-            };
+            // 2. Dual-Pane PTY Workspace (#primary-pane on Left + #workers-pane with tabs on Right)
+            let workspace = WorkspaceScreen::new()
+                .split_view(is_split_view)
+                .focused_pane(focused_pane)
+                .mode(current_mode)
+                .coordinator(coordinator)
+                .workers(workers)
+                .theme(theme);
+            f.render_widget(workspace, root_chunks[1]);
 
-            // Left Pane: Primary Coordinator PTY (#primary-pane)
-            if workspace_chunks[0].width > 0 {
-                let is_coord_focused = focused_pane == FocusedPane::Coordinator;
-                let coord_border_style = if is_coord_focused {
-                    Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(p.fg_muted)
-                };
-
-                let coord_title = if is_coord_focused {
-                    " 👑 Primary Coordinator (agy1) [FOCUSED] "
-                } else {
-                    " 👑 Primary Coordinator (agy1) "
-                };
-
-                let coord_block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(coord_border_style)
-                    .title(Span::styled(coord_title, coord_border_style));
-
-                if let Some(ref coord) = coordinator {
-                    let pty = coord.pty.lock();
-                    let buf = pty.buffer();
-                    let b = buf.lock();
-                    let screen_widget = TerminalScreenWidget::from_buffer(&b)
-                        .block(coord_block)
-                        .show_cursor(is_coord_focused && current_mode == AppMode::PtyInteract);
-                    f.render_widget(screen_widget, workspace_chunks[0]);
-                } else {
-                    let empty_coord = Paragraph::new("Coordinator PTY initializing...")
-                        .block(coord_block)
-                        .style(Style::default().fg(p.fg_muted));
-                    f.render_widget(empty_coord, workspace_chunks[0]);
-                }
-            }
-
-            // Right Pane: Workers Multiplexer (#workers-pane)
-            if workspace_chunks[1].width > 0 {
-                let is_worker_pane_focused = matches!(focused_pane, FocusedPane::Workers(_));
-                let worker_idx = match focused_pane {
-                    FocusedPane::Workers(idx) => idx,
-                    FocusedPane::Coordinator => 0,
-                };
-
-                // Split right pane vertically: Tab Bar (3) + Terminal Viewport (Rest)
-                let worker_subchunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(3), // Worker Tab Switcher Bar
-                        Constraint::Min(5),    // Active Worker Viewport
-                    ])
-                    .split(workspace_chunks[1]);
-
-                // Worker Tab Bar
-                let tab_titles: Vec<Line> = workers
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, w)| {
-                        let is_active = idx == worker_idx;
-                        let num = idx + 1;
-                        let prefix = if is_active { glyphs::POINTER } else { " " };
-                        let label = format!(" {}{}: {} ({}) ", prefix, num, w.id, w.slot_id);
-                        if is_active {
-                            Line::from(Span::styled(
-                                label,
-                                Style::default().fg(p.accent_cyan).bg(p.bg_highlight).add_modifier(Modifier::BOLD),
-                            ))
-                        } else {
-                            Line::from(Span::styled(label, Style::default().fg(p.fg_muted)))
-                        }
-                    })
-                    .collect();
-
-                let tab_border_style = if is_worker_pane_focused {
-                    Style::default().fg(p.accent_blue).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(p.fg_muted)
-                };
-
-                let tabs_widget = Tabs::new(tab_titles)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(tab_border_style)
-                            .title(Span::styled(" Interactive Workers [1..9 / h / l] ", tab_border_style)),
-                    )
-                    .select(worker_idx);
-                f.render_widget(tabs_widget, worker_subchunks[0]);
-
-                // Active Worker Viewport
-                let worker_view_block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tab_border_style);
-
-                if let Some(active_w) = workers.get(worker_idx) {
-                    let pty = active_w.pty.lock();
-                    let buf = pty.buffer();
-                    let b = buf.lock();
-                    let screen_widget = TerminalScreenWidget::from_buffer(&b)
-                        .block(worker_view_block)
-                        .show_cursor(is_worker_pane_focused && current_mode == AppMode::PtyInteract);
-                    f.render_widget(screen_widget, worker_subchunks[1]);
-                } else {
-                    let placeholder = Paragraph::new("\n  No active worker agents running.\n  Press 'c' or 'n' to spawn a new worker agent.")
-                        .block(worker_view_block)
-                        .style(Style::default().fg(p.fg_muted));
-                    f.render_widget(placeholder, worker_subchunks[1]);
-                }
-            }
-
-            // 3. Bottom Status Bar: Mode | Action Pills | Active Worker Info
-            let active_worker = engine.active_session();
-            let model_name = active_worker
-                .as_ref()
-                .map(|w| w.model())
-                .unwrap_or_else(|| "gemini-3.8-flash-high".to_string());
-
-            let mut status_bar = if let Some(ref w) = active_worker {
-                StatusBarWidget::from_session(w, &model_name).theme(theme)
-            } else {
-                StatusBarWidget::new("none", "0").theme(theme)
-            };
-
-            if let Some(notice) = &active_modal_notice {
-                status_bar = status_bar.alert_badge(tui_core::ui::AlertBadge::Custom(
-                    notice.clone(),
-                    ratatui::style::Color::Yellow.into(),
-                ));
-            } else {
-                status_bar = status_bar.custom_hint(
-                    "[i] PTY | [Tab] Switch | [1-9] Tabs | [h/l] Cycle | [m] Directive | [s] Split | [q] Quit",
-                );
-            }
-            f.render_widget(status_bar, root_chunks[2]);
+            // 3. BottomBar: Interactive multi-segment status bar
+            let bottom_bar = BottomBar::new(current_mode)
+                .notice(active_modal_notice.clone())
+                .theme(theme);
+            f.render_widget(bottom_bar, root_chunks[2]);
 
             // Overlays: Render any active modal on top
             if let Some(ref modal) = help_modal {
