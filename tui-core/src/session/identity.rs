@@ -166,6 +166,43 @@ impl IdentityDiscovery {
         }
     }
 
+    /// Detect multi-instance launcher `agys` binary across standard host locations:
+    /// 1. `/home/pluto/.local/bin/agys` (and real user's `.local/bin/agys`)
+    /// 2. `/usr/local/bin/agys`
+    /// 3. PATH discovery (`which agys` / `where agys`)
+    pub fn find_agys_binary() -> Option<PathBuf> {
+        let real_home = Self::get_real_user_home();
+        let direct_candidates = [
+            PathBuf::from("/home/pluto/.local/bin/agys"),
+            real_home.join(".local").join("bin").join("agys"),
+            PathBuf::from("/usr/local/bin/agys"),
+            PathBuf::from("/usr/bin/agys"),
+        ];
+
+        for path in &direct_candidates {
+            if is_executable_binary(path) {
+                return Some(path.clone());
+            }
+        }
+
+        let which_cmd = if cfg!(windows) { "where" } else { "which" };
+        for name in &["agys", "agys.exe"] {
+            if let Ok(output) = std::process::Command::new(which_cmd).arg(name).output() {
+                if output.status.success() {
+                    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !s.is_empty() {
+                        let p = PathBuf::from(&s);
+                        if is_executable_binary(&p) {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Detect real `agy` executable binary across standard host locations:
     /// 1. `/home/pluto/.local/bin/agy` (and real user's `.local/bin/agy`)
     /// 2. `/usr/local/bin/agy`
@@ -219,27 +256,38 @@ impl IdentityDiscovery {
         }
 
         let parsed_id = Self::parse_slot_id(slot_id).unwrap_or(if slot_id == "coordinator" { 1 } else { 1 });
-        let inst_dir = Self::get_instances_dir().join(format!("agy{}", parsed_id));
+        let instances_base = Self::get_instances_dir();
+        let inst_dir = instances_base.join(format!("agy{}", parsed_id));
         if !inst_dir.exists() {
             let _ = fs::create_dir_all(&inst_dir);
         }
-        let inst_str = if inst_dir.is_dir() {
-            inst_dir.to_string_lossy().to_string()
-        } else {
-            Self::get_real_user_home().to_string_lossy().to_string()
-        };
-
-        let mut env = HashMap::new();
-        env.insert("USERPROFILE".to_string(), inst_str.clone());
-        env.insert("HOME".to_string(), inst_str.clone());
-        env.insert("AGY_SLOT".to_string(), parsed_id.to_string());
-        env.insert("AGY_INSTANCE_DIR".to_string(), inst_str.clone());
-        env.insert(
-            "ANTIGRAVITY_APP_DATA_DIR".to_string(),
-            inst_dir.join(".gemini").join("antigravity-cli").to_string_lossy().to_string(),
-        );
-
+        let inst_str = inst_dir.to_string_lossy().to_string();
         let real_home = Self::get_real_user_home().to_string_lossy().to_string();
+        let mut env = HashMap::new();
+
+        let has_agys = Self::find_agys_binary().is_some();
+
+        if has_agys {
+            // When agys (bubblewrap container manager) is available, HOME must strictly be
+            // the host user home ($HOME = /home/pluto) so that bwrap's --bind "$inst_gemini_dir" "$HOME/.gemini"
+            // binds cleanly to ~/.gemini, allowing agy to locate authentication tokens without prompting for login.
+            env.insert("HOME".to_string(), real_home.clone());
+            env.insert("USERPROFILE".to_string(), real_home.clone());
+        } else {
+            // Fallback for systems without agys: point HOME and USERPROFILE to slot dir
+            env.insert("USERPROFILE".to_string(), inst_str.clone());
+            env.insert("HOME".to_string(), inst_str.clone());
+            env.insert(
+                "ANTIGRAVITY_APP_DATA_DIR".to_string(),
+                inst_dir.join(".gemini").join("antigravity-cli").to_string_lossy().to_string(),
+            );
+        }
+
+        env.insert("AGY_SLOT".to_string(), parsed_id.to_string());
+        env.insert("AGY_INSTANCE".to_string(), parsed_id.to_string());
+        env.insert("AGY_INSTANCE_NAME".to_string(), format!("agy{}", parsed_id));
+        env.insert("AGY_INSTANCE_DIR".to_string(), inst_str);
+        env.insert("AGY_INSTANCES_DIR".to_string(), instances_base.to_string_lossy().to_string());
         env.insert("MIND_REAL_USER_HOME".to_string(), real_home);
 
         env
@@ -248,18 +296,33 @@ impl IdentityDiscovery {
     /// Build isolated environment variables for spawning an agent process in a slot.
     pub fn build_slot_isolation_env(slot: &AgentSlot) -> HashMap<String, String> {
         let mut env = HashMap::new();
+        let instances_base = Self::get_instances_dir();
         let inst_str = slot.instance_dir.to_string_lossy().to_string();
-
-        env.insert("USERPROFILE".to_string(), inst_str.clone());
-        env.insert("HOME".to_string(), inst_str.clone());
-        env.insert("AGY_SLOT".to_string(), slot.slot_id.to_string());
-        env.insert("AGY_INSTANCE_DIR".to_string(), inst_str.clone());
-        env.insert(
-            "ANTIGRAVITY_APP_DATA_DIR".to_string(),
-            slot.instance_dir.join(".gemini").join("antigravity-cli").to_string_lossy().to_string(),
-        );
-
         let real_home = Self::get_real_user_home().to_string_lossy().to_string();
+
+        let has_agys = Self::find_agys_binary().is_some();
+
+        if has_agys {
+            // When agys (bubblewrap container manager) is available, HOME must strictly be
+            // the host user home ($HOME = /home/pluto) so that bwrap's --bind "$inst_gemini_dir" "$HOME/.gemini"
+            // binds cleanly to ~/.gemini, allowing agy to locate authentication tokens without prompting for login.
+            env.insert("HOME".to_string(), real_home.clone());
+            env.insert("USERPROFILE".to_string(), real_home.clone());
+        } else {
+            // Fallback for systems without agys: point HOME and USERPROFILE to slot dir
+            env.insert("USERPROFILE".to_string(), inst_str.clone());
+            env.insert("HOME".to_string(), inst_str.clone());
+            env.insert(
+                "ANTIGRAVITY_APP_DATA_DIR".to_string(),
+                slot.instance_dir.join(".gemini").join("antigravity-cli").to_string_lossy().to_string(),
+            );
+        }
+
+        env.insert("AGY_SLOT".to_string(), slot.slot_id.to_string());
+        env.insert("AGY_INSTANCE".to_string(), slot.slot_id.to_string());
+        env.insert("AGY_INSTANCE_NAME".to_string(), format!("agy{}", slot.slot_id));
+        env.insert("AGY_INSTANCE_DIR".to_string(), inst_str);
+        env.insert("AGY_INSTANCES_DIR".to_string(), instances_base.to_string_lossy().to_string());
         env.insert("MIND_REAL_USER_HOME".to_string(), real_home);
 
         env

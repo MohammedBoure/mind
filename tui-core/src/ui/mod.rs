@@ -17,6 +17,7 @@
 //! - [`TerminalScreenWidget`]: Zero-overhead character matrix renderer with dirty-frame checking.
 //! - [`Theme`]: Tokyo Night color palette and standard typography styles.
 
+pub mod agent_config_modal;
 pub mod bottom_bar;
 pub mod directive_editor;
 pub mod directive_modal;
@@ -33,6 +34,7 @@ pub mod theme;
 pub mod worker_list;
 pub mod workspace;
 
+pub use agent_config_modal::{AgentConfigModal, AgentConfigModalAction, TabConfigEntry};
 pub use bottom_bar::{ActionPill, BottomBar};
 pub use directive_editor::{DirectiveEditorAction, DirectiveEditorModal};
 pub use directive_modal::{DirectiveModal, DirectiveModalAction, DirectivePriority};

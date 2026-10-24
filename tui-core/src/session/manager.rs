@@ -105,24 +105,36 @@ impl SessionManager {
 
     /// Resolve effective command and arguments for a session worker.
     /// If `auto_spawn_agy` is enabled and no custom non-agy command was requested,
-    /// attempts to locate executable `agy` binary, falling back to system shell.
+    /// attempts to locate executable `agys` multi-instance container or `agy` binary,
+    /// falling back to system shell.
     pub fn resolve_worker_command(
         &self,
         w_cfg: &SessionWorkerConfig,
         fallback_shell: &str,
     ) -> (String, Vec<String>) {
         if let Some(ref explicit_cmd) = w_cfg.command {
-            if explicit_cmd != "agy" && !explicit_cmd.is_empty() {
+            if explicit_cmd != "agy" && explicit_cmd != "agys" && !explicit_cmd.is_empty() {
                 return (explicit_cmd.clone(), w_cfg.args.clone().unwrap_or_default());
             }
         }
 
         if self.auto_spawn_agy() {
+            let slot_num = IdentityDiscovery::parse_slot_id(&w_cfg.slot_id)
+                .unwrap_or(if w_cfg.slot_id == "coordinator" { 1 } else { 1 });
+            if let Some(agys_bin) = IdentityDiscovery::find_agys_binary() {
+                let mut args = vec![slot_num.to_string()];
+                if let Some(ref extra) = w_cfg.args {
+                    args.extend(extra.clone());
+                }
+                return (agys_bin.to_string_lossy().to_string(), args);
+            }
+
             if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
-                return (
-                    agy_bin.to_string_lossy().to_string(),
-                    w_cfg.args.clone().unwrap_or_default(),
-                );
+                let mut args = vec!["--model".to_string(), "gemini-3.8-flash-high".to_string()];
+                if let Some(ref extra) = w_cfg.args {
+                    args.extend(extra.clone());
+                }
+                return (agy_bin.to_string_lossy().to_string(), args);
             }
         }
 
@@ -372,13 +384,19 @@ impl SessionManager {
         for (idx, w_cfg) in session_record.workers.iter().enumerate() {
             let (cmd, args) = self.resolve_worker_command(w_cfg, default_cmd);
             let env = w_cfg.env.clone().unwrap_or_default();
+            let cwd = if !session_record.working_dir.is_empty() {
+                let p = PathBuf::from(&session_record.working_dir);
+                if p.is_dir() { Some(p) } else { std::env::current_dir().ok() }
+            } else {
+                std::env::current_dir().ok()
+            };
 
             let worker = self.spawn_session(
                 &w_cfg.id,
                 &w_cfg.slot_id,
                 cmd,
                 args,
-                None,
+                cwd,
                 env,
                 rows,
                 cols,
@@ -475,11 +493,19 @@ impl SessionManager {
         let cmd_str = command.into();
 
         let (final_cmd, final_args) = if cmd_str == "agy"
+            || cmd_str == "agys"
             || cmd_str == "auto"
             || (cmd_str.is_empty() && self.auto_spawn_agy())
         {
-            if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
-                (agy_bin.to_string_lossy().to_string(), args)
+            let slot_num = IdentityDiscovery::parse_slot_id(&slot_str).unwrap_or(if slot_str == "coordinator" { 1 } else { 1 });
+            if let Some(agys_bin) = IdentityDiscovery::find_agys_binary() {
+                let mut full_args = vec![slot_num.to_string()];
+                full_args.extend(args);
+                (agys_bin.to_string_lossy().to_string(), full_args)
+            } else if let Some(agy_bin) = IdentityDiscovery::find_agy_binary() {
+                let mut full_args = vec!["--model".to_string(), "gemini-3.8-flash-high".to_string()];
+                full_args.extend(args);
+                (agy_bin.to_string_lossy().to_string(), full_args)
             } else {
                 let fallback = if cfg!(windows) { "powershell.exe" } else { "bash" };
                 (fallback.to_string(), vec![])
@@ -488,12 +514,14 @@ impl SessionManager {
             (cmd_str, args)
         };
 
+        let effective_cwd = cwd.or_else(|| std::env::current_dir().ok());
+
         let session = Arc::new(WorkerSession::spawn(
             id_str.clone(),
             slot_str.clone(),
             final_cmd,
             final_args,
-            cwd,
+            effective_cwd,
             env,
             rows,
             cols,
@@ -517,6 +545,100 @@ impl SessionManager {
         }
 
         Ok(session)
+    }
+
+    /// Reassign a worker (or coordinator) to a new agy slot ID and restart its PTY process.
+    pub fn restart_worker_with_slot(
+        &self,
+        worker_id: &str,
+        new_slot_id: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Arc<WorkerSession>> {
+        let is_coord = worker_id == "coordinator" || worker_id == "agy1";
+
+        if is_coord {
+            if let Some(old) = self.coordinator() {
+                let _ = old.kill();
+            }
+            let new_session = self.spawn_session(
+                "coordinator",
+                new_slot_id,
+                "agy",
+                vec![],
+                None,
+                HashMap::new(),
+                rows,
+                cols,
+            )?;
+            let _ = self.save_current_session();
+            Ok(new_session)
+        } else {
+            let (target_id, orig_idx) = {
+                let workers = self.workers.lock();
+                let idx_opt = workers.iter().position(|w| w.id == worker_id || w.slot_id == worker_id);
+                if let Some(idx) = idx_opt {
+                    let old = workers[idx].clone();
+                    let tid = old.id.clone();
+                    let _ = old.kill();
+                    (tid, idx)
+                } else {
+                    return Err(TuiError::WorkerNotFound(format!("Worker '{}' not found", worker_id)));
+                }
+            };
+
+            // Remove old session from tracking
+            self.remove_worker(&target_id);
+
+            // Spawn replacement session
+            let new_session = self.spawn_session(
+                target_id.clone(),
+                new_slot_id,
+                "agy",
+                vec![],
+                None,
+                HashMap::new(),
+                rows,
+                cols,
+            )?;
+
+            // Re-order worker to original index if needed
+            let mut workers = self.workers.lock();
+            if let Some(cur_pos) = workers.iter().position(|w| w.id == target_id) {
+                if cur_pos != orig_idx && orig_idx < workers.len() {
+                    let w = workers.remove(cur_pos);
+                    workers.insert(orig_idx, w);
+                }
+            }
+
+            let _ = self.save_current_session();
+            Ok(new_session)
+        }
+    }
+
+    /// Update assigned agy slot metadata without restarting the current PTY process.
+    pub fn reassign_worker_slot(&self, worker_id: &str, new_slot_id: &str) -> Result<()> {
+        let is_coord = worker_id == "coordinator" || worker_id == "agy1";
+        let slot_info = IdentityDiscovery::find_slot(new_slot_id);
+
+        if is_coord {
+            if let Some(coord) = self.coordinator() {
+                if let Some(ref s) = slot_info {
+                    *coord.role.lock() = s.role.clone();
+                    *coord.model.lock() = s.model.clone();
+                }
+            }
+        } else {
+            let workers = self.workers.lock();
+            if let Some(worker) = workers.iter().find(|w| w.id == worker_id || w.slot_id == worker_id) {
+                if let Some(ref s) = slot_info {
+                    *worker.role.lock() = s.role.clone();
+                    *worker.model.lock() = s.model.clone();
+                }
+            }
+        }
+        let _ = self.save_current_session();
+        Ok(())
     }
 
     /// Retrieve all registered sessions in order (coordinator first, then workers).

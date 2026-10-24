@@ -18,6 +18,9 @@ pub enum TuiError {
     #[error("Session not found: {0}")]
     SessionNotFound(String),
 
+    #[error("Worker not found: {0}")]
+    WorkerNotFound(String),
+
     #[error("Channel closed or disconnected")]
     ChannelClosed,
 

@@ -107,39 +107,21 @@ Exiting back to `Normal` mode is governed by explicit Leader keys:
 
 ---
 
-## 6. Auto-Spawning Real `agy` CLI & Slot Environment Isolation
+## 6. Auto-Spawning Real `agy` / `agys` CLI & Slot Container Isolation
 
-`SessionManager` and `WorkerSession` natively support automatically launching the real Google Antigravity (`agy`) CLI inside PTY terminals for both the Primary Coordinator and interactive Worker tabs, with full filesystem and identity isolation per agent slot.
+`SessionManager` and `WorkerSession` natively support automatically launching the multi-instance Google Antigravity (`agys` / `agy`) CLI inside PTY terminals for both the Primary Coordinator and interactive Worker tabs, with full filesystem and identity isolation per agent slot.
 
-### A. Detection Flow for `agy` Binary (`find_agy_binary`)
-The engine discovers the executable binary through priority-ordered paths:
-1. `/home/pluto/.local/bin/agy` (and real host user's `~/.local/bin/agy`).
-2. `/usr/local/bin/agy`.
-3. `/usr/bin/agy`.
-4. PATH environment resolution via `which agy` (POSIX) or `where agy` (Windows).
-5. Instance slot fallback under `~/.local/share/agy-instances/agy11/bin/agy`.
-6. Verified executable permissions check (`mode & 0o111 != 0`).
-
-### B. Coordinator Isolated Environment (Slot 1 / `#primary-pane`)
-When spawning or restoring the Primary Coordinator:
-- Automatically launches `agy` with Coordinator environment:
-  - `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy1`
-  - `HOME`: `/home/pluto/.local/share/agy-instances/agy1`
-  - `AGY_SLOT`: `1`
-  - `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy1`
-  - `ANTIGRAVITY_APP_DATA_DIR`: `/home/pluto/.local/share/agy-instances/agy1/.gemini/antigravity-cli`
-  - `MIND_REAL_USER_HOME`: `/home/pluto`
-- Falls back cleanly to system shell (`bash` or `powershell.exe`) only if `agy` binary is not executable.
-
-### C. Worker Isolated Environments (Slot [x] / `#workers-pane`)
-When spawning or restoring interactive worker slots (e.g. `agy11`, `agy51`, `agy100`):
-- Automatically launches `agy` with the specific worker's isolated slot environment:
-  - `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `HOME`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `AGY_SLOT`: `[x]`
-  - `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `ANTIGRAVITY_APP_DATA_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]/.gemini/antigravity-cli`
-  - `MIND_REAL_USER_HOME`: `/home/pluto`
+### A. Detection Flow for `agys` / `agy` Launcher
+1. Host multi-instance launcher: `/home/pluto/.local/bin/agys` (Bubblewrap container isolator).
+2. Direct `agy` binary candidates: `/home/pluto/.local/bin/agy`, `/usr/local/bin/agy`, `/usr/bin/agy`.
+3. System PATH discovery via `which agys` / `which agy`.
+4. Command resolution:
+   - When `agys` is present: commands resolve to `agys <slot_id>` (e.g. `agys 1` for Coordinator, `agys 11` for Worker 1, `agys 51` for Worker 2).
+   - Bubblewrap mounts `/home/pluto/.local/share/agy-instances/agy[x]/.gemini` cleanly onto `$HOME/.gemini`.
+   - Host `$HOME` (`/home/pluto`) is preserved so authentication tokens (`antigravity-oauth-token`) load silently without requiring login or folder permission prompts.
+5. In-App Reconfiguration:
+   - Users can press `e` in Normal mode (or `Ctrl+E` in PTY mode) to open `AgentConfigModal`.
+   - Cycle assigned agy slots (`agy1`..`agy200`) and press `Enter` to save or `Ctrl+R` to save and restart the child PTY dynamically via `SessionManager::restart_worker_with_slot()`.
 
 ### D. Configuration Option in `~/.config/mind/agi.toml`
 Controlled via the `[general]` configuration section:

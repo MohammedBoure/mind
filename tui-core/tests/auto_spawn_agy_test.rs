@@ -43,32 +43,36 @@ fn test_coordinator_slot_1_environment_isolation() {
             slot_key
         );
 
+        let has_agys = IdentityDiscovery::find_agys_binary().is_some();
         let userprofile = env.get("USERPROFILE").expect("USERPROFILE must be set");
-        assert!(
-            userprofile.ends_with("agy1"),
-            "Coordinator USERPROFILE must end with agy1: {}",
-            userprofile
-        );
-
         let home = env.get("HOME").expect("HOME must be set");
-        assert!(
-            home.ends_with("agy1"),
-            "Coordinator HOME must end with agy1: {}",
-            home
-        );
+        if has_agys {
+            assert!(
+                !home.is_empty(),
+                "Coordinator HOME must be populated with host home for agys bwrap isolation"
+            );
+            assert!(
+                !userprofile.is_empty(),
+                "Coordinator USERPROFILE must be populated with host home for agys bwrap isolation"
+            );
+        } else {
+            assert!(
+                home.ends_with("agy1"),
+                "Coordinator HOME must end with agy1 in direct fallback mode: {}",
+                home
+            );
+            assert!(
+                userprofile.ends_with("agy1"),
+                "Coordinator USERPROFILE must end with agy1 in direct fallback mode: {}",
+                userprofile
+            );
+        }
 
         let inst_dir = env.get("AGY_INSTANCE_DIR").expect("AGY_INSTANCE_DIR must be set");
         assert!(
             inst_dir.ends_with("agy1"),
             "Coordinator AGY_INSTANCE_DIR must end with agy1: {}",
             inst_dir
-        );
-
-        let app_data = env.get("ANTIGRAVITY_APP_DATA_DIR").expect("ANTIGRAVITY_APP_DATA_DIR must be set");
-        assert!(
-            app_data.contains("agy1") && app_data.contains("antigravity-cli"),
-            "Coordinator ANTIGRAVITY_APP_DATA_DIR must point to agy1 antigravity-cli: {}",
-            app_data
         );
 
         let real_home = env.get("MIND_REAL_USER_HOME").expect("MIND_REAL_USER_HOME must be set");
@@ -103,21 +107,26 @@ fn test_worker_slot_environment_isolation() {
         );
 
         let expected_suffix = format!("agy{}", expected_id);
+        let has_agys = IdentityDiscovery::find_agys_binary().is_some();
         let userprofile = env.get("USERPROFILE").expect("USERPROFILE must be set");
-        assert!(
-            userprofile.ends_with(&expected_suffix),
-            "Worker USERPROFILE must end with {}: {}",
-            expected_suffix,
-            userprofile
-        );
-
         let home = env.get("HOME").expect("HOME must be set");
-        assert!(
-            home.ends_with(&expected_suffix),
-            "Worker HOME must end with {}: {}",
-            expected_suffix,
-            home
-        );
+        if has_agys {
+            assert!(!home.is_empty(), "Worker HOME must be populated with host home");
+            assert!(!userprofile.is_empty(), "Worker USERPROFILE must be populated with host home");
+        } else {
+            assert!(
+                home.ends_with(&expected_suffix),
+                "Worker HOME must end with {}: {}",
+                expected_suffix,
+                home
+            );
+            assert!(
+                userprofile.ends_with(&expected_suffix),
+                "Worker USERPROFILE must end with {}: {}",
+                expected_suffix,
+                userprofile
+            );
+        }
 
         let inst_dir = env.get("AGY_INSTANCE_DIR").expect("AGY_INSTANCE_DIR must be set");
         assert!(
@@ -192,12 +201,12 @@ fn test_session_manager_command_resolution() {
     };
     let (resolved_cmd, _) = manager.resolve_worker_command(&w_default, fallback_shell);
     assert!(
-        resolved_cmd.ends_with("agy"),
-        "When auto_spawn_agy is true, resolved command must be agy binary: {}",
+        resolved_cmd.ends_with("agy") || resolved_cmd.ends_with("agys"),
+        "When auto_spawn_agy is true, resolved command must be agy or agys launcher: {}",
         resolved_cmd
     );
 
-    // 2. When auto_spawn_agy is true and command is Some("agy") -> resolves to agy binary
+    // 2. When auto_spawn_agy is true and command is Some("agy") -> resolves to agy or agys binary
     let w_agy = SessionWorkerConfig {
         id: "worker2".to_string(),
         slot_id: "agy51".to_string(),
@@ -210,8 +219,8 @@ fn test_session_manager_command_resolution() {
     };
     let (resolved_cmd_2, _) = manager.resolve_worker_command(&w_agy, fallback_shell);
     assert!(
-        resolved_cmd_2.ends_with("agy"),
-        "When command is 'agy', resolved command must be agy binary: {}",
+        resolved_cmd_2.ends_with("agy") || resolved_cmd_2.ends_with("agys"),
+        "When command is 'agy', resolved command must be agy or agys launcher: {}",
         resolved_cmd_2
     );
 

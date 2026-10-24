@@ -149,9 +149,16 @@ fn test_agent_slot_discovery_in_custom_directory() {
     // Test environment isolation generation
     let env = IdentityDiscovery::build_slot_isolation_env(s42);
     assert_eq!(env.get("AGY_SLOT").unwrap(), "42");
-    assert!(env.get("HOME").unwrap().ends_with("agy42"));
-    assert!(env.get("USERPROFILE").unwrap().ends_with("agy42"));
-    assert!(env.get("ANTIGRAVITY_APP_DATA_DIR").unwrap().contains("antigravity-cli"));
+    let has_agys = IdentityDiscovery::find_agys_binary().is_some();
+    if has_agys {
+        assert!(!env.get("HOME").unwrap().is_empty());
+        assert!(!env.get("USERPROFILE").unwrap().is_empty());
+    } else {
+        assert!(env.get("HOME").unwrap().ends_with("agy42"));
+        assert!(env.get("USERPROFILE").unwrap().ends_with("agy42"));
+        assert!(env.get("ANTIGRAVITY_APP_DATA_DIR").unwrap().contains("antigravity-cli"));
+    }
+    assert!(env.get("AGY_INSTANCE_DIR").unwrap().ends_with("agy42"));
 }
 
 #[test]

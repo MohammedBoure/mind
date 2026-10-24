@@ -105,10 +105,11 @@ impl BottomBar {
     }
 
     /// Build normal mode action pills matching Python `mind`:
-    /// `[?] Help`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit`
+    /// `[?] Shortcuts`, `[e] Settings`, `[i] Type`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit`
     pub fn normal_action_pills() -> Vec<ActionPill> {
         vec![
             ActionPill::new("?", "Help"),
+            ActionPill::new("e", "Settings"),
             ActionPill::new("m", "Directive"),
             ActionPill::new("s", "Split"),
             ActionPill::new("d", "Edit"),
@@ -123,16 +124,17 @@ impl BottomBar {
     }
 
     /// Build PTY interact mode action pills matching Python `mind`:
-    /// `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+C] Interrupt`, `[Ctrl+M] Inject`, `[Ctrl+D] Directive`, `[Ctrl+Shift+C] Copy`, `[?] Help`
+    /// `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+E] Settings`, `[?] Help`, `[Ctrl+C] Interrupt`, `[Ctrl+M] Inject`
     pub fn pty_action_pills() -> Vec<ActionPill> {
         vec![
             ActionPill::new("Esc Esc / Ctrl+B", "Outer Normal"),
+            ActionPill::new("Ctrl+E", "Settings"),
+            ActionPill::new("?", "Help"),
             ActionPill::new("Ctrl+C", "Interrupt"),
             ActionPill::new("Ctrl+M", "Inject"),
             ActionPill::new("Ctrl+D", "Directive"),
             ActionPill::new("Ctrl+Shift+C", "Copy"),
             ActionPill::new("F12", "Normal"),
-            ActionPill::new("?", "Help"),
         ]
     }
 }
@@ -268,6 +270,7 @@ mod tests {
 
         assert!(content.contains("NORMAL MODE"), "Must contain mode indicator");
         assert!(content.contains("[?]"), "Must contain help pill");
+        assert!(content.contains("[e]"), "Must contain settings pill");
         assert!(content.contains("[m]"), "Must contain directive pill");
         assert!(content.contains("[s]"), "Must contain split pill");
         assert!(content.contains("[d]"), "Must contain edit pill");

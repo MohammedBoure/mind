@@ -146,13 +146,25 @@ fn test_slot_environment_isolation_builder() {
 
     // Verify key isolation variables
     assert_eq!(env.get("AGY_SLOT").unwrap(), "77");
-    assert_eq!(env.get("HOME").unwrap(), "/opt/agy-instances/agy77");
-    assert_eq!(env.get("USERPROFILE").unwrap(), "/opt/agy-instances/agy77");
+    let has_agys = IdentityDiscovery::find_agys_binary().is_some();
+    if has_agys {
+        assert_eq!(
+            env.get("HOME").unwrap(),
+            &IdentityDiscovery::get_real_user_home().to_string_lossy().to_string()
+        );
+        assert_eq!(
+            env.get("USERPROFILE").unwrap(),
+            &IdentityDiscovery::get_real_user_home().to_string_lossy().to_string()
+        );
+    } else {
+        assert_eq!(env.get("HOME").unwrap(), "/opt/agy-instances/agy77");
+        assert_eq!(env.get("USERPROFILE").unwrap(), "/opt/agy-instances/agy77");
+        assert_eq!(
+            env.get("ANTIGRAVITY_APP_DATA_DIR").unwrap(),
+            "/opt/agy-instances/agy77/.gemini/antigravity-cli"
+        );
+    }
     assert_eq!(env.get("AGY_INSTANCE_DIR").unwrap(), "/opt/agy-instances/agy77");
-    assert_eq!(
-        env.get("ANTIGRAVITY_APP_DATA_DIR").unwrap(),
-        "/opt/agy-instances/agy77/.gemini/antigravity-cli"
-    );
     assert!(env.contains_key("MIND_REAL_USER_HOME"));
 }
 

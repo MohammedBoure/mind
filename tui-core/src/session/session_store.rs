@@ -363,66 +363,41 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Create and provision a standard default session with discovered host agent slots.
+    /// Create and provision a standard default session with designated agent slots:
+    /// - Coordinator: agy1 (Lead Orchestrator)
+    /// - Worker 1: agy11 (Backend Logic & Systems)
+    /// - Worker 2: agy51 (Frontend & Interface Auditor)
+    /// - Worker 3: agy100 (Quality Gatekeeper & Testing)
     pub fn create_default_session(&self, name: &str) -> SessionRecord {
         let mut record = SessionRecord::new(
             name,
             "Multi-Agent AI Orchestration & Parallel Systems Engineering",
         );
 
-        let discovered_slots = IdentityDiscovery::discover_slots();
-        if discovered_slots.is_empty() {
-            // Standard fallback slots
-            record.add_worker(SessionWorkerConfig {
-                id: "coordinator".to_string(),
-                slot_id: "agy1".to_string(),
-                role: "Lead Orchestrator".to_string(),
-                model: "gemini-3.8-flash-high".to_string(),
-                task: Some("Overseeing multi-agent fleet".to_string()),
-                command: None,
-                args: None,
-                env: None,
-            });
-            record.add_worker(SessionWorkerConfig {
-                id: "worker-backend".to_string(),
-                slot_id: "agy11".to_string(),
-                role: "Backend Logic & Systems".to_string(),
-                model: "gemini-3.8-flash-high".to_string(),
-                task: Some("Core systems & API architecture".to_string()),
-                command: None,
-                args: None,
-                env: None,
-            });
-            record.add_worker(SessionWorkerConfig {
-                id: "worker-frontend".to_string(),
-                slot_id: "agy51".to_string(),
-                role: "Frontend & UI/UX".to_string(),
-                model: "gemini-3.8-flash-high".to_string(),
-                task: Some("Widget rendering & visual polish".to_string()),
-                command: None,
-                args: None,
-                env: None,
-            });
-        } else {
-            // Populate workers from real discovered slots
-            for slot in discovered_slots {
-                let id = if slot.slot_id == 1 {
-                    "coordinator".to_string()
-                } else {
-                    slot.name.clone()
-                };
+        let default_specs = [
+            ("coordinator", 1, "agy1", "Lead Orchestrator", "Overseeing multi-agent fleet"),
+            ("worker-1", 11, "agy11", "Backend Logic & Systems", "Core systems & API architecture"),
+            ("worker-2", 51, "agy51", "Frontend & Interface Auditor", "Widget rendering & visual polish"),
+            ("worker-3", 100, "agy100", "Quality Gatekeeper & Testing", "Pragmatic integration tests & validation"),
+        ];
 
-                record.add_worker(SessionWorkerConfig {
-                    id,
-                    slot_id: slot.name,
-                    role: slot.role,
-                    model: slot.model,
-                    task: slot.task,
-                    command: None,
-                    args: None,
-                    env: None,
-                });
-            }
+        for (id, slot_num, fallback_name, fallback_role, fallback_task) in default_specs {
+            let real_slot = IdentityDiscovery::find_slot(&format!("agy{}", slot_num));
+            let slot_id = real_slot.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| fallback_name.to_string());
+            let role = real_slot.as_ref().map(|s| s.role.clone()).unwrap_or_else(|| fallback_role.to_string());
+            let model = real_slot.as_ref().map(|s| s.model.clone()).unwrap_or_else(|| "gemini-3.8-flash-high".to_string());
+            let task = real_slot.as_ref().and_then(|s| s.task.clone()).or_else(|| Some(fallback_task.to_string()));
+
+            record.add_worker(SessionWorkerConfig {
+                id: id.to_string(),
+                slot_id,
+                role,
+                model,
+                task,
+                command: None,
+                args: None,
+                env: None,
+            });
         }
 
         record

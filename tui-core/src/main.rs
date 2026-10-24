@@ -21,9 +21,10 @@ use tui_core::session::{
     AppMode, FocusedPane, IdentityDiscovery, SessionStore,
 };
 use tui_core::ui::{
-    BottomBar, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal,
-    DirectiveModalAction, HeaderBar, HelpModal, NewWorkerModal, NewWorkerModalAction,
-    SessionPickerAction, SessionPickerScreen, Theme, ThemeMode, WorkspaceScreen,
+    AgentConfigModal, AgentConfigModalAction, BottomBar, DirectiveEditorAction,
+    DirectiveEditorModal, DirectiveModal, DirectiveModalAction, HeaderBar, HelpModal,
+    NewWorkerModal, NewWorkerModalAction, SessionPickerAction, SessionPickerScreen,
+    TabConfigEntry, Theme, ThemeMode, WorkspaceScreen,
 };
 use tui_core::{McpBackend, TuiEngine};
 
@@ -37,6 +38,12 @@ enum AppScreen {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
+
+    // Mode: Version Display (`agi --version`, `agi -v`, `agi version`)
+    if args.iter().any(|arg| arg == "--version" || arg == "-v" || arg == "version") {
+        println!("agi (mind tui-core) v0.1.0 (Tokyo Night Native Rust)");
+        return Ok(());
+    }
 
     // Mode: Stdio MCP Server (`agi mcp` or `agi --mcp-stdio`)
     if args.iter().any(|arg| arg == "--mcp-stdio" || arg == "mcp") {
@@ -464,6 +471,7 @@ async fn run_tui_app(
     let theme = Theme::new(ThemeMode::TokyoNight);
     let mut session_picker = SessionPickerScreen::new(engine.session_manager.store()).theme(theme);
     let mut help_modal: Option<HelpModal> = None;
+    let mut agent_config_modal: Option<AgentConfigModal> = None;
     let mut directive_modal: Option<DirectiveModal> = None;
     let mut directive_editor_modal: Option<DirectiveEditorModal> = None;
     let mut new_worker_modal: Option<NewWorkerModal> = None;
@@ -523,6 +531,8 @@ async fn run_tui_app(
             // Overlays: Render any active modal on top
             if let Some(ref modal) = help_modal {
                 f.render_widget(modal, f.area());
+            } else if let Some(ref modal) = agent_config_modal {
+                f.render_widget(modal, f.area());
             } else if let Some(ref modal) = directive_modal {
                 f.render_widget(modal, f.area());
             } else if let Some(ref modal) = directive_editor_modal {
@@ -568,6 +578,33 @@ async fn run_tui_app(
                     if let Some(ref mut modal) = help_modal {
                         if modal.handle_key(&key) {
                             help_modal = None;
+                        }
+                        continue;
+                    }
+
+                    // 2b. Agent & Tab Settings Modal handling
+                    if let Some(ref mut modal) = agent_config_modal {
+                        match modal.handle_key(&key) {
+                            AgentConfigModalAction::Save { tab_id, new_slot_id, restart, .. } => {
+                                if restart {
+                                    match engine.session_manager.restart_worker_with_slot(&tab_id, &new_slot_id, rows, cols) {
+                                        Ok(_) => {
+                                            active_modal_notice = Some(format!("Tab '{}' updated & restarted with {}", tab_id, new_slot_id));
+                                        }
+                                        Err(err) => {
+                                            active_modal_notice = Some(format!("Error restarting tab: {}", err));
+                                        }
+                                    }
+                                } else {
+                                    let _ = engine.session_manager.reassign_worker_slot(&tab_id, &new_slot_id);
+                                    active_modal_notice = Some(format!("Tab '{}' assigned to {}", tab_id, new_slot_id));
+                                }
+                                agent_config_modal = None;
+                            }
+                            AgentConfigModalAction::Cancel => {
+                                agent_config_modal = None;
+                            }
+                            AgentConfigModalAction::None => {}
                         }
                         continue;
                     }
@@ -665,6 +702,41 @@ async fn run_tui_app(
                         if key.code == KeyCode::F(12) {
                             engine.session_manager.enter_normal();
                             active_modal_notice = Some("Normal Mode Active".into());
+                            continue;
+                        }
+
+                        // Leader Key 4: Ctrl+E -> Open Agent & Tab Settings Modal
+                        if (key.code == KeyCode::Char('e') || key.code == KeyCode::Char('E'))
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            let mut tab_entries = Vec::new();
+                            if let Some(coord) = engine.session_manager.coordinator() {
+                                tab_entries.push(TabConfigEntry::new(
+                                    coord.id.clone(),
+                                    "Coordinator (Left Pane)",
+                                    coord.slot_id.clone(),
+                                    coord.role(),
+                                    coord.model(),
+                                    true,
+                                ));
+                            }
+                            for (idx, w) in engine.session_manager.workers().iter().enumerate() {
+                                tab_entries.push(TabConfigEntry::new(
+                                    w.id.clone(),
+                                    format!("Tab {} ({})", idx + 1, w.id),
+                                    w.slot_id.clone(),
+                                    w.role(),
+                                    w.model(),
+                                    false,
+                                ));
+                            }
+                            agent_config_modal = Some(AgentConfigModal::new(tab_entries).theme(theme));
+                            continue;
+                        }
+
+                        // Leader Key 5: F1 -> Open Shortcuts Reference
+                        if key.code == KeyCode::F(1) {
+                            help_modal = Some(HelpModal::new(theme));
                             continue;
                         }
 
@@ -838,8 +910,35 @@ async fn run_tui_app(
                         continue;
                     }
 
-                    // '?': Toggle Help Modal
-                    if key.code == KeyCode::Char('?') {
+                    // 'e': Open Agent & Tab Settings Modal (Assign agy slot per tab)
+                    if key.code == KeyCode::Char('e') || key.code == KeyCode::Char('E') {
+                        let mut tab_entries = Vec::new();
+                        if let Some(coord) = engine.session_manager.coordinator() {
+                            tab_entries.push(TabConfigEntry::new(
+                                coord.id.clone(),
+                                "Coordinator (Left Pane)",
+                                coord.slot_id.clone(),
+                                coord.role(),
+                                coord.model(),
+                                true,
+                            ));
+                        }
+                        for (idx, w) in engine.session_manager.workers().iter().enumerate() {
+                            tab_entries.push(TabConfigEntry::new(
+                                w.id.clone(),
+                                format!("Tab {} ({})", idx + 1, w.id),
+                                w.slot_id.clone(),
+                                w.role(),
+                                w.model(),
+                                false,
+                            ));
+                        }
+                        agent_config_modal = Some(AgentConfigModal::new(tab_entries).theme(theme));
+                        continue;
+                    }
+
+                    // '?' or F1: Toggle Help Modal (Shortcuts Reference)
+                    if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
                         help_modal = Some(HelpModal::new(theme));
                         continue;
                     }
