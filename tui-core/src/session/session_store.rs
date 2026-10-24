@@ -37,7 +37,10 @@ pub struct SessionRecord {
     pub total_interactions: usize,
     pub status: String,
     pub working_dir: String,
+    #[serde(default)]
     pub workers: Vec<SessionWorkerConfig>,
+    #[serde(default)]
+    pub agent_configs: HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub global_settings: HashMap<String, serde_json::Value>,
 }
@@ -60,7 +63,48 @@ impl SessionRecord {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default(),
             workers: Vec::new(),
+            agent_configs: HashMap::new(),
             global_settings: HashMap::new(),
+        }
+    }
+
+    /// Synchronize between `workers` vector and `agent_configs` map for Python mind parity.
+    pub fn sync_configs(&mut self) {
+        if self.workers.is_empty() && !self.agent_configs.is_empty() {
+            let mut sorted_keys: Vec<_> = self.agent_configs.keys().cloned().collect();
+            sorted_keys.sort();
+            for id in sorted_keys {
+                if let Some(val) = self.agent_configs.get(&id) {
+                    let slot = val.get("assigned_agent").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
+                    let role = val.get("role").and_then(|v| v.as_str()).unwrap_or("worker").to_string();
+                    let model = val.get("model").and_then(|v| v.as_str()).unwrap_or("gemini-3.8-flash-high").to_string();
+                    let task = val.get("task").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    self.workers.push(SessionWorkerConfig {
+                        id: id.clone(),
+                        slot_id: slot,
+                        role,
+                        model,
+                        task,
+                        command: None,
+                        args: None,
+                        env: None,
+                    });
+                }
+            }
+            self.agent_count = self.workers.len();
+        } else if !self.workers.is_empty() {
+            for w in &self.workers {
+                self.agent_configs.insert(
+                    w.id.clone(),
+                    serde_json::json!({
+                        "name": w.id,
+                        "assigned_agent": w.slot_id,
+                        "role": w.role,
+                        "model": w.model,
+                        "task": w.task,
+                    }),
+                );
+            }
         }
     }
 
@@ -68,6 +112,7 @@ impl SessionRecord {
     pub fn add_worker(&mut self, worker: SessionWorkerConfig) {
         self.workers.push(worker);
         self.agent_count = self.workers.len();
+        self.sync_configs();
     }
 }
 
@@ -111,6 +156,70 @@ impl SessionStore {
         self.base_dir.join(format!("{}.json", clean))
     }
 
+    /// Path to aggregate `~/.mind/sessions.json` file for Python parity.
+    pub fn aggregate_file_path(&self) -> PathBuf {
+        if self.base_dir.file_name().and_then(|s| s.to_str()) == Some("sessions") {
+            if let Some(parent) = self.base_dir.parent() {
+                return parent.join("sessions.json");
+            }
+        }
+        self.base_dir.join("sessions.json")
+    }
+
+    /// Synchronize single session to aggregate `sessions.json` array.
+    fn sync_to_aggregate(&self, session: &SessionRecord) {
+        let agg_path = self.aggregate_file_path();
+        let mut list: Vec<SessionRecord> = if agg_path.is_file() {
+            fs::read_to_string(&agg_path)
+                .ok()
+                .and_then(|content| serde_json::from_str(&content).ok())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let mut found = false;
+        for existing in &mut list {
+            if existing.name == session.name {
+                *existing = session.clone();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            list.insert(0, session.clone());
+        }
+
+        if let Ok(json_text) = serde_json::to_string_pretty(&list) {
+            let tmp_path = agg_path.with_extension("tmp");
+            if fs::write(&tmp_path, json_text).is_ok() {
+                let _ = fs::rename(&tmp_path, &agg_path);
+            }
+        }
+    }
+
+    /// Remove a session from aggregate `sessions.json` array.
+    fn remove_from_aggregate(&self, name: &str) {
+        let agg_path = self.aggregate_file_path();
+        if !agg_path.is_file() {
+            return;
+        }
+        if let Ok(content) = fs::read_to_string(&agg_path) {
+            if let Ok(mut list) = serde_json::from_str::<Vec<SessionRecord>>(&content) {
+                let prev_len = list.len();
+                list.retain(|s| s.name != name);
+                if list.len() != prev_len {
+                    if let Ok(json_text) = serde_json::to_string_pretty(&list) {
+                        let tmp_path = agg_path.with_extension("tmp");
+                        if fs::write(&tmp_path, json_text).is_ok() {
+                            let _ = fs::rename(&tmp_path, &agg_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Sanitize session name for safe filename usage.
     pub fn sanitize_name(name: &str) -> String {
         name.trim()
@@ -119,20 +228,27 @@ impl SessionStore {
             .collect()
     }
 
-    /// Save a session record to `~/.mind/sessions/<name>.json` with atomic write semantics.
+    /// Save a session record to `~/.mind/sessions/<name>.json` with atomic write semantics
+    /// and synchronize with aggregate `~/.mind/sessions.json`.
     pub fn save_session(&self, session: &SessionRecord) -> Result<PathBuf> {
-        let path = self.session_file_path(&session.name);
+        let mut session_clone = session.clone();
+        session_clone.sync_configs();
+
+        let path = self.session_file_path(&session_clone.name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let json_text = serde_json::to_string_pretty(session)
+        let json_text = serde_json::to_string_pretty(&session_clone)
             .map_err(TuiError::Serialization)?;
 
         // Write to temporary sibling file first then rename for atomic persistence
         let tmp_path = path.with_extension("tmp");
         fs::write(&tmp_path, json_text)?;
         fs::rename(&tmp_path, &path)?;
+
+        // Synchronize with aggregate sessions.json
+        self.sync_to_aggregate(&session_clone);
 
         debug!("Saved session '{}' to {}", session.name, path.display());
         Ok(path)
@@ -141,29 +257,61 @@ impl SessionStore {
     /// Load a session record by name.
     pub fn get_session(&self, name: &str) -> Result<Option<SessionRecord>> {
         let path = self.session_file_path(name);
-        if !path.is_file() {
-            return Ok(None);
+        if path.is_file() {
+            let content = fs::read_to_string(&path)?;
+            let mut record: SessionRecord = serde_json::from_str(&content)
+                .map_err(TuiError::Serialization)?;
+            record.sync_configs();
+            return Ok(Some(record));
         }
 
-        let content = fs::read_to_string(&path)?;
-        let record: SessionRecord = serde_json::from_str(&content)
-            .map_err(TuiError::Serialization)?;
-        Ok(Some(record))
+        // Fallback: check aggregate sessions.json
+        let agg_path = self.aggregate_file_path();
+        if agg_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&agg_path) {
+                if let Ok(list) = serde_json::from_str::<Vec<SessionRecord>>(&content) {
+                    if let Some(mut record) = list.into_iter().find(|s| s.name == name) {
+                        record.sync_configs();
+                        return Ok(Some(record));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// List all persisted session records, sorted by `last_activity` descending.
     pub fn list_sessions(&self) -> Result<Vec<SessionRecord>> {
         let mut sessions = Vec::new();
-        if !self.base_dir.is_dir() {
-            return Ok(sessions);
+        let mut seen = std::collections::HashSet::new();
+
+        if self.base_dir.is_dir() {
+            for entry in fs::read_dir(&self.base_dir)?.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        if let Ok(mut record) = serde_json::from_str::<SessionRecord>(&content) {
+                            record.sync_configs();
+                            seen.insert(record.name.clone());
+                            sessions.push(record);
+                        }
+                    }
+                }
+            }
         }
 
-        for entry in fs::read_dir(&self.base_dir)?.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(record) = serde_json::from_str::<SessionRecord>(&content) {
-                        sessions.push(record);
+        // Merge from aggregate sessions.json for any records not already seen
+        let agg_path = self.aggregate_file_path();
+        if agg_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&agg_path) {
+                if let Ok(list) = serde_json::from_str::<Vec<SessionRecord>>(&content) {
+                    for mut record in list {
+                        if !seen.contains(&record.name) {
+                            record.sync_configs();
+                            seen.insert(record.name.clone());
+                            sessions.push(record);
+                        }
                     }
                 }
             }
@@ -177,13 +325,15 @@ impl SessionStore {
     /// Delete a session by name. Returns true if file was found and removed.
     pub fn delete_session(&self, name: &str) -> Result<bool> {
         let path = self.session_file_path(name);
+        let mut removed = false;
         if path.is_file() {
             fs::remove_file(path)?;
             info!("Deleted session '{}'", name);
-            Ok(true)
-        } else {
-            Ok(false)
+            removed = true;
         }
+
+        self.remove_from_aggregate(name);
+        Ok(removed)
     }
 
     /// Clean / prune all stale or inactive sessions. Returns count of deleted sessions.

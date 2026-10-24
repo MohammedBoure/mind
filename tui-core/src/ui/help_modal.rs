@@ -16,7 +16,12 @@ pub struct ShortcutEntry {
     pub description: &'static str,
 }
 
-/// Accessible shortcuts help modal matching Python Mind shortcuts and `agi.toml`.
+/// Accessible shortcuts help modal matching Python Mind Textual `HelpModal`:
+/// - Vim-like Modal Architecture (Normal Mode vs PTY Mode)
+/// - Mode Switching & Leader Controls (`Esc Esc`, `Ctrl+B`, `F12`)
+/// - Normal Mode Navigation & Tab Controls (`1..9`, `h/l`, `c`, `x`, `s`, `Tab`)
+/// - Inter-Agent & Directive Injection (`m`, `d`, `o`, `Ctrl+C`)
+/// - Tokyo Night palette styling
 #[derive(Debug, Clone)]
 pub struct HelpModal {
     theme: Theme,
@@ -86,8 +91,8 @@ impl Widget for &HelpModal {
         let p = self.theme.palette();
 
         // Compute centered popup geometry
-        let modal_width = 72.min(area.width.saturating_sub(4));
-        let modal_height = 22.min(area.height.saturating_sub(2));
+        let modal_width = 82.min(area.width.saturating_sub(4));
+        let modal_height = 24.min(area.height.saturating_sub(2));
         let x = area.x + (area.width.saturating_sub(modal_width)) / 2;
         let y = area.y + (area.height.saturating_sub(modal_height)) / 2;
         let modal_area = Rect::new(x, y, modal_width, modal_height);
@@ -100,7 +105,7 @@ impl Widget for &HelpModal {
             .border_style(Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD))
             .style(Style::default().bg(p.bg_surface))
             .title(Span::styled(
-                " Keyboard Shortcuts Reference (? / Esc to close) ",
+                " Keyboard Shortcuts Reference — Mind Vim Modal Shortcuts (? / Esc / q to close) ",
                 Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD),
             ));
 
@@ -108,27 +113,35 @@ impl Widget for &HelpModal {
         block.render(modal_area, buf);
 
         let sections = vec![
-            ("SWARM NAVIGATION & TABS", vec![
-                ShortcutEntry { key: "Tab", description: "Focus next worker tab / pane" },
-                ShortcutEntry { key: "Shift+Tab", description: "Focus previous worker tab / pane" },
-                ShortcutEntry { key: "1..9", description: "Fast tab jump to worker #1..#9" },
+            ("VIM-LIKE MODAL ARCHITECTURE", vec![
+                ShortcutEntry { key: "NORMAL Mode", description: "Vim Command mode (single-key shortcuts, no modifiers needed)" },
+                ShortcutEntry { key: "PTY Mode", description: "Insert mode (raw keystrokes stream directly to agy.exe stdin)" },
+            ]),
+            ("MODE SWITCHING & LEADER CONTROLS", vec![
+                ShortcutEntry { key: "i / Enter / a", description: "Enter PTY Insert mode from NORMAL mode" },
+                ShortcutEntry { key: "Esc Esc / Ctrl+B", description: "Return to NORMAL mode from PTY (bare Esc passes to agy vim prompt)" },
+                ShortcutEntry { key: "F12 / Ctrl+]", description: "Dedicated leader keys to return to NORMAL mode" },
+            ]),
+            ("SWARM NAVIGATION & TABS (NORMAL MODE)", vec![
+                ShortcutEntry { key: "1..9", description: "Jump directly to Worker tab N" },
+                ShortcutEntry { key: "h / l", description: "Switch to previous / next worker tab" },
+                ShortcutEntry { key: "c / n", description: "Spawn a new worker agent tab" },
+                ShortcutEntry { key: "x", description: "Terminate and close active worker tab" },
+                ShortcutEntry { key: "s", description: "Toggle split layout (Side-by-side 50/50 vs Fullscreen)" },
+                ShortcutEntry { key: "Tab", description: "Toggle focus between Primary Coordinator & Worker PTY" },
             ]),
             ("DIRECTIVES & INSTRUCTIONS", vec![
-                ShortcutEntry { key: "m / Ctrl+M", description: "Open Directive Injection Modal" },
-                ShortcutEntry { key: "d / Ctrl+D", description: "Open In-app Directive Editor Modal" },
-                ShortcutEntry { key: "o / Ctrl+O", description: "Open directive in system editor ($EDITOR)" },
+                ShortcutEntry { key: "m / Ctrl+M", description: "Open Directive Injection Modal (NORMAL / Any mode)" },
+                ShortcutEntry { key: "d / Ctrl+D", description: "Open In-App Directive Modal Editor (NORMAL / Any mode)" },
+                ShortcutEntry { key: "o / Ctrl+O", description: "Open Directive in System Default Editor ($EDITOR)" },
+                ShortcutEntry { key: "Ctrl+C", description: "Send immediate interrupt signal (SIGINT) to active Worker" },
             ]),
-            ("LAYOUT & SESSIONS", vec![
-                ShortcutEntry { key: "s", description: "Cycle split layout (Single -> Horiz -> Vert -> Grid)" },
-                ShortcutEntry { key: "n", description: "Add new agent worker tab modal" },
-                ShortcutEntry { key: "p / Ctrl+P", description: "Launch interactive Session Picker screen" },
-                ShortcutEntry { key: "b", description: "Toggle worker list and resource sidebar" },
-            ]),
-            ("TERMINAL & APPLICATION", vec![
-                ShortcutEntry { key: "PageUp/Down", description: "Scrollback history navigation" },
-                ShortcutEntry { key: "F4 / Alt+T", description: "Cycle theme (TokyoNight, HighContrast, ColorBlind)" },
-                ShortcutEntry { key: "Ctrl+C", description: "Send SIGINT interrupt to active worker" },
-                ShortcutEntry { key: "q / Ctrl+Q", description: "Quit application & persist session state" },
+            ("CLIPBOARD & GENERAL", vec![
+                ShortcutEntry { key: "y", description: "Yank / copy focused pane selection or terminal buffer" },
+                ShortcutEntry { key: "Ctrl+Shift+C", description: "Copy selection or terminal buffer to OS clipboard" },
+                ShortcutEntry { key: "?", description: "Toggle this help screen" },
+                ShortcutEntry { key: "q", description: "Quit application and cleanly terminate worker processes" },
+                ShortcutEntry { key: "Escape", description: "Close modal / return to workspace" },
             ]),
         ];
 
@@ -138,25 +151,18 @@ impl Widget for &HelpModal {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("  {}  ", section_title),
-                    Style::default().fg(p.accent_yellow).add_modifier(Modifier::BOLD),
+                    Style::default().fg(p.accent_magenta).add_modifier(Modifier::BOLD),
                 ),
             ]));
 
             for entry in entries {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("    {:<16}", entry.key), Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("    {:<18}", entry.key), Style::default().fg(p.accent_cyan).add_modifier(Modifier::BOLD)),
                     Span::styled(entry.description, Style::default().fg(p.fg_light)),
                 ]));
             }
             lines.push(Line::from(""));
         }
-
-        lines.push(Line::from(vec![
-            Span::styled(
-                "  Configurable via ~/.config/mind/agi.toml or ~/.mind/config.toml",
-                Style::default().fg(p.fg_muted).add_modifier(Modifier::ITALIC),
-            ),
-        ]));
 
         let paragraph = Paragraph::new(lines).style(Style::default().bg(p.bg_surface));
         paragraph.render(inner, buf);
@@ -192,7 +198,7 @@ mod tests {
     #[test]
     fn test_help_modal_rendering() {
         let modal = HelpModal::default();
-        let backend = TestBackend::new(80, 24);
+        let backend = TestBackend::new(90, 26);
         let mut terminal = Terminal::new(backend).unwrap();
 
         terminal
@@ -202,16 +208,17 @@ mod tests {
             .unwrap();
 
         let term_buf = terminal.backend().buffer();
-        let mut text = String::new();
-        for y in 0..24 {
-            for x in 0..80 {
-                text.push_str(term_buf[(x, y)].symbol());
+        let mut content = String::new();
+        for y in 0..26 {
+            for x in 0..90 {
+                content.push_str(term_buf[(x, y)].symbol());
             }
         }
 
-        assert!(text.contains("Keyboard Shortcuts"));
-        assert!(text.contains("Directive Injection"));
-        assert!(text.contains("Directive Editor"));
-        assert!(text.contains("Cycle split layout"));
+        assert!(content.contains("Mind Vim Modal Shortcuts"));
+        assert!(content.contains("NORMAL Mode"));
+        assert!(content.contains("Esc Esc / Ctrl+B"));
+        assert!(content.contains("F12"));
+        assert!(content.contains("Directive"));
     }
 }

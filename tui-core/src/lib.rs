@@ -19,16 +19,17 @@ pub use ipc::{
 };
 pub use pty::{CellColor, PtyConfig, PtyMaster, PtyProcess, ScreenBuffer, ScreenCell};
 pub use session::{
-    Action, AgentSlot, AgiConfig, GeneralConfig, IdentityDiscovery, KeyBinding, SessionManager,
-    SessionRecord, SessionStore, SessionWorkerConfig, ShortcutConfig, ShortcutEngine, WorkerSession,
-    WorkerState,
+    Action, AgentSlot, AgiConfig, AppMode, FocusedPane, GeneralConfig, IdentityDiscovery, KeyBinding,
+    SessionManager, SessionRecord, SessionStore, SessionWorkerConfig, ShortcutConfig,
+    ShortcutEngine, WorkerSession, WorkerState,
 };
 pub use ui::{
-    AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,
-    DirectivePriority, GaugeLayout, HelpModal, NewWorkerModal, NewWorkerModalAction,
-    QuotaGaugesWidget, SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget,
-    StatusBarWidget, TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem,
-    WorkerListWidget,
+    ActionPill, AlertBadge, BottomBar, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal,
+    DirectiveModalAction, DirectivePriority, GaugeLayout, HeaderBar, HelpModal, NewWorkerModal,
+    NewWorkerModalAction, QuotaGaugesWidget, SelectWorkerModal, SelectWorkerModalAction,
+    SessionPickerAction, SessionPickerScreen, SplitMode, SplitPanesWidget, StatusBarWidget,
+    TerminalScreenWidget, Theme, ThemeMode, ThemePalette, WorkerListItem, WorkerListWidget,
+    WorkerTabBar, WorkerTabItem, WorkspaceScreen,
 };
 
 /// High-performance compiled TUI core engine binding PTY master processes,

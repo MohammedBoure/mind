@@ -32,6 +32,7 @@ Target system modules covered:
 | [`host_slot_discovery_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/host_slot_discovery_test.rs) | Dynamic Host Slot Discovery & Isolation | `session::identity` | Dynamic slot scanning under `~/.local/share/agy-instances/agy[x]`, multi-tier role extraction priority (`agent_assignments.json` -> `.gemini/GEMINI.md` -> heuristics), settings model detection, JWT token payload base64 email parsing, isolated environment variable provisioning (`USERPROFILE`, `HOME`, `AGY_SLOT`), and live filesystem discovery. |
 | [`shortcut_parity_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/shortcut_parity_test.rs) | Shortcut Engine & Python Parity | `session::shortcuts` | Exact Python-parity shortcuts (`q`, `?`, `Tab`, `Shift+Tab`, `BackTab`, `m`, `d`, `o`, `s`, `n`, `1`..`9`), pass-through for unmapped keys, custom TOML configuration loading (`~/.config/mind/agi.toml`), and conflict-free tab switching. |
 | [`modal_state_machine_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/modal_state_machine_test.rs) | Modal State Transitions & Screen Flow | `ui::*` | Modal open/close state transitions (`HelpModal`), `DirectiveModal` priority cycling (Normal -> High -> Critical -> Low) and input submission/cancellation, `DirectiveEditorModal` multiline buffer navigation, line editing, saving, and cancelling, `NewWorkerModal` slot selection & spawn dispatch, and `SessionPickerScreen` list navigation, creation, opening, deleting, and exit actions. |
+| [`parity_e2e_test.rs`](file:///home/pluto/projects/mind/tui-core/tests/parity_e2e_test.rs) | Python 1:1 Parity End-to-End Suite | `ui::workspace`, `ui::header_bar`, `ui::bottom_bar`, `session::manager`, `main` | End-to-end verification of dual-pane coordinator/worker multiplexer, Vim dual-mode (`NORMAL` vs `PTY_INTERACT`) and leader exits (`Esc Esc` within 350ms, `Ctrl+B`, `F12`), Zellij-style 1-line top dock pills (brand logo, session pill, mode badge, active worker count, quota progress bar, MCP status), bottom action pills and architecture badge, and CLI subcommands (`doctor`, `usage`, `usage --json`, `sessions`, `sessions --clean`, `bench`). |
 
 ---
 
@@ -67,6 +68,9 @@ cargo test --test shortcut_parity_test --manifest-path tui-core/Cargo.toml
 
 # Run Modal State Machine Tests
 cargo test --test modal_state_machine_test --manifest-path tui-core/Cargo.toml
+
+# Run Python 1:1 Parity End-to-End Tests
+cargo test --test parity_e2e_test --manifest-path tui-core/Cargo.toml
 ```
 
 ### Run Tests with Full Tracing Output
@@ -96,3 +100,6 @@ RUST_LOG=debug cargo test --test pty_burst_test -- --nocapture
    - Custom keybindings configured in `~/.config/mind/agi.toml` override defaults without collisions. Unmapped keystrokes automatically pass through as raw terminal bytes to the active child PTY.
 9. **Modal State Stack Transition Safety:**
    - Modal dialogs (`HelpModal`, `DirectiveModal`, `DirectiveEditorModal`, `NewWorkerModal`) manage encapsulated lifecycle states. Modals safely capture input while active and cleanly return control to the underlying screen upon submission or dismissal (`Esc`), preventing trapped focus states.
+10. **Vim Dual-Mode State Machine & 350ms Leader Exit Threshold:**
+    - Modal engine transitions between `NORMAL` and `PTY_INTERACT`. Escaping raw PTY pass-through without dropping single Esc commands (e.g., in vim inside child PTY) is handled through an exact 350ms double-escape detection window, or immediate `Ctrl+B` / `F12` escape keys.
+

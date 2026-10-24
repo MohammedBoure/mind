@@ -35,29 +35,54 @@
 
 ---
 
-## 2. Keyboard Navigation & Python-Parity Configurable Shortcuts
+## 2. Dual-Pane PTY Architecture & Vim-Style Modal Navigation
 
-The interactive compiled TUI interface offers ergonomic, single-keystroke navigation controls across all sessions, views, themes, and scrollback histories. Shortcuts can be customized via `~/.config/mind/agi.toml` (or `~/.mind/config.toml`):
+The compiled TUI interface replicates the Python `mind` workspace with a dual-pane PTY layout:
+- **Left Pane (`#primary-pane`)**: Dedicated Primary Coordinator terminal (`agy1` / slot 1).
+- **Right Pane (`#workers-pane`)**: Interactive Worker Multiplexer with visible Tab Bar (`1..9`) at the top and the active worker viewport below.
 
-| Hotkey / Shortcut | Action | Description |
-|---|---|---|
-| `Ctrl+P` | Screen Switch | Open interactive full-screen session picker |
-| `q` / `Ctrl+Q` | `Action::Quit` | Save session state and exit application |
-| `?` | `Action::Help` | Toggle shortcuts help modal |
-| `Tab` | `Action::CycleFocus` | Focus next worker tab / pane |
-| `Shift+Tab` / `BackTab` | `Action::CycleFocusReverse` | Focus previous worker tab / pane |
-| `m` / `Ctrl+M` | `Action::DirectiveModal` | Open Directive Injection Modal |
-| `d` / `Ctrl+D` | `Action::DirectiveEditor` | Open In-app Directive Editor Modal |
-| `o` / `Ctrl+O` | `Action::OpenExternalEditor` | Open directive file in system editor ($EDITOR) |
-| `s` | `Action::ToggleSplit` | Toggle split layout (Single -> Horizontal -> Vertical -> Grid) |
-| `n` | `Action::NewWorker` | Open New Worker Modal to dynamically provision slot |
-| `1`..`9` / `F5`..`F8` | `Action::SelectTab(idx)` | Configurable fast tab jump keys |
-| `PageUp` / `Shift+Up` | `Action::ScrollUp` | Scrolls active terminal history backward (5 lines per step) |
-| `PageDown` / `Shift+Down` | `Action::ScrollDown` | Scrolls active terminal history forward toward live bottom |
-| `b` | UI Toggle | Toggle worker metadata & quota sidebar |
-| `F4` / `Alt+T` | Theme Toggle | Switch active color palette: Tokyo Night -> HC Dark -> HC Light -> Color-Blind |
-| Any Typing / Enter | Terminal Input | Delivers keystroke to child PTY and automatically resets scroll offset |
-| `Ctrl+C` | Send SIGINT | Delivers interrupt signal (0x03) to the currently active worker PTY |
+### Dual Vim-Style Modal System
+The engine operates in two modal states:
+
+1. **`NORMAL` (Command Mode)**:
+   - `i`, `Enter`, `a`: Switches to `PTY_INTERACT` mode to type directly into child processes.
+   - `Tab` / `Shift+Tab`: Toggles focus between Primary Coordinator and active Worker pane.
+   - `1`..`9`: Fast jumps directly to worker tab #1 through #9 in the workers pane.
+   - `h` / `l`: Cycles worker tabs in the workers pane left / right.
+   - `s`: Toggles between 50/50 dual split and full-screen active pane.
+   - `m` / `Ctrl+M`: Opens directive task injection modal.
+   - `d` / `Ctrl+D`: Opens in-app multiline directive editor modal.
+   - `o` / `Ctrl+O`: Opens directive file in external `$EDITOR`.
+   - `c` / `n`: Opens new worker modal or provisions new agent slot.
+   - `x`: Terminates and closes active worker tab in the workers pane.
+   - `?`: Toggles shortcuts help modal.
+   - `q`: Quits application safely.
+   - `y`: Yanks / copies terminal buffer to clipboard.
+   - `Ctrl+P`: Switches to full-screen interactive session picker.
+
+2. **`PTY_INTERACT` (Insert Mode)**:
+   - Keystrokes are passed raw directly into the focused child PTY.
+   - **Leader Exits back to `NORMAL`**:
+     * `Ctrl+B`: Immediate exit to Normal mode.
+     * `F12`: Immediate exit to Normal mode.
+     * `Esc Esc` (Double Escape within 350ms): Exits to Normal mode, while a single `Esc` is forwarded to the child PTY.
+
+| Hotkey / Shortcut | Mode | Action | Description |
+|---|---|---|---|
+| `i` / `Enter` / `a` | Normal | `enter_pty` | Enter PTY Insert Mode |
+| `Ctrl+B` / `F12` / `Esc Esc` | PtyInteract | `enter_normal` | Exit to Normal Command Mode |
+| `Tab` / `Shift+Tab` | Normal | `switch_pane_focus` | Switch focus between Coordinator & Worker pane |
+| `1`..`9` | Normal | `jump_worker_tab` | Fast jump to worker tab #1..#9 |
+| `h` / `l` | Normal | `cycle_worker_tab` | Cycle worker tabs left / right |
+| `s` | Normal | `toggle_split` | Toggle 50/50 Dual-Pane vs Full-Screen |
+| `m` / `Ctrl+M` | Normal | `directive_modal` | Open Directive Injection Modal |
+| `d` / `Ctrl+D` | Normal | `directive_editor` | Open In-app Directive Editor Modal |
+| `o` / `Ctrl+O` | Normal | `open_external_editor` | Open directive file in system editor ($EDITOR) |
+| `c` / `n` | Normal | `new_worker` | Open New Worker Modal to dynamically provision slot |
+| `x` | Normal | `close_worker` | Close active worker tab in workers pane |
+| `?` | Normal | `help` | Toggle shortcuts help modal |
+| `q` / `Ctrl+Q` | Normal | `quit` | Save session state and exit application |
+| `Ctrl+P` | Normal | `session_picker` | Open interactive full-screen session picker |
 
 ---
 
@@ -156,15 +181,19 @@ tui-core/
 │   │   ├── shortcuts.rs # Configurable shortcut engine (~/.config/mind/agi.toml)
 │   │   ├── worker.rs   # WorkerSession (state, PTY, scrollback offset, idle detection)
 │   │   └── manager.rs  # SessionManager & McpBackend implementation
-│   └── ui/             # Accessible visual Ratatui widgets
+│   └── ui/             # Accessible visual Ratatui widgets (1:1 Python Mind Parity)
 │       ├── README.md   # Comprehensive UI documentation & API specifications
 │       ├── mod.rs      # Public exports & widget facade
 │       ├── theme.rs    # Accessible themes (Tokyo Night, HC Dark, HC Light, Color-Blind)
-│       ├── session_picker.rs # Interactive session picker screen with inline session creation
-│       ├── help_modal.rs # Accessible shortcuts reference card popup modal
+│       ├── workspace.rs # Dual-pane workspace screen (#primary-pane + #workers-pane) & WorkerTabBar
+│       ├── header_bar.rs # Zellij-style top ribbon (mind logo, session, quota progress, MCP status)
+│       ├── bottom_bar.rs # Multi-segment bottom bar (mode badge, dynamic action pills, arch badge)
+│       ├── select_worker_modal.rs # Slot selector list (agy1..200) with interactive search filter
+│       ├── new_worker_modal.rs # Dynamic slot discovery modal facade (re-exports SelectWorkerModal)
+│       ├── help_modal.rs # Hotkey reference card matching Python Mind (leader exits Esc Esc, Ctrl+B, F12)
 │       ├── directive_modal.rs # Directive injection modal with priority cycling (Low/Normal/High/Critical)
 │       ├── directive_editor.rs # In-app multiline directive editor with line numbers & Ctrl+S save
-│       ├── new_worker_modal.rs # Dynamic slot discovery modal with isolated environment provisioning
+│       ├── session_picker.rs # Interactive session picker screen with formatted session table
 │       ├── split_panes.rs # Flexible multiplexer (Single, Horiz, Vert, Grid) with history badges
 │       ├── status_bar.rs  # Accessible status bar with real roles, metrics & alert badges
 │       ├── gauges.rs      # Quota consumption & CPU/RAM progress gauges
@@ -201,11 +230,32 @@ cargo run --bin agi
 # Create and launch new session named 'alpha_mission'
 cargo run --bin agi -- new alpha_mission
 
-# Inspect saved sessions
+### Run Formatted Sessions Table & Clean Inactive Sessions
+```bash
+# Formatted sessions table matching `mind sessions`
 cargo run --bin agi -- sessions
+
+# Output sessions as JSON
+cargo run --bin agi -- sessions --json
 
 # Clean / prune stale and empty sessions
 cargo run --bin agi -- sessions --clean
+```
+
+### Run Comprehensive Diagnostic Doctor
+```bash
+# Comprehensive diagnostic doctor check matching `mind doctor`
+cargo run --bin agi -- doctor
+```
+
+### Run Quota Usage Monitor Table
+```bash
+# Display quota usage monitor table matching `mind usage`
+cargo run --bin agi -- usage
+
+# Inspect specific slot or output JSON
+cargo run --bin agi -- usage -s agy11
+cargo run --bin agi -- usage --json
 ```
 
 ### Run Performance Benchmarks
@@ -213,8 +263,10 @@ cargo run --bin agi -- sessions --clean
 cargo run --release --bin agi -- bench
 ```
 
-### Run as Stdio MCP Server
+### Run as Stdio FastMCP Server
 ```bash
+cargo run --bin agi -- mcp
+# or
 cargo run --bin agi -- --mcp-stdio
 ```
 

@@ -2,53 +2,60 @@
 
 > **Frontend & Interface Auditor Specification** for the compiled multi-agent TUI engine.
 > Maintained by Frontend & UI/UX Engineer (`agy51`) using Rust, Ratatui 0.29, and Crossterm 0.28.
+> **1:1 Pixel-Perfect Visual Parity with Python `mind` (Textual `WorkspaceScreen`, `HeaderBar`, `BottomBar`, and Modals).**
 
 ---
 
 ## 1. Overview & Architecture
 
-The `ui` module provides a comprehensive suite of reusable, reactive, accessible visual widgets, modal popups, and full-screen pickers engineered for low-latency terminal multiplexing across dozens of concurrent AI agent worker terminals (`agy1` .. `agyN`).
+The `ui` module provides a comprehensive suite of reactive, accessible visual widgets, modal popups, and full-screen pickers engineered for low-latency terminal multiplexing across dozens of concurrent AI agent worker terminals (`agy1` .. `agyN`).
 
-The module completely decouples backend PTY process buffers, identity discovery, and MCP events from Ratatui presentation, providing:
-- **Interactive Session Picker Screen**: Full-screen table listing persistent sessions with inline session creation, deletion, activity telemetry, and fast loading.
-- **Python-Parity Modals**:
-  - **Shortcuts Help Modal** (`?`): Accessible categorized hotkey reference card matching `agi.toml` and Python mind shortcuts.
-  - **Directive Injection Modal** (`m` / `Ctrl+M`): Prioritized directive messaging (Low, Normal, High, Critical) with asynchronous MCP injection.
-  - **In-App Directive Editor Modal** (`d` / `Ctrl+D`): Multiline text editor widget with line numbering, cursor navigation, and Ctrl+S persistence.
-  - **New Worker Modal** (`n`): Host agent slot discovery (`IdentityDiscovery`), table of slot metadata (role, model, token status), and isolated environment provisioning.
-- **Real Agent Identity & Role Indicators**: Integrated slot IDs (`agy[x]`), human-friendly worker names, and real role titles extracted dynamically from `.gemini/GEMINI.md` and workspace assignments.
-- **Dirty-Frame Caching**: $O(1)$ integer version comparisons (12.18 ns) eliminate redundant re-rendering when screen buffers have not mutated.
-- **Accessible Theme Palettes**: Runtime theme cycling across Tokyo Night, High Contrast Dark (WCAG AAA), High Contrast Light, and Color-Blind Universal Design (Protanopia / Deuteranopia safe).
-- **Responsive Split Multiplexing**: Single pane, horizontal split, vertical split, and 2x2 quad grid with active focus highlighting.
-- **Scrollback History Exploration**: Per-session scrolling offset (`PageUp`/`PageDown`) with instant scroll position indicator badges (`[SCROLL -N]`).
+The module completely decouples backend PTY process buffers, identity discovery, and MCP events from Ratatui presentation, achieving exact 1:1 visual parity with Python `mind`:
+- **Dual-Pane Workspace Layout (`WorkspaceScreen`)**:
+  - **Left Pane (`#primary-pane`)**: Dedicated Primary Coordinator PTY (Slot 1 `agy1`). Stays visible side-by-side.
+  - **Right Pane (`#workers-pane`)**: Worker Multiplexer with top `WorkerTabBar` (tabs `1..9`) and active worker PTY viewport below.
+  - **Focus Visuals**: Active pane gets prominent Tokyo Night accent border (`#7aa2f7` / `#7dcfff`); inactive pane has muted border (`#565f89` / `#7982a9`).
+  - **Split Layout Modes**: Side-by-side (50/50) vs Fullscreen expansion toggle on `s` key (Coordinator 100% or Workers 100%).
+- **Zellij-Style Top HeaderBar (`HeaderBar`)**:
+  - 1-line dock-top layout:
+    - **Brand Logo**: `mind` (bold cyan `#7aa2f7`)
+    - **Session Name**: active session in `#7dcfff` on `#24283b`
+    - **Quota Pill**: `[████████░░]` progress bar + percentage / remaining steps in Tokyo Night Green `#9ece6a`
+    - **MCP Status**: `● MCP: 8765` (green dot `#9ece6a`)
+    - **Worker Telemetry**: `X active workers` in Warm Gold `#e0af68`
+- **Multi-Segment BottomBar (`BottomBar`)**:
+  - 1-line dock-bottom layout:
+    - **Mode Indicator**: `[ NORMAL MODE ]` (bold on `#e0af68`) vs `[ PTY INTERACT ]` (bold on `#7aa2f7`)
+    - **Action Pills**: `[?] Help`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit` (Normal mode) and `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+C] Interrupt` (PTY mode)
+    - **Arch Badge**: `POSIX PTY · UTF-8` / `ConPTY · UTF-8` on far right
+- **Modals Matching Python `mind`**:
+  - **`HelpModal`**: Clean popup with keybindings, leader exit (`Esc Esc`, `Ctrl+B`, `F12`), Normal mode shortcuts.
+  - **`DirectiveModal`**: Priority selector (High, Medium, Low, Critical) with color highlights and directive text input.
+  - **`DirectiveEditorModal`**: Multiline directive editor with line numbers (`1 │ `, `2 │ `...) and `Ctrl+S` persistence.
+  - **`SelectWorkerModal`**: Slot selector list (`agy1..200`) with live search filter, role titles, and token status.
+  - **`SessionPickerScreen`**: Formatted session list table (`Session Name`, `Agents`, `Status`, `Steps`, `Tasks`, `Last Active`, `Goal`).
 
 ```
-+-----------------------------------------------------------------------------------+
-|                         tui-core Visual UI Hierarchy                              |
-+-----------------------------------------------------------------------------------+
-| Top Header: Tabs [ ▶ 1:agy11 [Backend] | 2:agy51 [Frontend] [Alt+2] ]             |
-|             Session: AGI Session: default                                         |
-+-----------------------------------+-----------------------------------------------+
-| Left Sidebar (b toggle):          | Main Area: SplitPanesWidget                   |
-| ├── WorkerListWidget              | ├── SplitMode::Single (1-Pane)                |
-| │   ├── ● 1:agy11 [Backend Logic] | ├── SplitMode::Horizontal (Side-by-side)      |
-| │   ├── ● 2:agy51 [Frontend UI/UX]| ├── SplitMode::Vertical (Stacked)             |
-| │   └── ⚡ 3:agy100 [Testing Gate] | └── SplitMode::Grid (2x2 Quad Panes)          |
-| └── QuotaGaugesWidget (Horizontal)|                                               |
-|     (Hourly, Weekly, CPU, RAM)    | TerminalScreenWidget: ANSI ScreenCell Matrix  |
-|                                   | with scrollback history support [SCROLL -N]   |
-+-----------------------------------+-----------------------------------------------+
-| Bottom: StatusBarWidget (Accessible Theme Mode)                                   |
-| [ ● 1:agy11 [Backend Logic] ] [ PID: 1234 ] [ gemini-3.8-flash ] [ Tokens: 18.5k ]|
-| [ ⚡ Worker Finished / 🚨 Assistance Needed ] [ [SPLIT: HORIZ] ] [ Hotkeys Guide ]|
-+-----------------------------------------------------------------------------------+
-| Overlays: Centered Ratatui Modals (Clear backdrop)                                |
-| ├── SessionPickerScreen: Full-screen table of saved sessions (`Ctrl+P` / `agi picker`)|
-| ├── HelpModal: Hotkey reference card (`?`)                                        |
-| ├── DirectiveModal: Directive Injection with priority selector (`m` / `Ctrl+M`)   |
-| ├── DirectiveEditorModal: In-app multiline editor (`d` / `Ctrl+D`)                |
-| └── NewWorkerModal: Host slot provisioner (`n`)                                   |
-+-----------------------------------------------------------------------------------+
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ mind  session_1  [NORMAL]                       4 active workers  Quota: [████████░░] 80%  ● MCP: 8765 │ <- HeaderBar
+├────────────────────────────────────────────────────┬───────────────────────────────────────────────────┤
+│ 👑 Primary Coordinator (Slot 1 agy1) [FOCUSED]     │ Interactive Workers [1..9 / h / l]                │
+│                                                    │  ▶1: Worker-1 (agy11)   2: Worker-2 (agy51)  +New │ <- WorkerTabBar
+│                                                    ├───────────────────────────────────────────────────┤
+│ Active Coordinator PTY Terminal Viewport           │ Active Worker PTY Terminal Viewport               │
+│ (ansi virtual screen matrix, zero-overhead dirty   │ (raw terminal IO pass-through, scrollback history,│
+│  frame caching, prominent #7aa2f7 accent border)   │  insert cursor, #7dcfff tab highlight)            │
+│                                                    │                                                   │
+├────────────────────────────────────────────────────┴───────────────────────────────────────────────────┤
+│ [ NORMAL MODE ] [?] Help  [m] Directive  [s] Split  [d] Edit  [c/n] New  [x] Close   POSIX PTY · UTF-8 │ <- BottomBar
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+│ Overlays: Centered Ratatui Modals (Clear backdrop)                                                     │
+│ ├── HelpModal: Keybindings, leader exit (Esc Esc, Ctrl+B, F12), Normal mode shortcuts                  │
+│ ├── DirectiveModal: Priority selector (High, Medium, Low) and prompt input                            │
+│ ├── DirectiveEditorModal: Multiline directive editor with line numbers                                 │
+│ ├── SelectWorkerModal: Slot selector list (agy1..200) with search filter                               │
+│ └── SessionPickerScreen: Formatted session list table                                                  │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -58,14 +65,18 @@ The module completely decouples backend PTY process buffers, identity discovery,
 | File | Module | Responsibility |
 |---|---|---|
 | [`mod.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/mod.rs) | `ui` | Public module exports, widget facade, modal action types, and theme re-exports. |
-| [`session_picker.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/session_picker.rs) | `ui::session_picker` | Interactive full-screen session picker (`SessionPickerScreen`), table listing, inline new session prompt dialog, deletion confirmation, and `SessionPickerAction`. |
-| [`help_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/help_modal.rs) | `ui::help_modal` | Accessible shortcuts help popup modal (`HelpModal`), categorized reference cards, and auto-dismiss on `Esc`/`q`/`?`. |
+| [`workspace.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/workspace.rs) | `ui::workspace` | Dual-pane workspace screen (`WorkspaceScreen`) and worker multiplexer tab bar (`WorkerTabBar`). Implements 50/50 side-by-side vs fullscreen layout modes and Tokyo Night active focus borders. |
+| [`header_bar.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/header_bar.rs) | `ui::header_bar` | Zellij-inspired top HeaderBar widget displaying bold cyan `mind` logo, active session pill, quota progress bar, green dot MCP health status, and worker count telemetry. |
+| [`bottom_bar.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/bottom_bar.rs) | `ui::bottom_bar` | Multi-segment BottomBar widget displaying mode indicator badge (`NORMAL MODE` vs `PTY INTERACT`), dynamic action pills, notice alerts, and platform architecture badge (`POSIX PTY` / `ConPTY`). |
+| [`select_worker_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/select_worker_modal.rs) | `ui::select_worker_modal` | Slot selector modal (`SelectWorkerModal`) with live search filter query, table columns (slot, role, model, status, email), and spawn action. |
+| [`new_worker_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/new_worker_modal.rs) | `ui::new_worker_modal` | Backward-compatibility facade re-exporting `SelectWorkerModal` as `NewWorkerModal`. |
+| [`help_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/help_modal.rs) | `ui::help_modal` | Accessible shortcuts help popup modal (`HelpModal`) matching Python Mind: Vim modal architecture, leader exits (`Esc Esc`, `Ctrl+B`, `F12`), Normal mode single-key shortcuts, directives, and clipboard. |
 | [`directive_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/directive_modal.rs) | `ui::directive_modal` | Directive injection modal (`DirectiveModal`), priority selection (`DirectivePriority`: Low, Normal, High, Critical), text cursor input, and submit action. |
-| [`directive_editor.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/directive_editor.rs) | `ui::directive_editor` | In-app multiline directive editor modal (`DirectiveEditorModal`) with line numbers, scrolling, cursor positioning, and `Ctrl+S` / `Ctrl+Enter` save action. |
-| [`new_worker_modal.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/new_worker_modal.rs) | `ui::new_worker_modal` | Dynamic agent slot provisioning modal (`NewWorkerModal`), table of available host slots (`IdentityDiscovery`), and spawn action. |
+| [`directive_editor.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/directive_editor.rs) | `ui::directive_editor` | In-app multiline directive editor modal (`DirectiveEditorModal`) with line numbers gutter (`1 │ `), scrolling, cursor positioning, and `Ctrl+S` persistence. |
+| [`session_picker.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/session_picker.rs) | `ui::session_picker` | Interactive full-screen session picker (`SessionPickerScreen`), table listing, inline new session prompt dialog, deletion confirmation, and `SessionPickerAction`. |
+| [`split_panes.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/split_panes.rs) | `ui::split_panes` | Multiplexer widget supporting Single, Horizontal, Vertical, and Grid layouts with active focus borders and history scroll indicators. |
 | [`status_bar.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/status_bar.rs) | `ui::status_bar` | Accessible status bar displaying active worker ID, real slot ID, role title, PID, model, token counters, and alert badges. |
 | [`worker_list.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/worker_list.rs) | `ui::worker_list` | Dynamic worker session list widget with real role titles, process states (`●`, `○`, `⚡`, `🚨`), task previews, and selection indicators. |
-| [`split_panes.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/split_panes.rs) | `ui::split_panes` | Multiplexer widget supporting Single, Horizontal, Vertical, and Grid layouts with active focus borders and history scroll indicators. |
 | [`gauges.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/gauges.rs) | `ui::gauges` | Real-time progress gauges for hourly quota, weekly quota, and CPU/RAM usage meters with theme-aware color thresholds. |
 | [`terminal_screen.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/terminal_screen.rs) | `ui::terminal_screen` | Zero-overhead ANSI character matrix renderer supporting both live cell buffers and history scrollback slices (`from_owned_cells`). |
 | [`theme.rs`](file:///home/pluto/projects/mind/tui-core/src/ui/theme.rs) | `ui::theme` | Color palette tokens, accessible theme modes (Tokyo Night, High Contrast Dark/Light, Color-Blind), glyphs, and style helpers. |
@@ -74,34 +85,78 @@ The module completely decouples backend PTY process buffers, identity discovery,
 
 ## 3. Component Specifications & State Models
 
-### 3.1 SessionPickerScreen (`session_picker.rs`)
+### 3.1 WorkspaceScreen & WorkerTabBar (`workspace.rs`)
 - **State Model**:
   ```rust
-  pub struct SessionPickerScreen {
-      pub sessions: Vec<SessionRecord>,
-      pub selected_index: usize,
-      pub is_creating: bool,
-      pub new_session_name: String,
-      pub notice: Option<String>,
-      store: Arc<SessionStore>,
-      theme: Theme,
+  pub struct WorkspaceScreen {
+      pub is_split_view: bool,
+      pub focused_pane: FocusedPane,
+      pub mode: AppMode,
+      pub coordinator: Option<Arc<WorkerSession>>,
+      pub workers: Vec<Arc<WorkerSession>>,
+      pub theme: Theme,
   }
   ```
-- **Actions Emitted (`SessionPickerAction`)**:
-  - `Open(SessionRecord)`: User pressed `Enter` on a session row; loads and restores all workers in that session.
-  - `Create(String)`: User entered a session name in the inline dialog and pressed `Enter`.
-  - `Delete(String)`: User pressed `d` to delete the selected session.
-  - `Exit`: User pressed `q` or `Esc` to return to the multiplexer screen.
-  - `None`: Internal navigation event (Up/Down arrows, typing in create prompt).
-- **Keybindings**:
-  - `↑` / `k`: Select previous session.
-  - `↓` / `j`: Select next session.
-  - `Enter`: Open selected session.
-  - `n`: Trigger inline create session dialog.
-  - `d`: Delete selected session.
-  - `Esc` / `q`: Exit picker.
+- **Geometry & Layout Calculation**:
+  - `is_split_view == true`: 50/50 side-by-side split. Left coordinator pane takes 50% width; right worker multiplexer pane takes 50% width.
+  - `is_split_view == false`: Fullscreen toggle on `s` key. If Coordinator is focused, Left pane expands to 100% width. If Worker is focused, Right pane expands to 100% width.
+- **Visual Styling**:
+  - Focused pane: prominent Tokyo Night accent border (`#7aa2f7` / `#7dcfff`, bold).
+  - Inactive pane: muted border (`#565f89`).
 
-### 3.2 HelpModal (`help_modal.rs`)
+### 3.2 HeaderBar (`header_bar.rs`)
+- **State Model**:
+  ```rust
+  pub struct HeaderBar {
+      pub session_name: String,
+      pub worker_count: usize,
+      pub mode: AppMode,
+      pub quota_percent: u8,
+      pub quota_text_override: Option<String>,
+      pub mcp_port: u16,
+      pub mcp_active: bool,
+      pub theme: Theme,
+  }
+  ```
+- **Visual Pattern**:
+  - Background: Tokyo Night Night `#16161e`.
+  - Brand Logo: `mind` in bold cyan `#7aa2f7`.
+  - Session Name: active session in `#7dcfff` on `#24283b`.
+  - Quota Pill: `[████████░░] 80%` in bold green `#9ece6a` on `#1f2335`.
+  - MCP Status: `● MCP: 8765` with active green dot `#9ece6a`.
+
+### 3.3 BottomBar (`bottom_bar.rs`)
+- **State Model**:
+  ```rust
+  pub struct BottomBar {
+      pub mode: AppMode,
+      pub active_notice: Option<String>,
+      pub pty_backend: String,
+      pub theme: Theme,
+  }
+  ```
+- **Action Pills**:
+  - Normal Mode: `[?] Help`, `[m] Directive`, `[s] Split`, `[d] Edit`, `[c/n] New`, `[x] Close`, `[q] Quit`, `[i] Type`, `[1..9] Jump`, `[h/l] Tabs`, `[y] Copy`.
+  - PTY Interact Mode: `[Esc Esc / Ctrl+B] Outer Normal`, `[Ctrl+C] Interrupt`, `[Ctrl+M] Inject`, `[Ctrl+D] Directive`, `[Ctrl+Shift+C] Copy`, `[?] Help`.
+  - Architecture Badge: `POSIX PTY · UTF-8` on Linux/macOS, `ConPTY · UTF-8` on Windows.
+
+### 3.4 SelectWorkerModal (`select_worker_modal.rs`)
+- **State Model**:
+  ```rust
+  pub struct SelectWorkerModal {
+      pub slots: Vec<AgentSlot>,
+      pub filter_query: String,
+      pub selected_index: usize,
+      pub is_open: bool,
+      pub theme: Theme,
+  }
+  ```
+- **Features**:
+  - Live search filter input box: filters slots dynamically across slot ID (`agy1`..`200`), name, role, model, and email.
+  - Up/Down navigation with clamping.
+  - Spawns selected slot on `Enter`, cancels on `Esc`.
+
+### 3.5 HelpModal (`help_modal.rs`)
 - **State Model**:
   ```rust
   pub struct HelpModal {
@@ -109,130 +164,46 @@ The module completely decouples backend PTY process buffers, identity discovery,
       is_open: bool,
   }
   ```
-- **Structure**: Rendered as a centered modal popup (64x22) with `Clear` background. Displays categorized shortcut entries matching `agi.toml`:
-  - *Swarm Navigation & Tabs*: `Tab`, `Shift+Tab`, `1..9`, `F5..F8`.
-  - *Directives & Instructions*: `m` / `Ctrl+M` (Inject Directive), `d` / `Ctrl+D` (In-app Editor), `o` / `Ctrl+O` (External Editor).
-  - *Layout & Multiplexing*: `s` (Toggle Horizontal/Vertical/Grid), `n` (Provision Worker Slot), `b` (Toggle Sidebar).
-  - *Terminal & Lifecycle*: `Ctrl+C` (Interrupt), `q` / `Ctrl+Q` (Quit & Persist), `F4` / `Alt+T` (Cycle Themes).
-- **Dismissal**: `Esc`, `q`, or `?`.
-
-### 3.3 DirectiveModal (`directive_modal.rs`)
-- **State Model**:
-  ```rust
-  pub struct DirectiveModal {
-      pub worker_id: String,
-      pub slot_id: String,
-      pub role: String,
-      pub message: String,
-      pub cursor_pos: usize,
-      pub priority: DirectivePriority,
-      pub is_open: bool,
-      pub theme: Theme,
-  }
-  ```
-- **Priority Selector (`DirectivePriority`)**:
-  - `Low`: Teal `#73dac2` (Priority 1)
-  - `Normal`: Blue `#7aa2f7` (Priority 2)
-  - `High`: Yellow/Amber `#e0af68` (Priority 3)
-  - `Critical`: Red `#f7768e` (Priority 4)
-- **Actions Emitted (`DirectiveModalAction`)**:
-  - `Submit { worker_id, message, priority }`: Operator pressed `Enter`. The central loop dispatches an asynchronous call to `engine.session_manager.interrupt_and_inject()`.
-  - `Cancel`: Operator pressed `Esc`.
-- **Keybindings**:
-  - `Tab` / `Shift+Tab`: Cycle priority levels.
-  - `Alt+1` .. `Alt+4`: Directly jump to priority level 1..4.
-  - `Char(c)` / `Backspace` / `Left` / `Right`: In-place directive text editing.
-  - `Enter`: Submit.
-  - `Esc`: Cancel.
-
-### 3.4 DirectiveEditorModal (`directive_editor.rs`)
-- **State Model**:
-  ```rust
-  pub struct DirectiveEditorModal {
-      pub worker_id: String,
-      pub slot_id: String,
-      pub role: String,
-      pub lines: Vec<String>,
-      pub cursor_row: usize,
-      pub cursor_col: usize,
-      pub scroll_offset: usize,
-      pub is_open: bool,
-      pub theme: Theme,
-  }
-  ```
 - **Features**:
-  - Multiline text editing with automatic line insertion and line joining.
-  - Line numbers gutter styled with muted theme colors.
-  - Active line and cursor position highlighting (`[Row X, Col Y]`).
-  - Auto-scrolling viewport following the cursor.
-- **Actions Emitted (`DirectiveEditorAction`)**:
-  - `Save(String)`: Dispatched on `Ctrl+S` or `Ctrl+Enter`. Updates the worker's instruction task in memory and forwards the new instructions to the worker PTY.
-  - `Cancel`: Dispatched on `Esc`.
-
-### 3.5 NewWorkerModal (`new_worker_modal.rs`)
-- **State Model**:
-  ```rust
-  pub struct NewWorkerModal {
-      pub slots: Vec<AgentSlot>,
-      pub selected_index: usize,
-      pub is_open: bool,
-      pub theme: Theme,
-  }
-  ```
-- **Features**:
-  - Discovers installed host agent slots via `IdentityDiscovery::discover_slots()`.
-  - Displays a clean Ratatui table showing: Slot ID (`agy[x]`), Role title, Model name, Token status badge (`[TOKEN]` vs `[NO TOKEN]`), and Status.
-  - Selecting a slot dynamically provisions a new `WorkerSession` configured with isolated environment variables (`USERPROFILE`, `HOME`, `AGY_SLOT`, `ANTIGRAVITY_APP_DATA_DIR`).
-- **Actions Emitted (`NewWorkerModalAction`)**:
-  - `Spawn(AgentSlot)`: Dispatched on `Enter`.
-  - `Cancel`: Dispatched on `Esc` or `q`.
+  - Categorized reference cards: Vim-like Modal Architecture, Mode Switching & Leader Controls (`Esc Esc`, `Ctrl+B`, `F12`), Normal Mode Navigation & Tab Controls (`1..9`, `h/l`, `c`, `x`, `s`, `Tab`), Inter-Agent & Directive Injection (`m`, `d`, `o`, `Ctrl+C`), and Clipboard.
 
 ---
 
-## 4. Real Agent Identity & Role Indicators
+## 4. Keyboard Shortcuts & Leader Key Controls
 
-Both `StatusBarWidget` and `WorkerListWidget` extract and render real agent identities:
-- **Real Role Titles**: Dynamically parsed from `.gemini/GEMINI.md` (e.g. `Backend Logic & Systems Engineer`, `Frontend Engineer & UI Auditor`, `Primary Coordinator`).
-- **Real Slot Identifiers**: Formatted as `{worker_id}:{slot_id} [{role}]` (e.g. `1:agy11 [Backend Systems]`).
-- **Model Labels**: Formatted from discovered slot settings (e.g. `gemini-3.8-flash-high`).
-- **Alert Badges**: Shape- and color-differentiated status pills:
-  - `⚡ Worker Finished`: Idle worker awaiting operator review.
-  - `🚨 Assistance Needed`: Critical alarm requiring manual intervention.
-  - `Notice Pills`: Temporary notifications for session creation, deletion, or directive delivery.
-
----
-
-## 5. Keyboard Ergonomics & Integration Shortcuts
-
-| Hotkey / Shortcut | Target Screen / Modal | Behavior |
+| Hotkey / Shortcut | Mode | Action |
 |---|---|---|
-| `Ctrl+P` | Multiplexer -> Session Picker | Switch to interactive session picker screen |
-| `?` | Multiplexer -> Help Modal | Toggle keyboard shortcuts reference popup |
-| `m` / `Ctrl+M` | Multiplexer -> Directive Modal | Open directive injection modal for active worker |
-| `d` / `Ctrl+D` | Multiplexer -> Directive Editor | Open in-app multiline directive editor |
-| `n` | Multiplexer -> New Worker Modal | Open dynamic agent slot provisioning modal |
-| `s` | Multiplexer | Cycle split layout: Single -> Horizontal -> Vertical -> Grid |
-| `b` | Multiplexer | Toggle worker metadata & quota gauges sidebar |
-| `Tab` / `Shift+Tab` | Multiplexer | Cycle active worker tab / pane focus |
-| `1`..`9` / `F5`..`F8` | Multiplexer | Fast tab jump to worker #1..#9 |
-| `PageUp` / `PageDown` | Multiplexer | Terminal history scrollback navigation |
-| `F4` / `Alt+T` | All Screens | Cycle accessible theme mode (Tokyo Night <-> High Contrast <-> Color Blind) |
-| `Ctrl+C` | Multiplexer | Send SIGINT interrupt to active worker PTY |
-| `q` / `Ctrl+Q` | Multiplexer | Save session state and exit application |
+| `i` / `Enter` / `a` | Normal | Enter PTY Insert mode (stream raw keystrokes to child process) |
+| `Esc Esc` (double-tap <350ms) | PTY | Exit PTY mode and return to Normal mode |
+| `Ctrl+B` | PTY | Exit PTY mode and return to Normal mode (leader key 1) |
+| `F12` | PTY | Exit PTY mode and return to Normal mode (leader key 2) |
+| `Tab` | Normal | Toggle focus between Primary Coordinator (`#primary-pane`) and Worker Multiplexer (`#workers-pane`) |
+| `s` | Normal | Toggle split layout: Side-by-side (50/50) vs Fullscreen focused pane |
+| `1`..`9` | Normal | Jump directly to Worker tab #1..#9 |
+| `h` / `l` | Normal | Switch to previous / next worker tab |
+| `c` / `n` | Normal | Open `SelectWorkerModal` to provision/spawn new worker slot |
+| `x` | Normal | Terminate and close active worker tab |
+| `m` / `Ctrl+M` | Any | Open `DirectiveModal` to inject prioritized task prompt |
+| `d` / `Ctrl+D` | Any | Open `DirectiveEditorModal` in-app multiline editor |
+| `o` / `Ctrl+O` | Any | Open directive file in external editor (`$EDITOR`) |
+| `Ctrl+C` | Any | Send SIGINT interrupt to active worker PTY |
+| `Ctrl+P` | Normal | Launch interactive `SessionPickerScreen` |
+| `?` | Normal | Toggle `HelpModal` keyboard shortcuts reference |
+| `q` | Normal | Cleanly shut down worker processes, persist session, and quit |
 
 ---
 
-## 6. Testing & Verification
+## 5. Testing & Verification
 
-The UI module includes comprehensive unit and integration tests:
-- `ui::session_picker::tests`: Verifies session list navigation, create dialog, and delete action.
-- `ui::help_modal::tests`: Verifies help popup open/close keybindings and layout rendering.
-- `ui::directive_modal::tests`: Verifies priority cycling, text cursor editing, and submit action.
-- `ui::directive_editor::tests`: Verifies multiline text editing, cursor navigation, and Ctrl+S save.
-- `ui::new_worker_modal::tests`: Verifies slot discovery, selection navigation, and spawn action.
-- `tests/ui_widgets_test.rs`: Full integration test suite rendering all widgets and modals using Ratatui `TestBackend`.
+The UI test suite passes 100% across unit and integration tests:
+- `ui::header_bar::tests`: Verifies logo branding, session name, quota progress bar, and MCP indicator rendering.
+- `ui::bottom_bar::tests`: Verifies normal mode action pills, PTY mode action pills, and architecture badge.
+- `ui::workspace::tests`: Verifies dual-pane geometry, 50/50 split vs fullscreen toggle on `s`, and `WorkerTabBar` rendering.
+- `ui::select_worker_modal::tests`: Verifies live search query filtering, slot navigation, and spawn dispatch.
+- `ui::help_modal::tests`: Verifies modal open/close transitions, leader keys, and hotkey reference rendering.
+- `tests/ui_widgets_test.rs`: 18 comprehensive integration tests covering all widgets and modals.
 
-Run the entire UI test suite with:
+Run the test suite:
 ```bash
-cargo test --manifest-path tui-core/Cargo.toml --test ui_widgets_test
+cargo test --manifest-path tui-core/Cargo.toml
 ```
