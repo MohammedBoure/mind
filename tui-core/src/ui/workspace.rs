@@ -276,10 +276,19 @@ impl Widget for &WorkspaceScreen {
                 Style::default().fg(workspace_colors::BORDER_MUTED)
             };
 
-            let coord_title = if is_coord_focused {
-                " 👑 Primary Coordinator (Slot 1 agy1) [FOCUSED] "
+            let coord_title = if let Some(ref coord) = self.coordinator {
+                let off = coord.scroll_offset();
+                if off > 0 {
+                    format!(" 👑 Primary Coordinator (Slot 1 agy1) [SCROLL: +{}] ", off)
+                } else if is_coord_focused {
+                    " 👑 Primary Coordinator (Slot 1 agy1) [FOCUSED] ".to_string()
+                } else {
+                    " 👑 Primary Coordinator (Slot 1 agy1) ".to_string()
+                }
+            } else if is_coord_focused {
+                " 👑 Primary Coordinator (Slot 1 agy1) [FOCUSED] ".to_string()
             } else {
-                " 👑 Primary Coordinator (Slot 1 agy1) "
+                " 👑 Primary Coordinator (Slot 1 agy1) ".to_string()
             };
 
             let coord_block = Block::default()
@@ -291,9 +300,12 @@ impl Widget for &WorkspaceScreen {
                 let pty = coord.pty.lock();
                 let b = pty.buffer();
                 let lock_guard = b.lock();
-                let screen_widget = TerminalScreenWidget::from_buffer(&lock_guard)
+                let offset = coord.scroll_offset();
+                let height = left_rect.height.saturating_sub(2) as usize;
+                let (cells, cursor) = lock_guard.viewport_cells(offset, height);
+                let screen_widget = TerminalScreenWidget::from_owned_cells(cells, cursor, lock_guard.version())
                     .block(coord_block)
-                    .show_cursor(is_coord_focused && self.mode == AppMode::PtyInteract);
+                    .show_cursor(offset == 0 && is_coord_focused && self.mode == AppMode::PtyInteract);
                 screen_widget.render(left_rect, buf);
             } else {
                 let empty_coord = Paragraph::new("\n  Coordinator PTY initializing (Slot 1 agy1)...")
@@ -346,7 +358,7 @@ impl Widget for &WorkspaceScreen {
                 Style::default().fg(workspace_colors::BORDER_MUTED)
             };
 
-            let worker_view_block = Block::default()
+            let mut worker_view_block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(worker_view_border_style);
 
@@ -354,9 +366,18 @@ impl Widget for &WorkspaceScreen {
                 let pty = active_w.pty.lock();
                 let b = pty.buffer();
                 let lock_guard = b.lock();
-                let screen_widget = TerminalScreenWidget::from_buffer(&lock_guard)
+                let offset = active_w.scroll_offset();
+                if offset > 0 {
+                    worker_view_block = worker_view_block.title(Span::styled(
+                        format!(" Active Worker [SCROLL: +{}] ", offset),
+                        worker_view_border_style,
+                    ));
+                }
+                let height = worker_subchunks[1].height.saturating_sub(2) as usize;
+                let (cells, cursor) = lock_guard.viewport_cells(offset, height);
+                let screen_widget = TerminalScreenWidget::from_owned_cells(cells, cursor, lock_guard.version())
                     .block(worker_view_block)
-                    .show_cursor(is_worker_pane_focused && self.mode == AppMode::PtyInteract);
+                    .show_cursor(offset == 0 && is_worker_pane_focused && self.mode == AppMode::PtyInteract);
                 screen_widget.render(worker_subchunks[1], buf);
             } else {
                 let placeholder = Paragraph::new(

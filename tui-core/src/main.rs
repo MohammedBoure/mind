@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::io::stdout;
+use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::time::Instant;
 use crossterm::{
     cursor,
-    event::{KeyCode, KeyModifiers},
+    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -455,6 +455,69 @@ fn compute_pane_geometries(
     }
 }
 
+// ── Clipboard & Base64 Helpers ───────────────────────────────────────
+
+fn base64_encode(data: &str) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = data.as_bytes();
+    let mut result = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+
+        result.push(CHARS[b0 >> 2] as char);
+        result.push(CHARS[((b0 & 3) << 4) | (b1 >> 4)] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((b1 & 15) << 2) | (b2 >> 6)] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[b2 & 63] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+fn copy_to_clipboard(text: &str) -> bool {
+    // 1. Universal OSC 52 sequence for local and remote SSH/Termux terminals
+    let b64 = base64_encode(text);
+    let osc52 = format!("\x1b]52;c;{}\x07", b64);
+    print!("{}", osc52);
+    let _ = std::io::stdout().flush();
+
+    // 2. Also try xclip if available on Linux desktop
+    if let Ok(mut child) = std::process::Command::new("xclip")
+        .arg("-selection")
+        .arg("clipboard")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+        return true;
+    }
+
+    // 3. Fallback to wl-copy for Wayland
+    if let Ok(mut child) = std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+        return true;
+    }
+
+    true
+}
+
 // ── Interactive Dual-Pane TUI Workspace (`agi`) ─────────────────────
 
 async fn run_tui_app(
@@ -463,7 +526,7 @@ async fn run_tui_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
+    execute!(stdout, EnterAlternateScreen, cursor::Hide, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -907,7 +970,60 @@ async fn run_tui_app(
                     // Mode: NORMAL (Vim Command Mode)
                     // Clipboard Yank: 'y'
                     if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
-                        active_modal_notice = Some("Buffer yanked / copied to clipboard (y)".into());
+                        if let Some(session) = engine.active_session() {
+                            let text = session.get_screen_text(500);
+                            let lines_cnt = text.lines().count();
+                            copy_to_clipboard(&text);
+                            active_modal_notice = Some(format!("Copied {} lines of {} to system clipboard (y)", lines_cnt, session.id));
+                        }
+                        continue;
+                    }
+
+                    // Terminal History Scrolling in Focused Pane:
+                    // PageUp / Ctrl+U / 'k': Scroll up into history
+                    if key.code == KeyCode::PageUp
+                        || (key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL))
+                        || key.code == KeyCode::Char('k')
+                    {
+                        if let Some(session) = engine.active_session() {
+                            session.scroll_up(5);
+                            active_modal_notice = Some(format!("Scroll: +{} (G to return bottom)", session.scroll_offset()));
+                        }
+                        continue;
+                    }
+
+                    // PageDown / Ctrl+D / 'j': Scroll down towards live output
+                    if key.code == KeyCode::PageDown
+                        || (key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL))
+                        || key.code == KeyCode::Char('j')
+                    {
+                        if let Some(session) = engine.active_session() {
+                            session.scroll_down(5);
+                            let off = session.scroll_offset();
+                            if off == 0 {
+                                active_modal_notice = Some("Live Bottom View".into());
+                            } else {
+                                active_modal_notice = Some(format!("Scroll: +{} (G to return bottom)", off));
+                            }
+                        }
+                        continue;
+                    }
+
+                    // 'G': Jump to live bottom
+                    if key.code == KeyCode::Char('G') {
+                        if let Some(session) = engine.active_session() {
+                            session.reset_scroll();
+                            active_modal_notice = Some("Jumped to live bottom view".into());
+                        }
+                        continue;
+                    }
+
+                    // 'g': Jump to top of scrollback history
+                    if key.code == KeyCode::Char('g') {
+                        if let Some(session) = engine.active_session() {
+                            session.scroll_up(10000);
+                            active_modal_notice = Some(format!("Top of history: +{} (G to return bottom)", session.scroll_offset()));
+                        }
                         continue;
                     }
 
@@ -1147,6 +1263,56 @@ async fn run_tui_app(
                     );
                     engine.resize_panes(c_r, c_c, w_r, w_c);
                 }
+                AppEvent::Mouse(mouse) => {
+                    use crossterm::event::{MouseButton, MouseEventKind};
+                    let (t_w, _t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                    let half_w = t_w / 2;
+
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => {
+                            if !is_split_view {
+                                if let Some(session) = engine.active_session() {
+                                    session.scroll_up(3);
+                                }
+                            } else if mouse.column < half_w {
+                                if let Some(coord) = engine.session_manager.coordinator() {
+                                    coord.scroll_up(3);
+                                }
+                            } else if let Some(worker) = engine.active_session() {
+                                worker.scroll_up(3);
+                            }
+                        }
+                        MouseEventKind::ScrollDown => {
+                            if !is_split_view {
+                                if let Some(session) = engine.active_session() {
+                                    session.scroll_down(3);
+                                }
+                            } else if mouse.column < half_w {
+                                if let Some(coord) = engine.session_manager.coordinator() {
+                                    coord.scroll_down(3);
+                                }
+                            } else if let Some(worker) = engine.active_session() {
+                                worker.scroll_down(3);
+                            }
+                        }
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            if is_split_view {
+                                if mouse.column < half_w {
+                                    if !matches!(engine.session_manager.focused_pane(), FocusedPane::Coordinator) {
+                                        engine.session_manager.set_focused_pane(FocusedPane::Coordinator);
+                                        active_modal_notice = Some("Focused: Primary Coordinator".into());
+                                    }
+                                } else {
+                                    if !matches!(engine.session_manager.focused_pane(), FocusedPane::Workers(_)) {
+                                        engine.session_manager.set_focused_pane(FocusedPane::Workers(0));
+                                        active_modal_notice = Some("Focused: Worker Tab Viewport".into());
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 AppEvent::Tick => {}
                 AppEvent::Alarm(alarm) => {
                     if let Some(s) = engine.session_manager.get_session(&alarm.worker_id) {
@@ -1163,6 +1329,6 @@ async fn run_tui_app(
     let _ = engine.session_manager.save_current_session();
     engine.shutdown();
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show, DisableMouseCapture)?;
     Ok(())
 }
