@@ -164,7 +164,7 @@ async fn test_pty_burst_during_dynamic_resize() {
         args: if cfg!(windows) {
             vec!["/c".into(), "for /L %i in (1,1,100) do @echo RESIZE_BURST_%i".into()]
         } else {
-            vec!["-c".into(), "for i in $(seq 1 150); do echo \"RESIZE_BURST_$i\"; usleep 2000; done".into()]
+            vec!["-c".into(), "for i in $(seq 1 150); do echo \"RESIZE_BURST_$i\"; sleep 0.002; done".into()]
         },
         cwd: None,
         env: HashMap::new(),

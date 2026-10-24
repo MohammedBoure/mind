@@ -19,9 +19,9 @@ pub use ipc::{
 };
 pub use pty::{CellColor, PtyConfig, PtyMaster, PtyProcess, ScreenBuffer, ScreenCell};
 pub use session::{
-    Action, AgentSlot, AgiConfig, GeneralConfig, IdentityDiscovery, KeyBinding, SessionManager,
-    SessionRecord, SessionStore, SessionWorkerConfig, ShortcutConfig, ShortcutEngine, WorkerSession,
-    WorkerState,
+    Action, AgentSlot, AgiConfig, AppMode, FocusedPane, GeneralConfig, IdentityDiscovery, KeyBinding,
+    SessionManager, SessionRecord, SessionStore, SessionWorkerConfig, ShortcutConfig,
+    ShortcutEngine, WorkerSession, WorkerState,
 };
 pub use ui::{
     AlertBadge, DirectiveEditorAction, DirectiveEditorModal, DirectiveModal, DirectiveModalAction,

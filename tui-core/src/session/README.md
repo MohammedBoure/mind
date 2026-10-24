@@ -1,32 +1,38 @@
-# `tui-core/src/session/` — Multi-Agent Session, Identity Discovery & Shortcuts Engine
+# `tui-core/src/session/` — Multi-Agent Session, Dual-Pane PTY Architecture & Vim Modal Engine
 
-> **Swarm Session Orchestration, Real Identity Discovery & Configurable Shortcuts** for the compiled multi-agent TUI engine.
+> **Dual-Pane PTY Swarm Architecture, Vim Modal State Machine, Real Identity Discovery & Storage Parity** for the compiled multi-agent TUI engine.
 > Maintained by Systems & Backend Specialists (`agy11`).
 
 ---
 
 ## 1. Overview & Architecture
 
-The `session` module provides complete session lifecycle management, persistence, dynamic agent slot discovery, and configurable keyboard shortcuts for the compiled TUI core.
+The `session` module provides complete 1:1 functional and architectural parity with Python `mind` for multi-agent session lifecycle management, dual-pane PTY multiplexing (Primary Coordinator on left, interactive Worker tabs on right), dual Vim modal states (`NORMAL` vs `PTY_INTERACT`), dynamic agent slot discovery, and two-way storage synchronization between individual sessions and `~/.mind/sessions.json`.
 
 ```
-+-----------------------------------------------------------------------------+
-|                          Session & Identity Subsystem                       |
-+-----------------------------------------------------------------------------+
-|                               SessionManager                                |
-|   ├── SessionStore: ~/.mind/sessions/<name>.json                            |
-|   │     ├── SessionRecord ("default", "alpha_mission")                      |
-|   │     ├── Activity Telemetry (steps, interactions, last_activity)         |
-|   │     └── Atomic persistence & session pruning                            |
-|   ├── IdentityDiscovery: ~/.local/share/agy-instances/agy[x]                 |
-|   │     ├── Real Slot Metadata (slot_id: 11, role, model, task, token)      |
-|   │     ├── GEMINI.md Role Parsing & settings.json Model Extraction         |
-|   │     └── Environment Isolation (USERPROFILE, HOME, AGY_SLOT)             |
-|   ├── ShortcutEngine: ~/.config/mind/agi.toml                               |
-|   │     ├── Exact Python-Parity Shortcuts (q, ?, Tab, m, d, o, s, n)        |
-|   │     └── Configurable Tab Keys (1..9, F5..F8) avoiding Alt conflicts     |
-|   └── McpBackend implementation (JSON-RPC tool endpoints)                  |
-+-----------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------+
+|                          Session & Dual-Pane Subsystem                                |
++---------------------------------------------------------------------------------------+
+|                               SessionManager                                          |
+|   ├── Dedicated Coordinator: Arc<WorkerSession> (#primary-pane / agy1)                |
+|   ├── Ordered Workers: Vec<Arc<WorkerSession>> (#workers-pane / agy2..N)              |
+|   ├── FocusedPane Tracking: FocusedPane::Coordinator vs FocusedPane::Workers(usize)   |
+|   ├── Dual Vim-Style Mode State Machine:                                              |
+|   │     ├── AppMode::Normal: Single-key commands (1..9, h/l, Tab, s, m, d, o, c, x, q) |
+|   │     └── AppMode::PtyInteract: Raw keystroke passthrough to active PTY             |
+|   │           └── Leader Exit: Ctrl+B, F12, or double-Escape (Esc Esc within 350ms)   |
+|   ├── SessionStore: ~/.mind/sessions/<name>.json & ~/.mind/sessions.json              |
+|   │     ├── SessionRecord with synchronized `workers` and `agent_configs`             |
+|   │     ├── Activity Telemetry (steps, interactions, last_activity)                   |
+|   │     └── Two-way JSON persistence & automatic pruning                              |
+|   ├── IdentityDiscovery: ~/.local/share/agy-instances/agy[x]                           |
+|   │     ├── Real Slot Metadata (slot_id: 11, role, model, task, token, email)         |
+|   │     ├── GEMINI.md Role Parsing & settings.json Model Extraction                   |
+|   │     └── Environment Isolation (USERPROFILE, HOME, AGY_SLOT, AGY_INSTANCE_DIR)     |
+|   ├── ShortcutEngine: ~/.config/mind/agi.toml                                         |
+|   │     └── Configurable key mapping with Python-parity fallback defaults             |
+|   └── McpBackend implementation (Stdio JSON-RPC 2.0 tool endpoints)                   |
++---------------------------------------------------------------------------------------+
 ```
 
 ---
@@ -35,134 +41,74 @@ The `session` module provides complete session lifecycle management, persistence
 
 | File | Purpose |
 |---|---|
-| [`mod.rs`](file:///home/pluto/projects/mind/tui-core/src/session/mod.rs) | Public re-exports for session management, identity discovery, shortcuts, and persistent storage. |
-| [`identity.rs`](file:///home/pluto/projects/mind/tui-core/src/session/identity.rs) | Host agent slot discovery engine (`IdentityDiscovery`, `AgentSlot`). Discovers slots under `~/.local/share/agy-instances/agy[x]`, inspects `.gemini/GEMINI.md` to extract real roles, reads `antigravity-cli/settings.json` for model configurations, extracts token/email metadata, and builds slot isolation environment variables. |
-| [`session_store.rs`](file:///home/pluto/projects/mind/tui-core/src/session/session_store.rs) | Persistent session storage (`SessionStore`, `SessionRecord`, `SessionWorkerConfig`). Manages saving and loading multi-agent sessions to `~/.mind/sessions/<name>.json` with atomic rename writes, activity telemetry updates, and session pruning (`clean_sessions`). |
+| [`mod.rs`](file:///home/pluto/projects/mind/tui-core/src/session/mod.rs) | Public re-exports for session management, dual-pane types (`FocusedPane`, `AppMode`), identity discovery, shortcuts, and persistent storage. |
+| [`manager.rs`](file:///home/pluto/projects/mind/tui-core/src/session/manager.rs) | Central multi-agent orchestrator (`SessionManager`). Holds dedicated `coordinator` and ordered `workers`, tracks `FocusedPane`, executes Vim mode transitions (`enter_pty`, `enter_normal`), handles `Tab` pane focus toggling, worker tab jumping (`jump_worker_tab`), cycling (`next_worker_tab`, `prev_worker_tab`), worker closing (`close_active_worker`), terminal resize propagation (`broadcast_resize`), and MCP tools. |
+| [`session_store.rs`](file:///home/pluto/projects/mind/tui-core/src/session/session_store.rs) | Persistent session storage (`SessionStore`, `SessionRecord`, `SessionWorkerConfig`). Manages saving and loading multi-agent sessions to both `~/.mind/sessions/<name>.json` and aggregate `~/.mind/sessions.json` with two-way field synchronization (`sync_configs`), atomic rename writes, activity telemetry updates, and session pruning (`clean_sessions`). |
 | [`shortcuts.rs`](file:///home/pluto/projects/mind/tui-core/src/session/shortcuts.rs) | Python-parity configurable shortcut engine (`ShortcutEngine`, `ShortcutConfig`, `AgiConfig`). Parses `~/.config/mind/agi.toml` and `~/.mind/config.toml`, resolves keyboard events into semantic `Action`s, and allows fully custom tab keys. |
 | [`worker.rs`](file:///home/pluto/projects/mind/tui-core/src/session/worker.rs) | Worker session abstraction (`WorkerSession`) encapsulating PTY process, virtual screen buffer, state transitions (`Spawning`, `Running`, `Idle`, `Interrupted`, `Exited`), idle prompt heuristics (`is_idle_prompt`), role/model/task accessors, scrollback offset state (`scroll_offset`), and clean process termination (`kill`). |
-| [`manager.rs`](file:///home/pluto/projects/mind/tui-core/src/session/manager.rs) | Central multi-agent orchestrator (`SessionManager`). Bridges active worker tabs with `SessionStore`, restores saved sessions, handles active tab focus cycling (`next_session`, `prev_session`, `select_index`), terminal resizing propagation (`broadcast_resize`), alarm queues, and graceful shutdown. |
+| [`identity.rs`](file:///home/pluto/projects/mind/tui-core/src/session/identity.rs) | Host agent slot discovery engine (`IdentityDiscovery`, `AgentSlot`). Discovers slots under `~/.local/share/agy-instances/agy[x]`, inspects `.gemini/GEMINI.md` to extract real roles, reads `antigravity-cli/settings.json` for model configurations, extracts token/email metadata, and builds slot isolation environment variables. |
 
 ---
 
-## 3. Persistent Storage Specification (`~/.mind/sessions/<name>.json`)
+## 3. Dual-Pane PTY Architecture & Focus Tracking
 
-Session records are serialized as structured JSON documents:
+To match Python `mind` (`workspace.py`), the workspace layout separates the terminal into two primary panes:
+- **Left Pane (`#primary-pane`)**: Dedicated Primary Coordinator running slot 1 (`agy1`). This terminal acts as the lead orchestrator and stays visible on screen at all times.
+- **Right Pane (`#workers-pane`)**: Interactive Worker Multiplexer with a visible tab bar at top (`1..9`) and the active worker terminal below.
 
-```json
-{
-  "name": "default",
-  "created_at": "2026-10-23T20:00:00Z",
-  "last_activity": "2026-10-23T22:30:00Z",
-  "agent_count": 4,
-  "goal": "Multi-Agent AI Orchestration & Parallel Systems Engineering",
-  "active": true,
-  "total_steps": 142,
-  "total_interactions": 38,
-  "status": "active",
-  "working_dir": "/home/pluto/projects/mind",
-  "workers": [
-    {
-      "id": "coordinator",
-      "slot_id": "agy1",
-      "role": "Lead Orchestrator",
-      "model": "gemini-3.8-flash-high",
-      "task": "Overseeing multi-agent fleet"
-    },
-    {
-      "id": "worker-backend",
-      "slot_id": "agy11",
-      "role": "Backend Logic & Systems",
-      "model": "gemini-3.8-flash-high",
-      "task": "Core systems & API architecture"
-    }
-  ],
-  "global_settings": {}
-}
-```
+### Focus Navigation & Keystrokes
+- `FocusedPane::Coordinator`: Focus is directed to the left Primary Coordinator PTY.
+- `FocusedPane::Workers(usize)`: Focus is directed to worker tab `usize` on the right pane.
+- **`Tab` / `Shift+Tab`**: Toggles focus back and forth between `FocusedPane::Coordinator` and the active worker tab via `switch_pane_focus()`.
+- **`1`..`9`**: Jumps directly to worker tab #1 through #9 via `jump_worker_tab(n)`.
+- **`h` / `l`**: Cycles worker tabs left or right in the workers pane via `prev_worker_tab()` and `next_worker_tab()`.
 
 ---
 
-## 4. Host Slot Identity & Isolation (`IdentityDiscovery`)
+## 4. Dual Vim-Style Mode State Machine
 
-Worker sessions are tied directly to host system slots under `/home/pluto/.local/share/agy-instances/agy[x]`:
+`SessionManager` exposes `AppMode` with two distinct operational states matching Python `mind`:
 
-- **Role Extraction**: Parsed from `# Role & Guidelines: <Role>` in `.gemini/GEMINI.md`, with automatic domain fallback based on slot ID ranges (e.g. 11..50 = Backend Logic & Systems, 51..100 = Frontend & UI/UX).
-- **Model Detection**: Parsed from `model` in `.gemini/antigravity-cli/settings.json` (defaults to `gemini-3.8-flash-high`).
-- **Slot Isolation**: Automatic generation of isolated environment variables:
-  - `USERPROFILE`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `HOME`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `AGY_SLOT`: `x`
-  - `AGY_INSTANCE_DIR`: `/home/pluto/.local/share/agy-instances/agy[x]`
-  - `ANTIGRAVITY_APP_DATA_DIR`: `.../agy[x]/.gemini/antigravity-cli`
-  - `MIND_REAL_USER_HOME`: `/home/pluto`
+### 1. `AppMode::Normal` (Command Mode)
+Single keys trigger application management actions without leaking to child processes:
+- `i`, `Enter`, or `a`: Enters `AppMode::PtyInteract`.
+- `1`..`9`: Jump to worker tab N.
+- `h` / `l`: Previous / Next worker tab.
+- `Tab` / `Shift+Tab`: Switch focus between Coordinator and Worker pane.
+- `s`: Toggle between 50/50 dual split and full-screen focused pane.
+- `m`: Open directive injection modal.
+- `d`: Open in-app multiline directive editor modal.
+- `o`: Open active agent's directive file in external `$EDITOR`.
+- `c` / `n`: Open new worker modal or spawn new agent slot.
+- `x`: Terminate and close active worker tab (`close_active_worker()`).
+- `?`: Open shortcuts help modal.
+- `q`: Clean shutdown and exit.
+- `y`: Yank / copy focused terminal buffer to system clipboard.
 
----
+### 2. `AppMode::PtyInteract` (Insert Mode)
+All keystrokes (alphanumerics, enter, backspace, arrows, Ctrl+C) are piped raw directly into the focused child PTY.
 
-## 5. Python-Parity Configurable Shortcuts (`ShortcutEngine`)
-
-The keyboard shortcut engine supports exact Python parity shortcuts and reads configurations from `~/.config/mind/agi.toml` (and `~/.mind/config.toml`):
-
-| Key | Semantic Action | Description |
-|---|---|---|
-| `q` / `Ctrl+Q` | `Action::Quit` | Save session state and exit application |
-| `?` | `Action::Help` | Toggle shortcuts help modal |
-| `Tab` | `Action::CycleFocus` | Focus next worker tab / pane |
-| `Shift+Tab` / `BackTab` | `Action::CycleFocusReverse` | Focus previous worker tab / pane |
-| `m` / `Ctrl+M` | `Action::DirectiveModal` | Open Directive Injection Modal |
-| `d` / `Ctrl+D` | `Action::DirectiveEditor` | Open In-app Directive Editor Modal |
-| `o` / `Ctrl+O` | `Action::OpenExternalEditor` | Open directive file in system editor ($EDITOR) |
-| `s` | `Action::ToggleSplit` | Toggle split layout (Single -> Horizontal -> Vertical -> Grid) |
-| `n` | `Action::NewWorker` | Dynamically provision and spawn next agent slot |
-| `1`..`9` / `F5`..`F8` | `Action::SelectTab(idx)` | Configurable fast tab jump keys |
-| `PageUp` / `PageDown` | `Action::ScrollUp` / `Down` | Scroll terminal history buffer |
-| `b` | UI Toggle | Toggle worker list and quota gauge sidebar |
-| `F4` / `Alt+T` | Theme Toggle | Cycle themes (TokyoNight <-> HighContrastDark <-> HighContrastLight) |
-| `Ctrl+C` | Interrupt | Send SIGINT to active worker process |
-
-### Example `~/.config/mind/agi.toml`
-
-```toml
-[general]
-theme = "tokyo_night"
-tick_rate_ms = 50
-default_session = "default"
-default_model = "gemini-3.8-flash-high"
-
-[shortcuts]
-quit = ["q", "Ctrl+Q"]
-help = ["?"]
-cycle_focus = ["Tab"]
-cycle_focus_reverse = ["Shift+Tab", "BackTab"]
-directive_modal = ["m", "Ctrl+M"]
-directive_editor = ["d", "Ctrl+D"]
-open_external_editor = ["o", "Ctrl+O"]
-toggle_split = ["s"]
-new_worker = ["n"]
-switch_tab_next = ["Tab", "F6"]
-switch_tab_prev = ["Shift+Tab", "BackTab", "F5"]
-tab_keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
-```
+Exiting back to `Normal` mode is governed by explicit Leader keys:
+- **`Ctrl+B`**: Immediate switch back to `AppMode::Normal`.
+- **`F12`**: Immediate switch back to `AppMode::Normal`.
+- **Double-Escape (`Esc Esc` within 350ms)**: Switches back to `AppMode::Normal`. If `Esc` is pressed only once, the byte `\x1b` is forwarded cleanly to the child PTY.
 
 ---
 
-## 6. CLI Command Suite
+## 5. Storage Parity & Synchronization
 
-```bash
-# Enter active session or launch Session Picker
-agi
+`SessionStore` guarantees 1:1 two-way compatibility between compiled Rust `agi` and Python `mind`:
+- **Individual Session Files**: `~/.mind/sessions/<name>.json`.
+- **Aggregate Sessions File**: `~/.mind/sessions.json`.
+- **Automatic Field Synchronization (`sync_configs`)**:
+  - Automatically bridges Rust's `workers: Vec<SessionWorkerConfig>` and Python's `agent_configs: dict[str, dict[str, Any]]`.
+  - Preserves metrics (`total_steps`, `total_interactions`, `last_activity`, `status`).
+  - Merges records across both storage formats when listing sessions.
 
-# Create and immediately enter a new session
-agi new my_mission
+---
 
-# Inspect saved sessions table
-agi sessions
+## 6. Environment & Configuration
 
-# Prune inactive / completed sessions
-agi sessions --clean
-
-# Run stdio MCP server for agent integration
-agi --mcp-stdio
-
-# Run performance benchmark suite
-agi bench
-```
+- Configuration files searched: `~/.config/mind/agi.toml` and `~/.mind/config.toml`.
+- Persistent session directory: `~/.mind/sessions/` and `~/.mind/sessions.json`.
+- Agent instance directory: `~/.local/share/agy-instances/agy[x]`.
