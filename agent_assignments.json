@@ -1,27 +1,17 @@
 {
   "target_integration_branch": "develop",
-  "integration_status": "COMPLETED",
-  "objective": "Implement Keyboard MCP module (keyboard_type, keyboard_press, keyboard_hotkey) and accurately tune the AI Natural Mouse Engine on live display",
-  "updated_at": "2026-10-25T22:32:00Z",
+  "integration_status": "IN_PROGRESS",
+  "objective": "Live interactive gaming verification: Open a web-based game in browser on DISPLAY=:0, navigate and click with Natural Mouse, play using both Keyboard and Mouse inputs, capture screenshots via Vision Coordinate Grid, and verify gameplay progress.",
+  "updated_at": "2026-10-25T22:58:00Z",
   "assignments": [
-    {
-      "agent_id": "agy11",
-      "worker_id": "worker-4",
-      "role": "Backend / Systems & Math",
-      "branch": "backend/agy11-keyboard-and-mouse-engine",
-      "scope": "1) Implement keyboard MCP module in src/mind/mcp/keyboard.py with Arabic Unicode support and natural typing jitter; 2) Accurately tune natural_mouse.py so it loads neural model and executes real human trajectories on DISPLAY=:0 using xdotool/pyautogui without falling back to dry-run; 3) Expose tools in server.py; 4) Add tests/test_keyboard_mcp.py",
-      "effort": "medium",
-      "status": "COMPLETED"
-    },
     {
       "agent_id": "agy100",
       "worker_id": "3",
       "role": "Testing & Verification Gatekeeper",
-      "branch": "test/agy100-keyboard-and-mouse-tests",
-      "scope": "Gatekeeper verification of keyboard and tuned natural mouse MCP tools, running pytest, and merging into develop",
+      "branch": "test/agy100-gameplay-verification",
+      "scope": "Open an interactive web game (e.g. 2048 at https://play2048.co or Google Pac-Man at https://www.google.com/logos/2010/pacman/pacman10-hp.html or Chrome Dino at https://elgoog.im/t-rex/) in Firefox on DISPLAY=:0. Use capture_screen_with_grid to locate UI elements, use natural_mouse_click to start/focus/interact, use keyboard_press and keyboard_type to play consecutive moves, take before-and-after grid captures to verify score/gameplay advancement, and report with notify_coordinator_worker_idle.",
       "effort": "medium",
-      "dependencies": ["agy11"],
-      "status": "COMPLETED"
+      "status": "DISPATCHED"
     }
   ]
 }
