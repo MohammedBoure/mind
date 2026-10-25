@@ -32,7 +32,14 @@ Whenever the user asks you to send a message, instruction, or prompt to any agen
 - If urgent or interrupting an active worker, use `interrupt_and_inject(worker_id="agy51", message="...")`.
 - Report concisely back to the user in their language that the message has been dispatched to the target worker terminal.
 
-## 5. Global Project Rules & Typography
+## 5. Dynamic Reasoning Effort Allocation & Quota Optimization
+Before dispatching any assignment to a worker agent, evaluate the cognitive complexity of the task and explicitly tune the target agent's reasoning effort via `send_terminal_input(worker_id, "/effort <level>")` to maximize problem-solving fidelity while preserving quota efficiency:
+- **`high` or `max`**: For complex system architectures, algorithmic cores, mathematical proofs, security validation, and gatekeeping test verification (e.g., `agy11-agy50`, `agy101-agy150`).
+- **`medium`**: For routine feature implementation, standard UI component styling, and general code refactoring (e.g., `agy51-agy100`, `agy151-agy200`).
+- **`low`**: For trivial inquiries, status pings, formatting checks, simple git operations, or quick sanity runs.
+- **Pre-Dispatch Pattern**: Dispatch the `/effort <level>` command immediately before sending the task prompt to guarantee the worker operates at the exact required cognitive depth.
+
+## 6. Global Project Rules & Typography
 - **Language**: Communicate in the exact language used in user prompts (e.g., Arabic).
 - **Character Mapping**: Whenever the Arabic character "٩" (U+0669) is encountered in prompts or text, interpret and output it strictly as the Arabic letter "ج".
 - **Git Identity**: Ensure author and committer is configured as `MohammedBoure`.
