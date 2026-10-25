@@ -526,7 +526,7 @@ async fn run_tui_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Hide, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -562,6 +562,7 @@ async fn run_tui_app(
     };
 
     let mut is_split_view = true;
+    let mut mouse_capture_enabled = false;
     let mut active_modal_notice: Option<String> = None;
     let mut last_esc_time: Option<Instant> = None;
 
@@ -907,6 +908,19 @@ async fn run_tui_app(
                             continue;
                         }
 
+                        // Leader Key 7: F9 -> Toggle Mouse Mode (Wheel Scroll vs Native Text Selection)
+                        if key.code == KeyCode::F(9) {
+                            mouse_capture_enabled = !mouse_capture_enabled;
+                            if mouse_capture_enabled {
+                                let _ = execute!(terminal.backend_mut(), EnableMouseCapture);
+                                active_modal_notice = Some("Mouse Capture ON (Wheel Scroll active; hold Shift to select text)".into());
+                            } else {
+                                let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
+                                active_modal_notice = Some("Mouse Capture OFF (Native text drag & selection active)".into());
+                            }
+                            continue;
+                        }
+
                         // Leader Key 3: Double Escape (Esc Esc within 350ms) -> Exit to Normal
                         if key.code == KeyCode::Esc {
                             let now = Instant::now();
@@ -1023,6 +1037,19 @@ async fn run_tui_app(
                         if let Some(session) = engine.active_session() {
                             session.scroll_up(10000);
                             active_modal_notice = Some(format!("Top of history: +{} (G to return bottom)", session.scroll_offset()));
+                        }
+                        continue;
+                    }
+
+                    // F9: Toggle Mouse Mode (Wheel Scroll vs Native Text Selection)
+                    if key.code == KeyCode::F(9) {
+                        mouse_capture_enabled = !mouse_capture_enabled;
+                        if mouse_capture_enabled {
+                            let _ = execute!(terminal.backend_mut(), EnableMouseCapture);
+                            active_modal_notice = Some("Mouse Capture ON (Wheel Scroll active; hold Shift to select text)".into());
+                        } else {
+                            let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
+                            active_modal_notice = Some("Mouse Capture OFF (Native text drag & selection active)".into());
                         }
                         continue;
                     }
@@ -1329,6 +1356,9 @@ async fn run_tui_app(
     let _ = engine.session_manager.save_current_session();
     engine.shutdown();
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show, DisableMouseCapture)?;
+    if mouse_capture_enabled {
+        let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
+    }
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)?;
     Ok(())
 }
