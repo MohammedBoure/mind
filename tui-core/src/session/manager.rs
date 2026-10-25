@@ -409,7 +409,15 @@ impl SessionManager {
         let worker_rows = rows.saturating_sub(7).max(5);
 
         for (idx, w_cfg) in session_record.workers.iter().enumerate() {
-            let (cmd, args) = self.resolve_worker_command(w_cfg, default_cmd);
+            let slot_str = if idx == 0 {
+                "agy1".to_string()
+            } else {
+                w_cfg.slot_id.clone()
+            };
+            let mut resolved_cfg = w_cfg.clone();
+            resolved_cfg.slot_id = slot_str.clone();
+
+            let (cmd, args) = self.resolve_worker_command(&resolved_cfg, default_cmd);
             let env = w_cfg.env.clone().unwrap_or_default();
             let cwd = if !session_record.working_dir.is_empty() {
                 let p = PathBuf::from(&session_record.working_dir);
@@ -426,7 +434,7 @@ impl SessionManager {
 
             let worker = self.spawn_session(
                 &w_cfg.id,
-                &w_cfg.slot_id,
+                &slot_str,
                 cmd,
                 args,
                 cwd,
@@ -435,7 +443,7 @@ impl SessionManager {
                 p_cols,
             )?;
 
-            worker.set_role(&w_cfg.role);
+            worker.set_role(if idx == 0 { "coordinator" } else { &w_cfg.role });
             worker.set_model(&w_cfg.model);
             worker.set_task(w_cfg.task.clone());
 
@@ -706,11 +714,22 @@ impl SessionManager {
         self.sessions.lock().clone()
     }
 
-    /// Find session by worker ID or slot ID.
+    /// Find session by worker ID, slot ID (e.g. "agy51", "51"), or tab name.
     pub fn get_session(&self, id: &str) -> Option<Arc<WorkerSession>> {
+        let clean = id.trim().to_lowercase();
+        let stripped = clean.trim_start_matches("agy");
         let list = self.sessions.lock();
+
         list.iter()
-            .find(|s| s.id == id || s.slot_id == id)
+            .find(|s| {
+                let s_id = s.id.to_lowercase();
+                let s_slot = s.slot_id.to_lowercase();
+                let s_slot_num = s_slot.trim_start_matches("agy");
+
+                s_id == clean
+                    || s_slot == clean
+                    || (!stripped.is_empty() && (s_id == stripped || s_slot_num == stripped))
+            })
             .cloned()
     }
 

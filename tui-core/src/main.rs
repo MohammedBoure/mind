@@ -532,6 +532,17 @@ async fn run_tui_app(
     let mut terminal = Terminal::new(backend)?;
 
     let engine = TuiEngine::default();
+
+    // Start background MCP HTTP/SSE server on 127.0.0.1:8765 for Antigravity integration
+    // Spawned early before any worker PTY processes launch so that `antigravity` instances
+    // find the listening endpoint immediately upon startup.
+    let mcp_srv = Arc::clone(&engine.mcp_server);
+    tokio::spawn(async move {
+        if let Err(e) = mcp_srv.run_http("127.0.0.1:8765").await {
+            tracing::warn!("Embedded MCP HTTP server exited: {}", e);
+        }
+    });
+
     let shell_cmd = if cfg!(windows) { "powershell.exe" } else { "bash" };
     let (rows, cols) = (terminal.size()?.height, terminal.size()?.width);
 
@@ -597,6 +608,7 @@ async fn run_tui_app(
     let mut directive_modal: Option<DirectiveModal> = None;
     let mut directive_editor_modal: Option<DirectiveEditorModal> = None;
     let mut new_worker_modal: Option<NewWorkerModal> = None;
+
 
     loop {
         terminal.draw(|f| {

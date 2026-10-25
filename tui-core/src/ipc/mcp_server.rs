@@ -30,7 +30,8 @@ pub trait McpBackend: Send + Sync {
     async fn get_agent_profile(&self, agent_id: &str) -> Result<Value>;
 }
 
-/// Embedded Model Context Protocol (MCP) server handling JSON-RPC 2.0 requests over stdio or IPC.
+/// Embedded Model Context Protocol (MCP) server handling JSON-RPC 2.0 requests over stdio, HTTP, and SSE.
+#[derive(Clone)]
 pub struct EmbeddedMcpServer {
     backend: Arc<dyn McpBackend>,
 }
@@ -160,11 +161,19 @@ impl EmbeddedMcpServer {
 
         let params = val.get("params").cloned().unwrap_or(Value::Null);
 
+        if method.starts_with("notifications/") {
+            return None;
+        }
+
         match method {
             "initialize" => {
                 Some(JsonRpcResponse::ok(id, json!({
                     "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {} },
+                    "capabilities": {
+                        "tools": { "listChanged": false },
+                        "prompts": { "listChanged": false },
+                        "resources": { "subscribe": false, "listChanged": false }
+                    },
                     "serverInfo": {
                         "name": "mind-mcp-engine",
                         "version": "0.1.0"
@@ -184,13 +193,15 @@ impl EmbeddedMcpServer {
                     Err(e) => Some(JsonRpcResponse::ok(id, serde_json::to_value(McpCallToolResult::error(e.to_string())).unwrap_or(Value::Null))),
                 }
             }
+            "resources/list" => Some(JsonRpcResponse::ok(id, json!({ "resources": [] }))),
+            "prompts/list" => Some(JsonRpcResponse::ok(id, json!({ "prompts": [] }))),
             "ping" => Some(JsonRpcResponse::ok(id, json!({}))),
             _ => Some(JsonRpcResponse::err(id, JsonRpcError::method_not_found(format!("Unknown method: {}", method)))),
         }
     }
 
     /// Dispatch a named tool invocation to the backend.
-    async fn dispatch_tool(&self, name: &str, args: Value) -> Result<McpCallToolResult> {
+    pub async fn dispatch_tool(&self, name: &str, args: Value) -> Result<McpCallToolResult> {
         match name {
             "list_workers" => {
                 let workers = self.backend.list_workers().await?;
@@ -273,5 +284,172 @@ impl EmbeddedMcpServer {
         }
 
         Ok(())
+    }
+
+    /// Run the embedded MCP server over HTTP and SSE on the specified address (e.g. "127.0.0.1:8765").
+    pub async fn run_http(&self, bind_addr: &str) -> Result<()> {
+        let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+        info!("Embedded MCP HTTP/SSE server listening on {}", bind_addr);
+
+        let (sse_tx, _) = tokio::sync::broadcast::channel::<String>(100);
+        let sse_tx = Arc::new(sse_tx);
+
+        loop {
+            let (mut socket, _) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::warn!("MCP accept error: {}", e);
+                    continue;
+                }
+            };
+
+            let server_backend = Arc::clone(&self.backend);
+            let sse_broadcast = Arc::clone(&sse_tx);
+
+            tokio::spawn(async move {
+                let (reader, mut writer) = socket.split();
+                let mut buf_reader = BufReader::new(reader);
+                let mut line = String::new();
+
+                // Read request line
+                if buf_reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    return;
+                }
+
+                let (method, path) = {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() < 2 {
+                        return;
+                    }
+                    (parts[0].to_string(), parts[1].to_string())
+                };
+
+                // Read headers
+                let mut content_length: usize = 0;
+                loop {
+                    line.clear();
+                    if buf_reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                        break;
+                    }
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    if line.to_lowercase().starts_with("content-length:") {
+                        if let Some(val_str) = line.split(':').nth(1) {
+                            content_length = val_str.trim().parse::<usize>().unwrap_or(0);
+                        }
+                    }
+                }
+
+                // Handle CORS preflight
+                if method == "OPTIONS" {
+                    let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\n\r\n";
+                    let _ = writer.write_all(resp.as_bytes()).await;
+                    return;
+                }
+
+                // Route 1: GET /sse -> Server-Sent Events stream for Antigravity
+                if method == "GET" && (path == "/sse" || path.starts_with("/sse?") || path.starts_with("/sse/")) {
+                    let mut rx = sse_broadcast.subscribe();
+                    let init_header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\nevent: endpoint\r\ndata: /message?session_id=1\r\n\r\n";
+                    if writer.write_all(init_header.as_bytes()).await.is_err() {
+                        return;
+                    }
+
+                    loop {
+                        tokio::select! {
+                            msg = rx.recv() => {
+                                match msg {
+                                    Ok(data) => {
+                                        let chunk = format!("event: message\ndata: {}\n\n", data);
+                                        if writer.write_all(chunk.as_bytes()).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            _ = tokio::time::sleep(tokio::time::Duration::from_secs(15)) => {
+                                if writer.write_all(b": keepalive\n\n").await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // Route 2: POST /message or POST /api/call-tool or POST /
+                if method == "POST" {
+                    let mut body_bytes = vec![0u8; content_length];
+                    if content_length > 0 {
+                        use tokio::io::AsyncReadExt;
+                        if buf_reader.read_exact(&mut body_bytes).await.is_err() {
+                            return;
+                        }
+                    }
+                    let body_str = String::from_utf8_lossy(&body_bytes);
+
+                    if path.starts_with("/api/call-tool") {
+                        let mcp_srv = EmbeddedMcpServer::new(server_backend);
+                        let val: Value = serde_json::from_str(&body_str).unwrap_or(Value::Null);
+                        let tool_name = val.get("name").and_then(Value::as_str).unwrap_or("");
+                        let args = val.get("arguments").cloned().unwrap_or(json!({}));
+                        match mcp_srv.dispatch_tool(tool_name, args).await {
+                            Ok(res) => {
+                                let res_val = json!({
+                                    "success": true,
+                                    "result": res.content.first().map(|c| c.text.clone()).unwrap_or_default()
+                                });
+                                let body = res_val.to_string();
+                                let resp = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                                    body.len(),
+                                    body
+                                );
+                                let _ = writer.write_all(resp.as_bytes()).await;
+                            }
+                            Err(e) => {
+                                let res_val = json!({ "success": false, "error": e.to_string() });
+                                let body = res_val.to_string();
+                                let resp = format!(
+                                    "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                                    body.len(),
+                                    body
+                                );
+                                let _ = writer.write_all(resp.as_bytes()).await;
+                            }
+                        }
+                        return;
+                    }
+
+                    // Otherwise JSON-RPC message over HTTP/SSE
+                    let mcp_srv = EmbeddedMcpServer::new(server_backend);
+                    if let Some(resp) = mcp_srv.handle_message(&body_str).await {
+                        let json_str = serialize_response(&resp).unwrap_or_default();
+                        let _ = sse_broadcast.send(json_str.clone());
+                        let resp_http = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                            json_str.len(),
+                            json_str
+                        );
+                        let _ = writer.write_all(resp_http.as_bytes()).await;
+                    } else {
+                        let resp_http = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 2\r\n\r\n{}\r\n";
+                        let _ = writer.write_all(resp_http.as_bytes()).await;
+                    }
+                    return;
+                }
+
+                // Default health check for GET / or GET /health
+                let health_body = json!({ "status": "ok", "service": "mind-mcp", "port": 8765 }).to_string();
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{}",
+                    health_body.len(),
+                    health_body
+                );
+                let _ = writer.write_all(resp.as_bytes()).await;
+            });
+        }
     }
 }

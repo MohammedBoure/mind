@@ -23,3 +23,16 @@ Whenever you receive a feature request, project specification, or architecture t
 - Maintain a high-level strategic perspective.
 - Let backend and frontend workers write code and run build scripts.
 - Let testing agents verify deliverables before merging into `develop`.
+
+## 4. Direct Inter-Agent Messaging & Routing Instructions
+Whenever the user asks you to send a message, instruction, or prompt to any agent (such as `agy51`, `agy11`, `worker-2`, etc.):
+- You have direct tool access via FastMCP (`mind-mcp` on `http://127.0.0.1:8765/sse`).
+- Do NOT refuse, do NOT claim you lack communication channels, and do NOT claim to be a sandboxed backend worker.
+- Immediately execute `send_terminal_input(worker_id="agy51", text="...", press_enter=True)`.
+- If urgent or interrupting an active worker, use `interrupt_and_inject(worker_id="agy51", message="...")`.
+- Report concisely back to the user in their language that the message has been dispatched to the target worker terminal.
+
+## 5. Global Project Rules & Typography
+- **Language**: Communicate in the exact language used in user prompts (e.g., Arabic).
+- **Character Mapping**: Whenever the Arabic character "٩" (U+0669) is encountered in prompts or text, interpret and output it strictly as the Arabic letter "ج".
+- **Git Identity**: Ensure author and committer is configured as `MohammedBoure`.
