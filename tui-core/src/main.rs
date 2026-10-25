@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use crossterm::{
     cursor,
-    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers},
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -519,6 +519,36 @@ fn copy_to_clipboard(text: &str) -> bool {
     true
 }
 
+fn get_clipboard_text() -> Option<String> {
+    // 1. Try xclip (X11)
+    if let Ok(output) = std::process::Command::new("xclip")
+        .arg("-selection")
+        .arg("clipboard")
+        .arg("-o")
+        .output()
+    {
+        if output.status.success() && !output.stdout.is_empty() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                return Some(s);
+            }
+        }
+    }
+
+    // 2. Try wl-paste (Wayland)
+    if let Ok(output) = std::process::Command::new("wl-paste")
+        .arg("-n")
+        .output()
+    {
+        if output.status.success() && !output.stdout.is_empty() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                return Some(s);
+            }
+        }
+    }
+
+    None
+}
+
 // ── Interactive Dual-Pane TUI Workspace (`agi`) ─────────────────────
 
 async fn run_tui_app(
@@ -527,7 +557,7 @@ async fn run_tui_app(
 ) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
+    execute!(stdout, EnterAlternateScreen, cursor::Hide, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1080,7 +1110,20 @@ async fn run_tui_app(
                                 engine.send_input_to_active(&c.to_string(), false).ok();
                             }
                         } else if key.code == KeyCode::Enter {
-                            engine.send_input_to_active("\r", false).ok();
+                            if key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT) {
+                                // Shift+Enter or Alt+Enter inserts a newline without submitting
+                                engine.send_input_to_active("\n", false).ok();
+                            } else {
+                                engine.send_input_to_active("\r", false).ok();
+                            }
+                        } else if key.code == KeyCode::Char('\n') {
+                            engine.send_input_to_active("\n", false).ok();
+                        } else if key.code == KeyCode::Char('\r') {
+                            if key.modifiers.contains(KeyModifiers::SHIFT) || key.modifiers.contains(KeyModifiers::ALT) {
+                                engine.send_input_to_active("\n", false).ok();
+                            } else {
+                                engine.send_input_to_active("\r", false).ok();
+                            }
                         } else if key.code == KeyCode::Backspace {
                             engine.send_input_to_active("\x7f", false).ok();
                         } else if key.code == KeyCode::Tab {
@@ -1117,6 +1160,13 @@ async fn run_tui_app(
                             }
                             continue;
                         } else if key.code == KeyCode::Insert {
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                if let Some(text) = get_clipboard_text() {
+                                    let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                                    engine.send_input_to_active(&bracketed, false).ok();
+                                }
+                                continue;
+                            }
                             engine.send_input_to_active("\x1b[2~", false).ok();
                         } else if key.code == KeyCode::Up {
                             engine.send_input_to_active("\x1b[A", false).ok();
@@ -1138,6 +1188,17 @@ async fn run_tui_app(
                             let lines_cnt = text.lines().count();
                             copy_to_clipboard(&text);
                             active_modal_notice = Some(format!("Copied {} lines of {} to system clipboard (y)", lines_cnt, session.id));
+                        }
+                        continue;
+                    }
+
+                    // Clipboard Paste: 'p' / 'P'
+                    if key.code == KeyCode::Char('p') || key.code == KeyCode::Char('P') {
+                        if let Some(text) = get_clipboard_text() {
+                            let lines_cnt = text.lines().count();
+                            let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                            engine.send_input_to_active(&bracketed, false).ok();
+                            active_modal_notice = Some(format!("Pasted {} lines from clipboard (p)", lines_cnt));
                         }
                         continue;
                     }
@@ -1501,6 +1562,21 @@ async fn run_tui_app(
                         _ => {}
                     }
                 }
+                AppEvent::Paste(text) => {
+                    let current_mode = engine.session_manager.app_mode();
+                    if current_mode == AppMode::PtyInteract {
+                        let bracketed = format!("\x1b[200~{}\x1b[201~", text);
+                        engine.send_input_to_active(&bracketed, false).ok();
+                    } else if let Some(ref mut modal) = directive_editor_modal {
+                        for c in text.chars() {
+                            modal.handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+                        }
+                    } else if let Some(ref mut modal) = new_worker_modal {
+                        for c in text.chars() {
+                            modal.handle_key(&KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+                        }
+                    }
+                }
                 AppEvent::Tick => {}
                 AppEvent::Alarm(alarm) => {
                     if let Some(s) = engine.session_manager.get_session(&alarm.worker_id) {
@@ -1520,6 +1596,6 @@ async fn run_tui_app(
     if mouse_capture_enabled {
         let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     }
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show, DisableBracketedPaste)?;
     Ok(())
 }

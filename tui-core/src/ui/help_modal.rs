@@ -138,12 +138,15 @@ impl Widget for &HelpModal {
                 ShortcutEntry { key: "o / Ctrl+O", description: "Open Directive in System Default Editor ($EDITOR)" },
                 ShortcutEntry { key: "Ctrl+C", description: "Send immediate interrupt signal (SIGINT) to active Worker" },
             ]),
-            ("CLIPBOARD & GENERAL", vec![
-                ShortcutEntry { key: "y", description: "Yank / copy focused pane selection or terminal buffer" },
-                ShortcutEntry { key: "Ctrl+Shift+C", description: "Copy selection or terminal buffer to OS clipboard" },
-                ShortcutEntry { key: "?", description: "Toggle this help screen" },
+            ("CLIPBOARD, MULTILINE & PROMPT", vec![
+                ShortcutEntry { key: "Shift+Enter / Alt+Enter", description: "Insert newline without submitting (تخليف السطر)" },
+                ShortcutEntry { key: "Ctrl+J", description: "Insert newline character into prompt" },
+                ShortcutEntry { key: "Ctrl+Shift+V / Shift+Ins", description: "Paste multiline text cleanly (Bracketed Paste)" },
+                ShortcutEntry { key: "y", description: "Yank / copy terminal buffer to OS clipboard (NORMAL Mode)" },
+                ShortcutEntry { key: "p", description: "Paste OS clipboard into active PTY (NORMAL Mode)" },
+                ShortcutEntry { key: "F9", description: "Toggle Mouse Mode (Wheel Scroll vs Native text drag selection)" },
+                ShortcutEntry { key: "? / F1", description: "Toggle this help screen" },
                 ShortcutEntry { key: "q", description: "Quit application and cleanly terminate worker processes" },
-                ShortcutEntry { key: "Escape", description: "Close modal / return to workspace" },
             ]),
         ];
 

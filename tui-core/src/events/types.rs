@@ -7,6 +7,9 @@ pub enum AppEvent {
     /// Keyboard key event from terminal crossterm stream.
     Key(KeyEvent),
 
+    /// Text pasted from terminal clipboard (bracketed paste).
+    Paste(String),
+
     /// Mouse event (click, drag, scroll).
     Mouse(MouseEvent),
 

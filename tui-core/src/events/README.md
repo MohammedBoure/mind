@@ -30,8 +30,8 @@ The `events` module provides the central asynchronous event loop (`EventLoop`) d
 | File | Purpose |
 |---|---|
 | [`mod.rs`](file:///home/pluto/projects/mind/tui-core/src/events/mod.rs) | Public re-exports for the event subsystem (`EventLoop`, `AppEvent`, `AlarmEvent`). |
-| [`types.rs`](file:///home/pluto/projects/mind/tui-core/src/events/types.rs) | Core event definitions: `AppEvent` enum (`Key`, `Mouse`, `Resize`, `PtyOutput`, `PtyExited`, `Alarm`, `IpcMessage`, `Tick`, `Quit`) and `AlarmEvent` structure. |
-| [`event_loop.rs`](file:///home/pluto/projects/mind/tui-core/src/events/event_loop.rs) | Asynchronous multiplexer (`EventLoop`) implementing unified polling across Crossterm, POSIX SIGWINCH, internal MPSC channel, and tick intervals. |
+| [`types.rs`](file:///home/pluto/projects/mind/tui-core/src/events/types.rs) | Core event definitions: `AppEvent` enum (`Key`, `Paste`, `Mouse`, `Resize`, `PtyOutput`, `PtyExited`, `Alarm`, `IpcMessage`, `Tick`, `Quit`) and `AlarmEvent` structure. |
+| [`event_loop.rs`](file:///home/pluto/projects/mind/tui-core/src/events/event_loop.rs) | Asynchronous multiplexer (`EventLoop`) implementing unified polling across Crossterm (including bracketed paste), POSIX SIGWINCH, internal MPSC channel, and tick intervals. |
 
 ---
 

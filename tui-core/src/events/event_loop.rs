@@ -59,6 +59,7 @@ impl EventLoop {
             maybe_term_event = self.event_stream.next() => {
                 match maybe_term_event {
                     Some(Ok(CrosstermEvent::Key(key))) => Some(AppEvent::Key(key)),
+                    Some(Ok(CrosstermEvent::Paste(text))) => Some(AppEvent::Paste(text)),
                     Some(Ok(CrosstermEvent::Mouse(mouse))) => Some(AppEvent::Mouse(mouse)),
                     Some(Ok(CrosstermEvent::Resize(cols, rows))) => Some(AppEvent::Resize(rows, cols)),
                     Some(Ok(_)) => None,
