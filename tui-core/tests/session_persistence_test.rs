@@ -210,3 +210,33 @@ fn test_default_session_provisioning() {
     let saved = store.save_session(&default_session).expect("Save default session");
     assert!(saved.is_file());
 }
+
+#[test]
+fn test_find_by_working_dir_and_project_session_isolation() {
+    let tmp = tempdir().expect("Failed to create tempdir");
+    let store = SessionStore::with_dir(tmp.path().join("sessions"));
+
+    let project_dir_a = tmp.path().join("project_alpha");
+    let project_dir_b = tmp.path().join("project_beta");
+    std::fs::create_dir_all(&project_dir_a).unwrap();
+    std::fs::create_dir_all(&project_dir_b).unwrap();
+
+    let session_a = store.create_default_session_for_dir("project_alpha", &project_dir_a);
+    store.save_session(&session_a).unwrap();
+
+    let session_b = store.create_default_session_for_dir("project_beta", &project_dir_b);
+    store.save_session(&session_b).unwrap();
+
+    // Verify lookup by working dir returns distinct sessions
+    let found_a = store.find_by_working_dir(&project_dir_a).unwrap();
+    assert!(found_a.is_some());
+    assert_eq!(found_a.unwrap().name, "project_alpha");
+
+    let found_b = store.find_by_working_dir(&project_dir_b).unwrap();
+    assert!(found_b.is_some());
+    assert_eq!(found_b.unwrap().name, "project_beta");
+
+    // Non-existent directory returns None
+    let other_dir = tmp.path().join("other_project");
+    assert!(store.find_by_working_dir(&other_dir).unwrap().is_none());
+}

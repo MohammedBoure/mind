@@ -60,12 +60,18 @@ impl TabConfigEntry {
 /// Resulting action from user interaction with AgentConfigModal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentConfigModalAction {
-    /// Save configuration changes (optionally restarting the child PTY with the new slot).
+    /// Save configuration changes for single tab or across all tabs.
     Save {
         tab_id: String,
         new_slot_id: String,
         new_role: String,
         restart: bool,
+        tabs: Vec<TabConfigEntry>,
+    },
+    /// Save all configuration changes across all tabs (spawning added, killing removed).
+    SaveAll {
+        tabs: Vec<TabConfigEntry>,
+        restart_modified: bool,
     },
     /// Save all changes and restart all tabs (Coordinator and all Workers).
     RestartAll,
@@ -235,6 +241,67 @@ impl AgentConfigModal {
         self.status_message = Some(format!("Assigned to {} ({})", new_slot.name, new_slot.role));
     }
 
+    /// Add a new worker tab entry to the tabs list.
+    pub fn add_worker_tab(&mut self) {
+        let worker_count = self.tabs.iter().filter(|t| !t.is_coordinator).count() + 1;
+        let tab_id = format!("worker-{}", worker_count);
+        let title = format!("Tab {} ({})", worker_count + 1, tab_id);
+
+        let used_slots: Vec<String> = self.tabs.iter().map(|t| t.slot_id.clone()).collect();
+        let next_slot = self
+            .available_slots
+            .iter()
+            .find(|s| !used_slots.contains(&s.name) && s.slot_id != 1)
+            .cloned()
+            .unwrap_or_else(|| {
+                self.available_slots
+                    .iter()
+                    .find(|s| s.slot_id != 1)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        AgentSlot::new(
+                            11,
+                            "agy11".to_string(),
+                            IdentityDiscovery::get_instances_dir().join("agy11"),
+                            "Backend Logic & Systems".to_string(),
+                            "gemini-3.8-flash-high".to_string(),
+                            None,
+                            true,
+                            None,
+                        )
+                    })
+            });
+
+        self.tabs.push(TabConfigEntry::new(
+            tab_id.clone(),
+            title,
+            next_slot.name.clone(),
+            next_slot.role.clone(),
+            next_slot.model.clone(),
+            false,
+        ));
+        self.selected_tab_index = self.tabs.len() - 1;
+        self.status_message = Some(format!("Added {} assigned to {} (press Enter to save & start)", tab_id, next_slot.name));
+    }
+
+    /// Remove the currently selected worker tab from tabs list.
+    pub fn remove_selected_worker_tab(&mut self) -> Option<String> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        if self.tabs[self.selected_tab_index].is_coordinator {
+            self.status_message = Some("Cannot remove Primary Coordinator".into());
+            return None;
+        }
+
+        let removed = self.tabs.remove(self.selected_tab_index);
+        if self.selected_tab_index >= self.tabs.len() && !self.tabs.is_empty() {
+            self.selected_tab_index = self.tabs.len() - 1;
+        }
+        self.status_message = Some(format!("Removed worker tab '{}' (press Enter to save)", removed.tab_id));
+        Some(removed.tab_id)
+    }
+
     /// Handle keyboard navigation and actions.
     pub fn handle_key(&mut self, key: &KeyEvent) -> AgentConfigModalAction {
         if !self.is_open {
@@ -245,6 +312,21 @@ impl AgentConfigModal {
         if key.code == KeyCode::Esc || key.code == KeyCode::Char('q') {
             self.close();
             return AgentConfigModalAction::Cancel;
+        }
+
+        // Add Worker Tab: '+', '=', or Insert
+        if key.code == KeyCode::Char('+') || key.code == KeyCode::Char('=') || key.code == KeyCode::Insert {
+            self.add_worker_tab();
+            return AgentConfigModalAction::None;
+        }
+
+        // Remove Worker Tab: '-', Delete, or 'x' (when modifiers empty)
+        if key.code == KeyCode::Char('-')
+            || key.code == KeyCode::Delete
+            || (key.code == KeyCode::Char('x') && key.modifiers.is_empty())
+        {
+            self.remove_selected_worker_tab();
+            return AgentConfigModalAction::None;
         }
 
         // Save & Restart All Tabs: 'a', 'A', or Ctrl+A
@@ -270,6 +352,7 @@ impl AgentConfigModal {
                     new_slot_id: tab.slot_id.clone(),
                     new_role: tab.role.clone(),
                     restart: true,
+                    tabs: self.tabs.clone(),
                 };
                 self.close();
                 return action;
@@ -288,6 +371,7 @@ impl AgentConfigModal {
                     new_slot_id: tab.slot_id.clone(),
                     new_role: tab.role.clone(),
                     restart: false,
+                    tabs: self.tabs.clone(),
                 };
                 self.close();
                 return action;
@@ -544,16 +628,18 @@ impl Widget for &AgentConfigModal {
         // ── Bottom Action Footer ────────────────────────────────────
         let footer_lines = vec![
             Line::from(vec![
-                Span::styled(" [↑/↓/Tab] ", Style::default().fg(config_colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)),
-                Span::styled("Tab  ", Style::default().fg(config_colors::FG_LIGHT)),
-                Span::styled("[←/→/Space] ", Style::default().fg(config_colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD)),
-                Span::styled("Change agy  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled(" [↑/↓] ", Style::default().fg(config_colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)),
+                Span::styled("Select  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("[←/→] ", Style::default().fg(config_colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD)),
+                Span::styled("Slot  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("[+] ", Style::default().fg(config_colors::ACCENT_GREEN).add_modifier(Modifier::BOLD)),
+                Span::styled("Add Worker  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("[-] ", Style::default().fg(config_colors::ACCENT_YELLOW).add_modifier(Modifier::BOLD)),
+                Span::styled("Remove Worker  ", Style::default().fg(config_colors::FG_LIGHT)),
                 Span::styled("[Enter/r] ", Style::default().fg(config_colors::ACCENT_GREEN).add_modifier(Modifier::BOLD)),
                 Span::styled("Save & Restart  ", Style::default().fg(config_colors::FG_LIGHT)),
                 Span::styled("[s] ", Style::default().fg(config_colors::ACCENT_CYAN).add_modifier(Modifier::BOLD)),
-                Span::styled("Save Only  ", Style::default().fg(config_colors::FG_LIGHT)),
-                Span::styled("[a] ", Style::default().fg(config_colors::ACCENT_MAGENTA).add_modifier(Modifier::BOLD)),
-                Span::styled("Restart All  ", Style::default().fg(config_colors::FG_LIGHT)),
+                Span::styled("Save  ", Style::default().fg(config_colors::FG_LIGHT)),
                 Span::styled("[Esc] ", Style::default().fg(config_colors::FG_MUTED).add_modifier(Modifier::BOLD)),
                 Span::styled("Cancel", Style::default().fg(config_colors::FG_LIGHT)),
             ]),
@@ -655,5 +741,33 @@ mod tests {
         let key_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         let action = modal.handle_key(&key_a);
         assert_eq!(action, AgentConfigModalAction::RestartAll);
+    }
+
+    #[test]
+    fn test_agent_config_modal_add_remove_workers() {
+        let tabs = vec![
+            TabConfigEntry::new("coordinator", "Coordinator", "agy1", "Lead Orchestrator", "gemini-3.8-flash-high", true),
+            TabConfigEntry::new("worker-1", "Tab 1 (worker-1)", "agy11", "Backend Logic", "gemini-3.8-flash-high", false),
+        ];
+
+        let mut modal = AgentConfigModal::new(tabs);
+        assert_eq!(modal.tabs.len(), 2);
+
+        // Press '+' to add worker
+        let key_plus = KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE);
+        modal.handle_key(&key_plus);
+        assert_eq!(modal.tabs.len(), 3);
+        assert_eq!(modal.tabs[2].tab_id, "worker-2");
+
+        // Try removing coordinator (should fail)
+        modal.selected_tab_index = 0;
+        let key_minus = KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE);
+        modal.handle_key(&key_minus);
+        assert_eq!(modal.tabs.len(), 3, "Coordinator must never be removed");
+
+        // Remove worker-2
+        modal.selected_tab_index = 2;
+        modal.handle_key(&key_minus);
+        assert_eq!(modal.tabs.len(), 2);
     }
 }

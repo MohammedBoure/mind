@@ -352,10 +352,33 @@ impl SessionManager {
                     _ => {}
                 }
             }
+            let _ = self.save_current_session();
             Ok(removed)
         } else {
             Ok(None)
         }
+    }
+
+    /// Terminate and close a specific worker by its ID or slot ID, persisting session state.
+    pub fn close_worker(&self, id: &str) -> Result<Option<Arc<WorkerSession>>> {
+        let removed = self.remove_worker(id);
+        if let Some(ref w) = removed {
+            let _ = w.kill();
+        }
+        let workers_len = self.workers.lock().len();
+        let mut pane = self.focused_pane.lock();
+        if workers_len == 0 {
+            *pane = FocusedPane::Coordinator;
+        } else {
+            match *pane {
+                FocusedPane::Workers(idx) if idx >= workers_len => {
+                    *pane = FocusedPane::Workers(workers_len - 1);
+                }
+                _ => {}
+            }
+        }
+        let _ = self.save_current_session();
+        Ok(removed)
     }
 
     // ── Session Restoration & Lifecycle ────────────────────────────
@@ -427,7 +450,7 @@ impl SessionManager {
         Ok(session_record)
     }
 
-    /// Create, persist, and launch a new multi-agent session.
+    /// Create, persist, and launch a new multi-agent session bound to a directory.
     pub fn create_and_launch_session(
         &self,
         name: &str,
@@ -435,7 +458,8 @@ impl SessionManager {
         rows: u16,
         cols: u16,
     ) -> Result<SessionRecord> {
-        let record = self.store.create_default_session(name);
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let record = self.store.create_default_session_for_dir(name, &cwd);
         self.store.save_session(&record)?;
         self.load_and_restore_session(name, default_cmd, rows, cols)
     }
@@ -451,6 +475,13 @@ impl SessionManager {
             .store
             .get_session(&name)?
             .unwrap_or_else(|| SessionRecord::new(&name, ""));
+
+        // Keep working_dir fresh if empty or currently running in a project dir
+        if record.working_dir.is_empty() {
+            if let Ok(cwd) = std::env::current_dir() {
+                record.working_dir = cwd.canonicalize().unwrap_or(cwd).to_string_lossy().to_string();
+            }
+        }
 
         record.workers.clear();
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{stdout, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use crossterm::{
@@ -534,13 +535,34 @@ async fn run_tui_app(
     let shell_cmd = if cfg!(windows) { "powershell.exe" } else { "bash" };
     let (rows, cols) = (terminal.size()?.height, terminal.size()?.width);
 
-    // Resolve target session name
-    let target_name = session_name
-        .or_else(|| engine.shortcut_engine.config().general.default_session.clone())
-        .unwrap_or_else(|| {
-            let list = engine.session_manager.store().list_sessions().unwrap_or_default();
-            list.first().map(|s| s.name.clone()).unwrap_or_else(|| "default".to_string())
-        });
+    // Target session resolution strategy:
+    // 1. Explicit CLI argument `session_name`
+    // 2. Search persistent sessions whose `working_dir` matches canonical current directory
+    // 3. Search persistent sessions whose name matches project folder name
+    // 4. Configured default_session if non-empty and not "default"
+    // 5. Project folder name as new isolated session
+    let current_pwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let current_pwd_canonical = current_pwd.canonicalize().unwrap_or_else(|_| current_pwd.clone());
+    let folder_name = current_pwd_canonical
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "default".to_string());
+
+    let target_name = if let Some(explicit_name) = session_name {
+        explicit_name
+    } else if let Ok(Some(existing_by_dir)) = engine.session_manager.store().find_by_working_dir(&current_pwd_canonical) {
+        existing_by_dir.name
+    } else if let Ok(Some(existing_by_name)) = engine.session_manager.store().get_session(&folder_name) {
+        existing_by_name.name
+    } else if let Some(cfg_default) = engine.shortcut_engine.config().general.default_session.clone() {
+        if !cfg_default.is_empty() && cfg_default != "default" {
+            cfg_default
+        } else {
+            folder_name
+        }
+    } else {
+        folder_name
+    };
 
     let (init_w, init_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
     let ((init_c_r, init_c_c), (init_w_r, init_w_c)) =
@@ -562,7 +584,8 @@ async fn run_tui_app(
     };
 
     let mut is_split_view = true;
-    let mut mouse_capture_enabled = false;
+    let mut mouse_capture_enabled = true;
+    let _ = execute!(terminal.backend_mut(), EnableMouseCapture);
     let mut active_modal_notice: Option<String> = None;
     let mut last_esc_time: Option<Instant> = None;
 
@@ -684,7 +707,7 @@ async fn run_tui_app(
                     // 2b. Agent & Tab Settings Modal handling
                     if let Some(ref mut modal) = agent_config_modal {
                         match modal.handle_key(&key) {
-                            AgentConfigModalAction::Save { tab_id, new_slot_id, restart, .. } => {
+                            AgentConfigModalAction::Save { tab_id, new_slot_id, restart, tabs, .. } => {
                                 let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
                                 let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
                                     t_w,
@@ -692,6 +715,39 @@ async fn run_tui_app(
                                     is_split_view,
                                     engine.session_manager.focused_pane(),
                                 );
+
+                                // Reconcile worker tabs if tabs list is present
+                                if !tabs.is_empty() {
+                                    // 1. Remove workers that are no longer in tabs
+                                    let current_workers = engine.session_manager.workers();
+                                    let tab_ids: Vec<String> = tabs.iter().map(|t| t.tab_id.clone()).collect();
+                                    for w in current_workers {
+                                        if !tab_ids.contains(&w.id) {
+                                            let _ = engine.session_manager.close_worker(&w.id);
+                                        }
+                                    }
+
+                                    // 2. Add newly created workers that are in tabs but not yet spawned
+                                    for t in tabs.iter().filter(|t| !t.is_coordinator) {
+                                        if engine.session_manager.get_session(&t.tab_id).is_none() {
+                                            let isolation_env = IdentityDiscovery::find_slot(&t.slot_id)
+                                                .map(|s| IdentityDiscovery::build_slot_isolation_env(&s))
+                                                .unwrap_or_default();
+                                            let spawn_cmd = if engine.session_manager.auto_spawn_agy() { "agy" } else { shell_cmd };
+                                            let _ = engine.spawn_worker(
+                                                t.tab_id.clone(),
+                                                t.slot_id.clone(),
+                                                spawn_cmd,
+                                                vec![],
+                                                std::env::current_dir().ok(),
+                                                isolation_env,
+                                                w_r,
+                                                w_c,
+                                            );
+                                        }
+                                    }
+                                }
+
                                 let (p_r, p_c) = if tab_id == "coordinator" || tab_id == "agy1" {
                                     (c_r, c_c)
                                 } else {
@@ -711,6 +767,67 @@ async fn run_tui_app(
                                     let _ = engine.session_manager.reassign_worker_slot(&tab_id, &new_slot_id);
                                     active_modal_notice = Some(format!("Tab '{}' assigned to {} (press 'r' to restart)", tab_id, new_slot_id));
                                 }
+                                let _ = engine.session_manager.save_current_session();
+                                agent_config_modal = None;
+                            }
+                            AgentConfigModalAction::SaveAll { tabs, restart_modified } => {
+                                let (t_w, t_h) = terminal.size().map(|s| (s.width, s.height)).unwrap_or((cols, rows));
+                                let ((c_r, c_c), (w_r, w_c)) = compute_pane_geometries(
+                                    t_w,
+                                    t_h,
+                                    is_split_view,
+                                    engine.session_manager.focused_pane(),
+                                );
+
+                                // 1. Remove workers that are no longer in tabs
+                                let current_workers = engine.session_manager.workers();
+                                let tab_ids: Vec<String> = tabs.iter().map(|t| t.tab_id.clone()).collect();
+                                for w in current_workers {
+                                    if !tab_ids.contains(&w.id) {
+                                        let _ = engine.session_manager.close_worker(&w.id);
+                                    }
+                                }
+
+                                // 2. Update existing or spawn new workers
+                                for t in &tabs {
+                                    if t.is_coordinator {
+                                        if let Some(coord) = engine.session_manager.coordinator() {
+                                            if coord.slot_id != t.slot_id {
+                                                if restart_modified {
+                                                    let _ = engine.session_manager.restart_worker_with_slot("coordinator", &t.slot_id, c_r, c_c);
+                                                } else {
+                                                    let _ = engine.session_manager.reassign_worker_slot("coordinator", &t.slot_id);
+                                                }
+                                            }
+                                        }
+                                    } else if let Some(existing) = engine.session_manager.get_session(&t.tab_id) {
+                                        if existing.slot_id != t.slot_id {
+                                            if restart_modified {
+                                                let _ = engine.session_manager.restart_worker_with_slot(&t.tab_id, &t.slot_id, w_r, w_c);
+                                            } else {
+                                                let _ = engine.session_manager.reassign_worker_slot(&t.tab_id, &t.slot_id);
+                                            }
+                                        }
+                                    } else {
+                                        let isolation_env = IdentityDiscovery::find_slot(&t.slot_id)
+                                            .map(|s| IdentityDiscovery::build_slot_isolation_env(&s))
+                                            .unwrap_or_default();
+                                        let spawn_cmd = if engine.session_manager.auto_spawn_agy() { "agy" } else { shell_cmd };
+                                        let _ = engine.spawn_worker(
+                                            t.tab_id.clone(),
+                                            t.slot_id.clone(),
+                                            spawn_cmd,
+                                            vec![],
+                                            std::env::current_dir().ok(),
+                                            isolation_env,
+                                            w_r,
+                                            w_c,
+                                        );
+                                    }
+                                }
+                                let _ = engine.session_manager.save_current_session();
+                                let total = engine.session_manager.workers().len() + if engine.session_manager.coordinator().is_some() { 1 } else { 0 };
+                                active_modal_notice = Some(format!("Saved agent configuration ({} agents active)", total));
                                 agent_config_modal = None;
                             }
                             AgentConfigModalAction::RestartAll => {
@@ -803,6 +920,7 @@ async fn run_tui_app(
                                     rows,
                                     cols,
                                 );
+                                let _ = engine.session_manager.save_current_session();
                                 new_worker_modal = None;
                                 active_modal_notice = Some(format!("Spawned agent slot agy{}", slot.slot_id));
                             }
@@ -962,11 +1080,30 @@ async fn run_tui_app(
                         } else if key.code == KeyCode::Home {
                             engine.send_input_to_active("\x1b[H", false).ok();
                         } else if key.code == KeyCode::End {
+                            if let Some(session) = engine.active_session() {
+                                if session.scroll_offset() > 0 {
+                                    session.reset_scroll();
+                                    active_modal_notice = Some("Returned to live view (End)".into());
+                                    continue;
+                                }
+                            }
                             engine.send_input_to_active("\x1b[F", false).ok();
                         } else if key.code == KeyCode::PageUp {
-                            engine.send_input_to_active("\x1b[5~", false).ok();
+                            if let Some(session) = engine.active_session() {
+                                session.scroll_up(5);
+                                active_modal_notice = Some(format!("Scroll: +{} (End to return to live view)", session.scroll_offset()));
+                            }
+                            continue;
                         } else if key.code == KeyCode::PageDown {
-                            engine.send_input_to_active("\x1b[6~", false).ok();
+                            if let Some(session) = engine.active_session() {
+                                session.scroll_down(5);
+                                if session.scroll_offset() > 0 {
+                                    active_modal_notice = Some(format!("Scroll: +{} (End to return to live view)", session.scroll_offset()));
+                                } else {
+                                    active_modal_notice = Some("Live bottom view".into());
+                                }
+                            }
+                            continue;
                         } else if key.code == KeyCode::Insert {
                             engine.send_input_to_active("\x1b[2~", false).ok();
                         } else if key.code == KeyCode::Up {
@@ -1305,8 +1442,14 @@ async fn run_tui_app(
                                 if let Some(coord) = engine.session_manager.coordinator() {
                                     coord.scroll_up(3);
                                 }
-                            } else if let Some(worker) = engine.active_session() {
-                                worker.scroll_up(3);
+                            } else {
+                                let worker_idx = match engine.session_manager.focused_pane() {
+                                    FocusedPane::Workers(idx) => idx,
+                                    FocusedPane::Coordinator => 0,
+                                };
+                                if let Some(worker) = engine.session_manager.workers().get(worker_idx) {
+                                    worker.scroll_up(3);
+                                }
                             }
                         }
                         MouseEventKind::ScrollDown => {
@@ -1318,8 +1461,14 @@ async fn run_tui_app(
                                 if let Some(coord) = engine.session_manager.coordinator() {
                                     coord.scroll_down(3);
                                 }
-                            } else if let Some(worker) = engine.active_session() {
-                                worker.scroll_down(3);
+                            } else {
+                                let worker_idx = match engine.session_manager.focused_pane() {
+                                    FocusedPane::Workers(idx) => idx,
+                                    FocusedPane::Coordinator => 0,
+                                };
+                                if let Some(worker) = engine.session_manager.workers().get(worker_idx) {
+                                    worker.scroll_down(3);
+                                }
                             }
                         }
                         MouseEventKind::Down(MouseButton::Left) => {

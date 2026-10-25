@@ -363,16 +363,42 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Find a session record whose `working_dir` matches the given directory path.
+    pub fn find_by_working_dir(&self, dir: &Path) -> Result<Option<SessionRecord>> {
+        let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let canonical_str = canonical_dir.to_string_lossy().to_string();
+
+        let sessions = self.list_sessions()?;
+        for s in sessions {
+            if !s.working_dir.is_empty() {
+                let p = PathBuf::from(&s.working_dir);
+                let p_canonical = p.canonicalize().unwrap_or(p);
+                if p_canonical == canonical_dir || s.working_dir == canonical_str {
+                    return Ok(Some(s));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Create and provision a standard default session with designated agent slots:
     /// - Coordinator: agy1 (Lead Orchestrator)
     /// - Worker 1: agy11 (Backend Logic & Systems)
     /// - Worker 2: agy51 (Frontend & Interface Auditor)
     /// - Worker 3: agy100 (Quality Gatekeeper & Testing)
     pub fn create_default_session(&self, name: &str) -> SessionRecord {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        self.create_default_session_for_dir(name, &cwd)
+    }
+
+    /// Create and provision a standard default session bound explicitly to a project directory.
+    pub fn create_default_session_for_dir(&self, name: &str, dir: &Path) -> SessionRecord {
         let mut record = SessionRecord::new(
             name,
             "Multi-Agent AI Orchestration & Parallel Systems Engineering",
         );
+        let canonical = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        record.working_dir = canonical.to_string_lossy().to_string();
 
         let default_specs = [
             ("coordinator", 1, "agy1", "Lead Orchestrator", "Overseeing multi-agent fleet"),
