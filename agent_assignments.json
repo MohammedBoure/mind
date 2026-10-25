@@ -1,36 +1,27 @@
 {
   "target_integration_branch": "develop",
-  "integration_status": "COMPLETED",
-  "objective": "Integrate NaturaleMouseEvent into mind-mcp and add Screen Capture with Numbered Grid MCP tool for Vision Agent mouse control",
-  "updated_at": "2026-10-25T19:16:00Z",
+  "integration_status": "IN_PROGRESS",
+  "objective": "Implement Keyboard MCP module (keyboard_type, keyboard_press, keyboard_hotkey) and accurately tune the AI Natural Mouse Engine on live display",
+  "updated_at": "2026-10-25T21:27:30Z",
   "assignments": [
     {
       "agent_id": "agy11",
       "worker_id": "worker-4",
-      "role": "Backend / Systems",
-      "branch": "backend/agy11-natural-mouse-mcp",
-      "commit": "d98b6f3",
-      "scope": "NaturaleMouseEvent integration into mind-mcp server, clean up unneeded files, expose natural_mouse_move, natural_mouse_click, natural_mouse_sequence tools with headless fallbacks",
-      "status": "COMPLETED"
-    },
-    {
-      "agent_id": "agy12",
-      "worker_id": "worker-5",
-      "role": "Backend / Systems",
-      "branch": "backend/agy12-grid-screen-capture-mcp",
-      "commit": "7b566e9",
-      "scope": "Implement Screen Capture MCP tool with numbered coordinate grid overlay for Vision LLMs, returning calibrated coordinates and images",
-      "status": "COMPLETED"
+      "role": "Backend / Systems & Math",
+      "branch": "backend/agy11-keyboard-and-mouse-engine",
+      "scope": "1) Implement keyboard MCP module in src/mind/mcp/keyboard.py with Arabic Unicode support and natural typing jitter; 2) Accurately tune natural_mouse.py so it loads neural model and executes real human trajectories on DISPLAY=:0 using xdotool/pyautogui without falling back to dry-run; 3) Expose tools in server.py; 4) Add tests/test_keyboard_mcp.py",
+      "effort": "medium",
+      "status": "DISPATCHED"
     },
     {
       "agent_id": "agy100",
       "worker_id": "3",
       "role": "Testing & Verification Gatekeeper",
-      "branch": "test/agy100-mouse-and-vision-mcp-gatekeeper",
-      "scope": "Gatekeeper verification: run and validate tests for both vision grid capture (tests/test_vision_grid_capture.py) and natural mouse movement (tests/test_natural_mouse_mcp.py), verify graceful co-existence in server.py, and merge both feature branches into develop",
-      "effort": "high",
-      "dependencies": ["agy11", "agy12"],
-      "status": "COMPLETED"
+      "branch": "test/agy100-keyboard-and-mouse-tests",
+      "scope": "Gatekeeper verification of keyboard and tuned natural mouse MCP tools, running pytest, and merging into develop",
+      "effort": "medium",
+      "dependencies": ["agy11"],
+      "status": "PENDING"
     }
   ]
 }
