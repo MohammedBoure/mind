@@ -131,6 +131,7 @@ mind/
 ├── tasks.md                    # Roadmap & transformation plan
 ├── scripts/                    # QA and integration scripts
 ├── tests/                      # Automated test suite (pytest, anyio)
+├── tui-core/                   # High-performance compiled TUI core architecture (Rust, Tokio, Portable-PTY, Ratatui, MCP)
 └── src/
     └── mind/                   # Root Python package
         ├── app.py              # Root Textual App & screen lifecycle
@@ -148,6 +149,7 @@ mind/
 | Directory / File | Description & Purpose |
 |---|---|
 | [`pyproject.toml`](file:///C:/Users/moham/Desktop/mind/pyproject.toml) | Package metadata, build system configuration (Hatchling), CLI entrypoints (`mind = "mind.cli.main:main"`), cross-platform dependencies, and pytest configuration with `pythonpath = ["src"]`. |
+| [`tui-core/`](file:///home/pluto/projects/mind/tui-core/) | High-performance compiled TUI core engine in Rust with Tokio async event loop, cross-platform `portable-pty` process multiplexing, virtual screen buffer emulation (`ScreenBuffer` with ANSI parser and $O(1)$ version-tracked caching), and embedded MCP JSON-RPC 2.0 client/server bridge. |
 | [`src/mind/app.py`](file:///C:/Users/moham/Desktop/mind/src/mind/app.py) | Main application class (`MindApp`) managing screens and top-level lifecycle. |
 | [`src/mind/events.py`](file:///C:/Users/moham/Desktop/mind/src/mind/events.py) | Decoupled Textual event definitions for UI messaging. |
 | [`src/mind/cli/`](file:///C:/Users/moham/Desktop/mind/src/mind/cli/) | Click-based CLI entrypoints implementing `mind`, `mind new`, `mind mcp`, and `mind register-mcp`. |
