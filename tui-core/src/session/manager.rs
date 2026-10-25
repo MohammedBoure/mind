@@ -942,7 +942,7 @@ impl McpBackend for SessionManager {
     }
 
     async fn notify_coordinator_worker_idle(&self, worker_id: &str, status_summary: &str) -> Result<String> {
-        self.push_alarm(AlarmEvent {
+        let alarm = AlarmEvent {
             worker_id: worker_id.to_string(),
             alarm_type: "IDLE".to_string(),
             message: status_summary.to_string(),
@@ -950,17 +950,29 @@ impl McpBackend for SessionManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-        });
+        };
+        self.push_alarm(alarm);
 
         if let Some(session) = self.get_session(worker_id) {
             *session.state.lock() = WorkerState::Idle;
+        }
+
+        // Bridge notification directly into the coordinator's prompt queue if coordinator is idle
+        if let Some(coord) = self.coordinator() {
+            let notification_text = format!(
+                "\n[NOTIFICATION from {}]: {}\n",
+                worker_id,
+                if status_summary.is_empty() { "Task completed / idle." } else { status_summary }
+            );
+            // Write notification to coordinator PTY without interrupting if active
+            let _ = coord.send_input(&notification_text, true);
         }
 
         Ok(format!("Coordinator notified: worker '{}' is IDLE", worker_id))
     }
 
     async fn notify_coordinator_help(&self, worker_id: &str, reason: &str, priority: &str) -> Result<String> {
-        self.push_alarm(AlarmEvent {
+        let alarm = AlarmEvent {
             worker_id: worker_id.to_string(),
             alarm_type: "HELP".to_string(),
             message: format!("[Priority {}] {}", priority, reason),
@@ -968,7 +980,17 @@ impl McpBackend for SessionManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-        });
+        };
+        self.push_alarm(alarm);
+
+        // Bridge urgent assistance alert directly into coordinator's PTY
+        if let Some(coord) = self.coordinator() {
+            let alert_text = format!(
+                "\n[URGENT HELP from {} (priority: {})]: {}\n",
+                worker_id, priority, reason
+            );
+            let _ = coord.send_input(&alert_text, true);
+        }
 
         Ok(format!("Coordinator alerted: assistance needed for '{}'", worker_id))
     }
