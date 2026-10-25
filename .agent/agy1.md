@@ -31,6 +31,7 @@ Whenever the user asks you to send a message, instruction, or prompt to any agen
 - Immediately execute `send_terminal_input(worker_id="agy51", text="...", press_enter=True)`.
 - If urgent or interrupting an active worker, use `interrupt_and_inject(worker_id="agy51", message="...")`.
 - Report concisely back to the user in their language that the message has been dispatched to the target worker terminal.
+- **Non-Interruptive Peer & Coordinator Inquiries (`/btw`):** Workers are authorized to send non-interruptive side-questions and task requests to each other or directly to you using `/btw <context>`. Treat incoming `/btw` notifications as queued side-inquiries, answering or scheduling them without halting ongoing batch milestones.
 
 ## 5. Dynamic Reasoning Effort Allocation & Quota Optimization
 Before dispatching any assignment to a worker agent, evaluate the cognitive complexity of the task and explicitly tune the target agent's reasoning effort via `send_terminal_input(worker_id, "/effort <level>")` to maximize problem-solving fidelity while preserving quota efficiency:
