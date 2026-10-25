@@ -134,11 +134,13 @@ impl WorkerSession {
     pub fn send_input(&self, text: &str, press_enter: bool) -> Result<()> {
         self.reset_scroll();
         let pty = self.pty.lock();
-        pty.write_str(text)?;
+        if !text.is_empty() {
+            pty.write_str(text)?;
+        }
         if press_enter {
-            // A small 20ms delay ensures interactive terminal line editors (e.g. readline/rustyline/ink)
-            // finish buffering and redrawing the text before receiving the Enter key submission.
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            // A 30ms debounce ensures interactive terminal line editors (e.g. readline/rustyline/ink)
+            // finish buffering and redrawing before receiving the Enter submission.
+            std::thread::sleep(std::time::Duration::from_millis(30));
             pty.write_bytes(b"\r")?;
         }
         *self.state.lock() = WorkerState::Running;
