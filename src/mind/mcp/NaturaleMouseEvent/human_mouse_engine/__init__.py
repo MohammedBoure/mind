@@ -12,10 +12,7 @@ from .human_mouse import (
     MemoryConditionedMouseGenerator,
     ExtendedConditioningEncoder,
     KinematicDecoder,
-    ActionHead,
-    ContinuousTremorGenerator,
     sample_target_within_box,
-    compute_terminal_momentum,
     PYAUTOGUI_AVAILABLE,
 )
 
@@ -26,9 +23,6 @@ __all__ = [
     "MemoryConditionedMouseGenerator",
     "ExtendedConditioningEncoder",
     "KinematicDecoder",
-    "ActionHead",
-    "ContinuousTremorGenerator",
     "sample_target_within_box",
-    "compute_terminal_momentum",
     "PYAUTOGUI_AVAILABLE",
 ]

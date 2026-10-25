@@ -1,9 +1,9 @@
 """AI-powered Natural Human Mouse Movement Controller and MCP integration wrapper.
 
 Wraps the PyTorch-based NaturaleMouseEvent / human_mouse_engine with safe fallbacks
-for headless Linux environments (absence of DISPLAY / WAYLAND_DISPLAY) and missing
-GUI libraries, providing both authentic AI-generated trajectories and high-fidelity
-biomechanical kinematic simulations.
+for headless Linux environments and missing GUI libraries, while actively driving real
+display cursors via xdotool or PyAutoGUI when an active display server (e.g. DISPLAY=:0)
+is available.
 """
 
 from __future__ import annotations
@@ -14,6 +14,9 @@ import logging
 import math
 import os
 import random
+import re
+import shutil
+import subprocess
 import sys
 import time
 from typing import Any, Sequence
@@ -33,39 +36,147 @@ except Exception:
     pyautogui = None
 
 
+def find_xdotool() -> str | None:
+    """Locate the xdotool executable on the system."""
+    for candidate in [
+        os.environ.get("XDOTOOL_PATH", ""),
+        "/home/pluto/.local/bin/xdotool",
+        "/usr/bin/xdotool",
+        shutil.which("xdotool") or "",
+    ]:
+        if candidate and os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def ensure_display_environment() -> str | None:
+    """Ensure Linux display environment variables are configured if an X11 socket exists."""
+    if not sys.platform.startswith("linux"):
+        return os.environ.get("DISPLAY")
+
+    display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    if display:
+        return display
+
+    for display_num in range(4):
+        socket_path = f"/tmp/.X11-unix/X{display_num}"
+        if os.path.exists(socket_path):
+            auto_display = f":{display_num}"
+            os.environ["DISPLAY"] = auto_display
+            logger.debug("Auto-configured Linux DISPLAY to %s", auto_display)
+            return auto_display
+
+    return None
+
+
 def is_headless_environment() -> bool:
     """Detect whether current execution environment is running without an active display server."""
+    disp = ensure_display_environment()
     if sys.platform.startswith("linux"):
-        display = os.environ.get("DISPLAY")
-        wayland = os.environ.get("WAYLAND_DISPLAY")
-        if not display and not wayland:
+        if not disp:
             return True
+        tool = find_xdotool()
+        if tool:
+            try:
+                res = subprocess.run(
+                    [tool, "getmouselocation"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                    check=False,
+                )
+                if res.returncode == 0:
+                    return False
+            except Exception:
+                pass
+        return not bool(disp)
     return False
+
+
+def query_live_mouse_position(xdotool_path: str | None = None) -> tuple[float, float] | None:
+    """Query current mouse coordinates from active display server via pyautogui or xdotool."""
+    if PYAUTOGUI_AVAILABLE and pyautogui is not None:
+        try:
+            pos = pyautogui.position()
+            return float(pos[0]), float(pos[1])
+        except Exception:
+            pass
+
+    tool = xdotool_path or find_xdotool()
+    if tool:
+        try:
+            res = subprocess.run(
+                [tool, "getmouselocation"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            if res.returncode == 0:
+                m_x = re.search(r"x:(\d+)", res.stdout)
+                m_y = re.search(r"y:(\d+)", res.stdout)
+                if m_x and m_y:
+                    return float(m_x.group(1)), float(m_y.group(1))
+        except Exception:
+            pass
+    return None
+
+
+def query_screen_geometry(xdotool_path: str | None = None) -> tuple[float, float]:
+    """Query screen resolution from active display server or return default 1920x1080."""
+    if PYAUTOGUI_AVAILABLE and pyautogui is not None:
+        try:
+            w, h = pyautogui.size()
+            return float(w), float(h)
+        except Exception:
+            pass
+
+    tool = xdotool_path or find_xdotool()
+    if tool:
+        try:
+            res = subprocess.run(
+                [tool, "getdisplaygeometry"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                parts = res.stdout.strip().split()
+                if len(parts) >= 2:
+                    return float(parts[0]), float(parts[1])
+        except Exception:
+            pass
+    return 1920.0, 1080.0
 
 
 class NaturalMouseController:
     """High-level AI Natural Mouse Controller with dynamic neural and kinematic fallback."""
 
     def __init__(self, model_path: str | None = None, dry_run: bool | None = None) -> None:
+        ensure_display_environment()
+        self.xdotool_path = find_xdotool()
         self.headless = is_headless_environment()
-        self.dry_run = self.headless if dry_run is None else dry_run
+
+        # Do NOT fall back to dry-run when display is present and xdotool or pyautogui is available
+        if dry_run is not None:
+            self.dry_run = dry_run
+        else:
+            can_live_drive = (not self.headless) and (PYAUTOGUI_AVAILABLE or (self.xdotool_path is not None))
+            self.dry_run = not can_live_drive
+
         self.screen_w = 1920.0
         self.screen_h = 1080.0
         self.virtual_pos = [960.0, 540.0]
         self.engine_type = "pure_kinematics"
         self._human_mouse = None
 
-        # Resolve screen resolution if display server is available
-        if PYAUTOGUI_AVAILABLE and not self.dry_run:
-            try:
-                w, h = pyautogui.size()
-                self.screen_w = float(w)
-                self.screen_h = float(h)
-                pos = pyautogui.position()
-                self.virtual_pos = [float(pos[0]), float(pos[1])]
-            except Exception as exc:
-                logger.debug("Failed querying display size, falling back to dry-run: %s", exc)
-                self.dry_run = True
+        # Resolve screen resolution & starting position if display is available
+        if not self.dry_run:
+            self.screen_w, self.screen_h = query_screen_geometry(self.xdotool_path)
+            live_pos = query_live_mouse_position(self.xdotool_path)
+            if live_pos is not None:
+                self.virtual_pos = [live_pos[0], live_pos[1]]
 
         # Attempt to load PyTorch neural HumanMouse engine
         self._init_neural_engine(model_path)
@@ -73,7 +184,6 @@ class NaturalMouseController:
     def _init_neural_engine(self, model_path: str | None) -> None:
         """Attempt to initialize the PyTorch HumanMouse engine from NaturaleMouseEvent."""
         try:
-            # Add package search paths
             base_dir = os.path.dirname(os.path.abspath(__file__))
             nat_dir = os.path.join(base_dir, "NaturaleMouseEvent")
             engine_dir = os.path.join(nat_dir, "human_mouse_engine")
@@ -96,15 +206,22 @@ class NaturalMouseController:
                         resolved_model = c
                         break
 
+            # HumanMouse handles neural trajectory generation; physical execution is routed
+            # safely by NaturalMouseController (using xdotool or PyAutoGUI)
             self._human_mouse = HumanMouse(
                 model_path=resolved_model,
                 failsafe=True,
-                dry_run=self.dry_run,
+                dry_run=True,  # Trajectory generator only, NaturalMouseController manages execution
             )
             self.screen_w = float(self._human_mouse.screen_w)
             self.screen_h = float(self._human_mouse.screen_h)
-            pos = self._human_mouse.get_current_position()
-            self.virtual_pos = [float(pos[0]), float(pos[1])]
+
+            if not self.dry_run:
+                live_pos = query_live_mouse_position(self.xdotool_path)
+                if live_pos:
+                    self.virtual_pos = [live_pos[0], live_pos[1]]
+                    self._human_mouse._virtual_pos = (int(live_pos[0]), int(live_pos[1]))
+
             self.engine_type = "pytorch_neural_engine"
             logger.info("NaturalMouseController initialized with PyTorch neural engine.")
         except Exception as exc:
@@ -114,18 +231,10 @@ class NaturalMouseController:
 
     def get_position(self) -> dict[str, Any]:
         """Return current mouse position and execution state."""
-        if self._human_mouse is not None and not self.dry_run and PYAUTOGUI_AVAILABLE:
-            try:
-                pos = self._human_mouse.get_current_position()
-                self.virtual_pos = [float(pos[0]), float(pos[1])]
-            except Exception:
-                pass
-        elif PYAUTOGUI_AVAILABLE and not self.dry_run:
-            try:
-                pos = pyautogui.position()
-                self.virtual_pos = [float(pos[0]), float(pos[1])]
-            except Exception:
-                pass
+        if not self.dry_run:
+            live_pos = query_live_mouse_position(self.xdotool_path)
+            if live_pos is not None:
+                self.virtual_pos = [live_pos[0], live_pos[1]]
 
         return {
             "status": "success",
@@ -208,6 +317,34 @@ class NaturalMouseController:
 
         return trajectory
 
+    def _execute_glide_live(self, trajectory: list[dict[str, Any]]) -> None:
+        """Step smoothly through trajectory waypoints on live display using xdotool or PyAutoGUI."""
+        if not trajectory:
+            return
+
+        if PYAUTOGUI_AVAILABLE and pyautogui is not None:
+            for pt in trajectory:
+                pyautogui.moveTo(int(round(pt["x"])), int(round(pt["y"])))
+                dt = pt.get("dt_ms", 0.0) / 1000.0
+                if dt > 0:
+                    time.sleep(dt)
+            return
+
+        if self.xdotool_path:
+            # Step through Savitzky-Golay / neural trajectory waypoints so cursor visibly glides
+            total_steps = len(trajectory)
+            stride = max(1, total_steps // 32) if total_steps > 32 else 1
+            sample_points = [trajectory[i] for i in range(0, total_steps - 1, stride)]
+            sample_points.append(trajectory[-1])  # Ensure exact landing target
+
+            for idx, pt in enumerate(sample_points):
+                px = int(round(pt["x"]))
+                py = int(round(pt["y"]))
+                dt = max(0.006, pt.get("dt_ms", 8.0) * stride / 1000.0)
+                subprocess.run([self.xdotool_path, "mousemove", str(px), str(py)], check=False)
+                if idx < len(sample_points) - 1:
+                    time.sleep(min(0.035, dt))
+
     async def move(
         self,
         target_x: float,
@@ -215,6 +352,12 @@ class NaturalMouseController:
         duration_ms: float | None = None,
     ) -> dict[str, Any]:
         """Move cursor naturally from current position to target coordinates."""
+        # Query latest live position if available
+        if not self.dry_run:
+            live_pos = query_live_mouse_position(self.xdotool_path)
+            if live_pos is not None:
+                self.virtual_pos = [live_pos[0], live_pos[1]]
+
         start_x, start_y = self.virtual_pos[0], self.virtual_pos[1]
         dist = math.hypot(target_x - start_x, target_y - start_y)
         start_time = time.perf_counter()
@@ -232,20 +375,17 @@ class NaturalMouseController:
                     for s in traj[1:]:
                         s["dt_ms"] *= scale
 
-                if not self.dry_run and PYAUTOGUI_AVAILABLE:
-                    await asyncio.to_thread(self._human_mouse._execute_trajectory, traj)
+                if not self.dry_run:
+                    await asyncio.to_thread(self._execute_glide_live, traj)
             except Exception as exc:
                 logger.debug("Neural move execution failed (%s), fallback to kinematic.", exc)
                 traj = self._generate_kinematic_trajectory(start_x, start_y, target_x, target_y, duration_ms)
+                if not self.dry_run:
+                    await asyncio.to_thread(self._execute_glide_live, traj)
         else:
             traj = self._generate_kinematic_trajectory(start_x, start_y, target_x, target_y, duration_ms)
-            if not self.dry_run and PYAUTOGUI_AVAILABLE:
-                def _exec():
-                    for pt in traj:
-                        pyautogui.moveTo(int(pt["x"]), int(pt["y"]))
-                        if pt["dt_ms"] > 0:
-                            time.sleep(pt["dt_ms"] / 1000.0)
-                await asyncio.to_thread(_exec)
+            if not self.dry_run:
+                await asyncio.to_thread(self._execute_glide_live, traj)
 
         # Update persistent virtual position
         self.virtual_pos = [float(target_x), float(target_y)]
@@ -284,13 +424,21 @@ class NaturalMouseController:
         click_count = max(1, int(clicks))
         move_result = await self.move(target_x, target_y)
 
-        # Perform click action
-        if not self.dry_run and PYAUTOGUI_AVAILABLE:
+        # Perform click action on display
+        if not self.dry_run:
             def _do_click():
-                for c in range(click_count):
-                    pyautogui.click(button=clean_button)
-                    if c < click_count - 1:
-                        time.sleep(random.uniform(0.06, 0.12))  # Authentic inter-click latency
+                if PYAUTOGUI_AVAILABLE and pyautogui is not None:
+                    for c in range(click_count):
+                        pyautogui.click(button=clean_button)
+                        if c < click_count - 1:
+                            time.sleep(random.uniform(0.06, 0.12))
+                elif self.xdotool_path:
+                    btn_map = {"left": "1", "middle": "2", "right": "3"}
+                    btn_num = btn_map.get(clean_button, "1")
+                    subprocess.run(
+                        [self.xdotool_path, "click", "--repeat", str(click_count), "--delay", "90", btn_num],
+                        check=False,
+                    )
             await asyncio.to_thread(_do_click)
 
         return {
@@ -315,7 +463,6 @@ class NaturalMouseController:
         """Execute a fluid multi-target sequence with kinematic momentum chaining."""
         parsed_targets: list[tuple[float, float]] = []
 
-        # Parse arbitrary sequence formats (tuples, lists, dicts)
         for item in coordinates:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
                 parsed_targets.append((float(item[0]), float(item[1])))
@@ -343,8 +490,13 @@ class NaturalMouseController:
             total_duration_ms += res.get("duration_ms", 0.0)
 
             if click_targets:
-                if not self.dry_run and PYAUTOGUI_AVAILABLE:
-                    await asyncio.to_thread(pyautogui.click)
+                if not self.dry_run:
+                    if PYAUTOGUI_AVAILABLE and pyautogui is not None:
+                        await asyncio.to_thread(pyautogui.click)
+                    elif self.xdotool_path:
+                        await asyncio.to_thread(
+                            lambda: subprocess.run([self.xdotool_path, "click", "1"], check=False)
+                        )
 
             step_results.append({
                 "target": {"x": round(tx, 2), "y": round(ty, 2)},

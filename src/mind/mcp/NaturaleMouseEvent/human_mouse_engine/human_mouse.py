@@ -1206,6 +1206,8 @@ class HumanMouse:
             results.append(traj)
         return results
 
+apply_biomechanical_kinematic_filter = HumanMouse.apply_biomechanical_kinematic_filter
+
 if __name__ == '__main__':
     print("Testing self-contained HumanMouse module dry-run...")
     mouse = HumanMouse()

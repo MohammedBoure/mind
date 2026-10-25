@@ -1,6 +1,17 @@
 """Model Context Protocol (MCP) server layer for the mind orchestrator."""
 
 try:
+    from mind.mcp.keyboard import (
+        KeyboardController,
+        get_keyboard_controller,
+        reset_keyboard_controller,
+    )
+except ImportError:
+    KeyboardController = None  # type: ignore[assignment, misc]
+    get_keyboard_controller = None  # type: ignore[assignment]
+    reset_keyboard_controller = None  # type: ignore[assignment]
+
+try:
     from mind.mcp.natural_mouse import (
         NaturalMouseController,
         get_natural_mouse_controller,
@@ -40,6 +51,7 @@ from mind.mcp.vision_capture import (
 
 __all__ = [
     "GridCalibration",
+    "KeyboardController",
     "MCPServerRunner",
     "MonitorGeometry",
     "NaturalMouseController",
@@ -52,12 +64,14 @@ __all__ = [
     "encode_vision_capture",
     "generate_mock_screen",
     "get_default_mcp_server",
+    "get_keyboard_controller",
     "get_mouse_position",
     "get_natural_mouse_controller",
     "get_screen_geometry",
     "is_display_available",
     "is_headless_environment",
     "reset_default_mcp_server",
+    "reset_keyboard_controller",
     "reset_natural_mouse_controller",
     "run_stdio_mcp_server",
     "run_stdio_mcp_server_async",

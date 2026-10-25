@@ -16,6 +16,9 @@ Exposes lightweight asyncio-native orchestration tools for the primary coordinat
 - `natural_mouse_click`: Natural mouse targeting and click action.
 - `natural_mouse_sequence`: Multi-target kinematic momentum chained path execution.
 - `get_mouse_position`: Query current live or simulated mouse cursor coordinates.
+- `keyboard_type`: Type text with natural human cadence and full Arabic/Unicode support.
+- `keyboard_press`: Press an individual keyboard key.
+- `keyboard_hotkey`: Trigger a keyboard hotkey combination.
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ try:
     from mind.mcp import natural_mouse
 except ImportError:
     natural_mouse = None  # type: ignore[assignment]
+
+try:
+    from mind.mcp import keyboard
+except ImportError:
+    keyboard = None  # type: ignore[assignment]
 
 logger = logging.getLogger("mind.mcp")
 
@@ -715,6 +723,60 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             """
             controller = natural_mouse.get_natural_mouse_controller()
             return controller.get_position()
+
+    if keyboard is not None:
+        # ── Tool 16: keyboard_type ────────────────────────────────────────
+        @server.tool()
+        async def keyboard_type(
+            text: str,
+            wpm: int = 75,
+            natural_delay: bool = True,
+        ) -> dict[str, Any]:
+            """Type text with authentic human cadence, keystroke jitter, and seamless Arabic/Unicode support.
+
+            Supports natural typing cadence with realistic human keystroke jitter (~60-90 WPM,
+            60-120ms between characters). On Linux X11 displays, injects Arabic and Unicode text
+            seamlessly into the focused window without character corruption or layout mismatch.
+            Provides safe simulation in headless environments.
+
+            Args:
+                text: Text string to type (supports full Arabic and Unicode text).
+                wpm: Typing speed in words per minute (default: 75 WPM).
+                natural_delay: Whether to introduce authentic neuromuscular jitter between keystrokes (default: True).
+
+            Returns:
+                Dictionary with characters typed, WPM, duration, and simulation/execution status.
+            """
+            controller = keyboard.get_keyboard_controller()
+            return await controller.type_text(text=text, wpm=wpm, natural_delay=natural_delay)
+
+        # ── Tool 17: keyboard_press ───────────────────────────────────────
+        @server.tool()
+        async def keyboard_press(key: str) -> dict[str, Any]:
+            """Press an individual keyboard key (e.g. 'Return', 'Tab', 'Escape', 'BackSpace', 'space', 'Up', 'Down').
+
+            Args:
+                key: Key name to press ('Return'/'enter', 'Tab', 'Escape'/'esc', 'BackSpace', 'space', 'Up', 'Down', etc.).
+
+            Returns:
+                Dictionary containing key pressed, normalized keysym, and execution details.
+            """
+            controller = keyboard.get_keyboard_controller()
+            return await controller.press_key(key=key)
+
+        # ── Tool 18: keyboard_hotkey ──────────────────────────────────────
+        @server.tool()
+        async def keyboard_hotkey(keys: list[str]) -> dict[str, Any]:
+            """Trigger a keyboard hotkey combination (e.g. ['ctrl', 'c'], ['alt', 'tab'], ['ctrl', 'shift', 't']).
+
+            Args:
+                keys: List of key combinations to trigger in sequence (e.g. ['ctrl', 'c'], ['ctrl', 'v'], ['alt', 'tab']).
+
+            Returns:
+                Dictionary with hotkey combination triggered, keys list, and execution details.
+            """
+            controller = keyboard.get_keyboard_controller()
+            return await controller.hotkey(keys=keys)
 
     return server
 
