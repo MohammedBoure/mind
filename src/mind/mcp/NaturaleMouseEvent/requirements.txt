@@ -1,0 +1,15 @@
+# Core Deep Learning & Kinematic Modeling
+torch>=2.0.0
+
+# Scientific & Numerical Computation
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Mouse Control & Hardware Automation
+pyautogui>=0.9.54
+
+# Progress Bars & Training Utilities
+tqdm>=4.65.0
+
+# Trajectory Visualization & Plotting
+matplotlib>=3.7.0

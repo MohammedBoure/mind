@@ -1,0 +1,25 @@
+{
+  "dataset_name": "NaturaleMouseEvent Fixed N=256 Unified Telemetry Dataset",
+  "total_files_processed": 12,
+  "total_raw_events": 8335207,
+  "total_raw_episodes": 60518,
+  "total_retained_episodes": 53028,
+  "max_horizon_N": 256,
+  "rejection_breakdown": {
+    "<15 steps": 11359,
+    "<30px displacement": 10538,
+    "orthogonal grid artifact": 438,
+    "flat 1D line": 1055,
+    "time anomalies": 0
+  },
+  "mean_duration_sec": 2.1015741122557894,
+  "median_duration_sec": 1.4483188500000002,
+  "mean_steps": 126.38558874556838,
+  "median_steps": 104.0,
+  "action_distribution": {
+    "move_0": 6571391,
+    "button_down_1": 44927,
+    "button_up_2": 44666,
+    "scroll_3": 40991
+  }
+}
