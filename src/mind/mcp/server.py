@@ -10,6 +10,12 @@ Exposes lightweight asyncio-native orchestration tools for the primary coordinat
 - `notify_coordinator_worker_idle`: Coordinator notification when worker finishes.
 - `notify_coordinator_help`: Urgent assistance alarm for coordinator.
 - `check_coordinator_alarms`: Retrieve unread coordinator alarms.
+- `capture_screen_with_grid`: Capture screen with calibrated numbered coordinate grid overlay for Vision LLMs.
+- `get_screen_geometry`: Inspect display dimensions, monitors, and headless state.
+- `natural_mouse_move`: Biomechanically authentic human-like mouse movement.
+- `natural_mouse_click`: Natural mouse targeting and click action.
+- `natural_mouse_sequence`: Multi-target kinematic momentum chained path execution.
+- `get_mouse_position`: Query current live or simulated mouse cursor coordinates.
 """
 
 from __future__ import annotations
@@ -28,6 +34,12 @@ except ImportError:
 
 from mind.core.terminal_manager import TerminalManager, WorkerSession
 from mind.core.usage_monitor import UsageMonitor
+from mind.mcp import vision_capture
+
+try:
+    from mind.mcp import natural_mouse
+except ImportError:
+    natural_mouse = None  # type: ignore[assignment]
 
 logger = logging.getLogger("mind.mcp")
 
@@ -456,6 +468,158 @@ def create_mcp_server(manager: TerminalManager | None = None) -> FastMCP:
             List of alarm event dictionaries queued for the coordinator.
         """
         return mgr.get_coordinator_alarms()
+
+    # ── Tool 10: capture_screen_with_grid ─────────────────────────────
+    @server.tool()
+    async def capture_screen_with_grid(
+        grid_step: int = 100,
+        show_axes: bool = True,
+        output_format: str = "base64",
+        quality: int = 85,
+        monitor: int = 0,
+        image_format: str = "jpeg",
+        show_badges: bool = True,
+        target: str = "",
+    ) -> dict[str, Any]:
+        """Capture the screen with a calibrated numbered coordinate grid overlay for Vision LLMs.
+
+        Designed specifically for Vision models (e.g. Gemini Vision, Claude 3.5 Sonnet, GPT-4o)
+        to perceive the screen and accurately locate coordinates for autonomous mouse control.
+
+        Args:
+            grid_step: Pixel distance between grid lines (default: 100px).
+            show_axes: Whether to render coordinate rulers along top (X) and left (Y) borders (default: True).
+            output_format: Output format ('base64', 'file', or 'both'). Default: 'base64'.
+            quality: Compression quality for JPEG output (1-100, default: 85).
+            monitor: Monitor index (0 = entire virtual screen, 1 = primary monitor, 2 = secondary).
+            image_format: Image file format ('jpeg' or 'png', default: 'jpeg').
+            show_badges: Whether to render coordinate badges at major intersections (default: True).
+            target: Optional alias or filter tag.
+
+        Returns:
+            Dictionary containing encoded image data (base64 data URL and/or saved file path),
+            screen dimensions, calibration metadata, grid step, and display status.
+        """
+        return await asyncio.to_thread(
+            vision_capture.capture_screen_with_grid,
+            grid_step=grid_step,
+            show_axes=show_axes,
+            output_format=output_format,
+            quality=quality,
+            monitor=monitor,
+            image_format=image_format,
+            show_badges=show_badges,
+        )
+
+    # ── Tool 11: get_screen_geometry ──────────────────────────────────
+    @server.tool()
+    async def get_screen_geometry(target: str = "") -> dict[str, Any]:
+        """Inspect display geometry, monitor layout, screen resolution, and headless status.
+
+        Args:
+            target: Optional target selector.
+
+        Returns:
+            Dictionary containing overall virtual screen width and height, list of active monitors
+            with bounding coordinates, primary monitor index, display name, and headless flag.
+        """
+        return await asyncio.to_thread(vision_capture.get_screen_geometry)
+
+    if natural_mouse is not None:
+        # ── Tool 12: natural_mouse_move ───────────────────────────────────
+        @server.tool()
+        async def natural_mouse_move(
+            target_x: float,
+            target_y: float,
+            duration_ms: float | None = None,
+        ) -> dict[str, Any]:
+            """Move the mouse cursor smoothly and naturally to (target_x, target_y) using AI kinematics.
+
+            Generates biologically authentic human-like trajectories modeled after neuromuscular
+            kinematics (Savitzky-Golay smoothing, Fitts's Law duration allocation, quintic onset inertia,
+            and continuous Ornstein-Uhlenbeck micro-tremors). Operates safely in headless Linux
+            environments (simulation/dry-run mode) without crashing.
+
+            Args:
+                target_x: Target screen X coordinate in pixels.
+                target_y: Target screen Y coordinate in pixels.
+                duration_ms: Optional total duration for the movement in milliseconds (default: dynamic Fitts's Law).
+
+            Returns:
+                Dictionary with move metadata, starting and ending coordinates, step count, duration,
+                and simulation status.
+            """
+            controller = natural_mouse.get_natural_mouse_controller()
+            return await controller.move(target_x=target_x, target_y=target_y, duration_ms=duration_ms)
+
+        # ── Tool 13: natural_mouse_click ──────────────────────────────────
+        @server.tool()
+        async def natural_mouse_click(
+            target_x: float,
+            target_y: float,
+            button: str = "left",
+            clicks: int = 1,
+        ) -> dict[str, Any]:
+            """Move the mouse cursor naturally to (target_x, target_y) and perform authentic human click(s).
+
+            Combines AI-powered trajectory generation with realistic neuromuscular click timing,
+            including authentic inter-click latency and button dispatch. Operates safely in headless
+            Linux environments (simulation/dry-run mode).
+
+            Args:
+                target_x: Target screen X coordinate in pixels.
+                target_y: Target screen Y coordinate in pixels.
+                button: Mouse button to click ('left', 'right', or 'middle', default: 'left').
+                clicks: Number of clicks to perform (default: 1, use 2 for double-click).
+
+            Returns:
+                Dictionary containing target coordinates, button clicked, click count, trajectory steps,
+                and execution details.
+            """
+            controller = natural_mouse.get_natural_mouse_controller()
+            return await controller.click(target_x=target_x, target_y=target_y, button=button, clicks=clicks)
+
+        # ── Tool 14: natural_mouse_sequence ───────────────────────────────
+        @server.tool()
+        async def natural_mouse_sequence(
+            coordinates: list[Any],
+            delay_between: float = 0.2,
+            click_targets: bool = False,
+        ) -> dict[str, Any]:
+            """Execute a continuous sequence of natural mouse movements across multiple waypoints.
+
+            Applies kinematic momentum chaining to transition fluidly between consecutive waypoints
+            without unnatural sharp stops or robotic angular bends.
+
+            Args:
+                coordinates: List of target coordinates to visit in sequence (e.g. [[400, 300], [800, 500]]).
+                delay_between: Dwell/pause time in seconds between waypoints (default: 0.2s).
+                click_targets: Whether to trigger a click upon reaching each waypoint (default: False).
+
+            Returns:
+                Dictionary with sequence statistics, visited waypoints, total trajectory steps,
+                accumulated duration, and final landing coordinate.
+            """
+            controller = natural_mouse.get_natural_mouse_controller()
+            return await controller.sequence(
+                coordinates=coordinates,
+                delay_between=delay_between,
+                click_targets=click_targets,
+            )
+
+        # ── Tool 15: get_mouse_position ───────────────────────────────────
+        @server.tool()
+        async def get_mouse_position() -> dict[str, Any]:
+            """Retrieve the current mouse cursor coordinates and execution mode.
+
+            In live environments, queries the active display server cursor position.
+            In headless environments, returns the tracked persistent virtual cursor position.
+
+            Returns:
+                Dictionary with current 'x', 'y' coordinates, dry_run status, and execution engine.
+            """
+            controller = natural_mouse.get_natural_mouse_controller()
+            return controller.get_position()
 
     return server
 
