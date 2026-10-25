@@ -136,6 +136,9 @@ impl WorkerSession {
         let pty = self.pty.lock();
         pty.write_str(text)?;
         if press_enter {
+            // A small 20ms delay ensures interactive terminal line editors (e.g. readline/rustyline/ink)
+            // finish buffering and redrawing the text before receiving the Enter key submission.
+            std::thread::sleep(std::time::Duration::from_millis(20));
             pty.write_bytes(b"\r")?;
         }
         *self.state.lock() = WorkerState::Running;

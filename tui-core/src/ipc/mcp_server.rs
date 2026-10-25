@@ -63,13 +63,13 @@ impl EmbeddedMcpServer {
             },
             McpTool {
                 name: "send_terminal_input".to_string(),
-                description: Some("Send raw input/commands directly to worker stdin.".to_string()),
+                description: Some("Send input or commands directly to a worker terminal. By default, executes immediately by pressing Enter.".to_string()),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "worker_id": { "type": "string" },
-                        "text": { "type": "string" },
-                        "press_enter": { "type": "boolean", "default": true }
+                        "worker_id": { "type": "string", "description": "Worker ID, slot ID (e.g. 'agy11'), or tab number" },
+                        "text": { "type": "string", "description": "The command or prompt text to send" },
+                        "press_enter": { "type": "boolean", "default": true, "description": "Press Enter immediately to submit and execute the prompt (default: true)" }
                     },
                     "required": ["worker_id", "text"]
                 }),
