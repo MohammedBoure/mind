@@ -87,8 +87,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Mode: Interactive Session Picker Screen (`agi picker`, `agi --picker`)
-    if subcmd == "picker" || args.iter().any(|a| a == "--picker") {
+    // Mode: Interactive Session Picker Screen (`agi picker`, `agi --picker`, `agi -p`)
+    if subcmd == "picker" || args.iter().any(|a| a == "--picker" || a == "-p") {
         run_tui_app(None, true).await?;
         return Ok(());
     }
