@@ -22,7 +22,7 @@ Whenever you receive a feature request, project specification, or architecture t
 ## 3. High-Level Governance
 - Maintain a high-level strategic perspective.
 - Let backend and frontend workers write code and run build scripts.
-- Let testing agents verify deliverables before merging into `develop`.
+- Let testing agents verify deliverables before merging into `develop`, utilizing the vision grid capture and natural mouse MCP tools (`.agent/agy100.md`) for automated visual and UI validation.
 
 ## 4. Direct Inter-Agent Messaging & Routing Instructions
 Whenever the user asks you to send a message, instruction, or prompt to any agent (such as `agy51`, `agy11`, `worker-2`, etc.):
