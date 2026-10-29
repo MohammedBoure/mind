@@ -1,4 +1,4 @@
-# Python
+# Python (legacy)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -28,3 +28,8 @@ Thumbs.db
 
 # Tests
 .pytest_cache/
+
+# Rust
+/target/
+target/
+**/*.rs.bk

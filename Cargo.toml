@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "tui-core",
+]
+default-members = ["tui-core"]
+resolver = "2"

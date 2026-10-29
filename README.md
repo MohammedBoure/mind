@@ -1,202 +1,136 @@
-# mind
+# `mind` (`agi`)
 
-> **AI Multi-Agent Orchestration TUI** — A high-performance terminal user interface and MCP bridge for managing, monitoring, and steering multi-agent AI sessions running `agy` CLI agents.
+> **Autonomous Multi-Agent AI Orchestration Engine & High-Performance Terminal Interface** — Built in Rust with Tokio, Ratatui, Portable-PTY, and FastMCP.
+
+---
+
+> [!NOTE]
+> **Python Implementation Preservation**: The original Python implementation (`src/mind`) has been cleanly separated and fully preserved on the dedicated branch [`python-version`](https://github.com/MohammedBoure/mind/tree/python-version). The `main` branch is now centered on the native compiled Rust engine (`tui-core` / `agi`) for sub-millisecond event loops, zero-polling PTY multiplexing, and robust multi-agent orchestration without Python GIL bottlenecks.
+
+---
+
+## Architecture & Fleet Orchestration
+
+`mind` transforms a developer workstation into a 200-agent autonomous software engineering fleet. Each agent operates inside an unprivileged Linux **Bubblewrap (`bwrap`)** sandbox with dedicated environment tokens and history while mounting the shared project repository.
+
+```
++-----------------------------------------------------------------------------+
+|                          mind / agi: Native Core                            |
++-----------------------------------------------------------------------------+
+|                                  TuiEngine                                  |
+|   ├── SessionManager                                                        |
+|   │     ├── Coordinator Terminal (Slot 1..10)   -> PtyProcess -> Buffer     |
+|   │     ├── Worker Terminal      (Slot 11..50)  -> PtyProcess -> Buffer     |
+|   │     └── Worker Terminal      (Slot 51..200) -> PtyProcess -> Buffer     |
+|   ├── EventLoop (Tokio async stream)                                        |
+|   │     ├── Crossterm Events (Keys, Mouse, Window Resize)                   |
+|   │     ├── Portable-PTY Streams (<1ms async channel)                       |
+|   │     └── FastMCP Coordinator Alarms & Wakeup Bus                         |
+|   └── Theme & Accessibility System (Tokyo Night, WCAG AAA High Contrast)     |
++-----------------------------------------------------------------------------+
+                                       |
+                   Bubblewrap Sandboxed Agent Fleet (`agys`)
+             [ agy1: Orchestrator | agy11: Backend | agy100: Gatekeeper ]
+                                       |
+                       Shared Git Project Repository
+```
+
+---
+
+## Comprehensive Workstation Setup Guide
+
+For complete, step-by-step instructions on configuring host dependencies, setting up Bubblewrap sandboxing, managing agent tokens, and configuring the 200-agent deterministic fleet, see:
+
+👉 **[`docs/ENVIRONMENT_SETUP_AND_AGENT_FLEET.md`](file:///home/pluto/projects/mind/docs/ENVIRONMENT_SETUP_AND_AGENT_FLEET.md)**
 
 ---
 
 ## Features
 
-- **Session Picker** — Browse, create, and launch agent workspaces interactively.
-- **PTY Terminal Multiplexing** — Each worker tab runs a real, interactive terminal session running `agy` (on Windows via `pywinpty` / ConPTY, on Unix/Linux via `ptyprocess` / `termios`).
-- **Virtual Screen Emulation** — In-memory, thread-safe 2D character matrix and ring buffer powered by `pyte` and `rich`.
-- **Embedded MCP Server (`mind-mcp`)** — Asyncio-native FastMCP server exposing high-performance tools to the primary coordinator agent:
-  - `list_workers()`: Inspect active worker tabs, agent IDs, process states, and linked account/slot details.
-  - `get_terminal_screen(worker_id, lines)`: Read rendered clean text from any worker terminal with version-tracked caching.
-  - `send_terminal_input(worker_id, text, press_enter)`: Send raw input/commands directly to worker stdin.
-  - `interrupt_and_inject(worker_id, sender_id, message, priority)`: Send SIGINT / Ctrl+C to pause ongoing agent actions, wait for prompt to settle, and inject formatted directives safely.
-  - `check_account_quotas(slot, as_json)`: Inspect accounts quota consumption, hourly/weekly remaining steps, and graphic progress bars.
-  - `notify_coordinator_worker_idle(worker_id, status_summary)`: Dispatch immediate wake-up alarms to the Primary Coordinator when a worker completes its task.
-  - `notify_coordinator_help(worker_id, reason, priority)`: Dispatch urgent assistance alarms (`🚨 Assistance Needed`) to the coordinator.
-  - `check_coordinator_alarms()`: Inspect queued wake-up alarms and worker completion events.
-  - `get_agent_profile(agent_id)`: Query agent role, principles, instructions, and `./agent` config.
-- **Event-Driven Coordinator Alarm Pipeline** — Single-threaded debounced watcher detecting worker transitions to IDLE prompts without CPU exhaustion or continuous timer churn, displaying visual header badges (`⚡ Worker-X Finished (Idle)` or `🚨 Assistance Needed`), and injecting event summaries into coordinator terminal for immediate reasoning.
-- **Externalized Directives & Hot-Reload** — Agent rules, roles, and instructions are persisted cleanly as Markdown files (`~/.mind/directives/coordinator.md` and `~/.mind/directives/workers/agy1.md` .. `agyN.md`). Includes an event-driven background file watcher with automatic hot-reloading upon external edits and direct shortcuts (`o` / `Ctrl+O` for external editor, `d` / `Ctrl+D` for in-app modal editor).
-- **Direct Interactive Control** — Switch tabs, click into any worker terminal, and type directly into `agy` at any time.
-- **Instant Visual Feedback** — MCP-injected directives immediately trigger visual toast badges and alert banners in the TUI.
+- **Compiled Native Speed** — Written in Rust with `tokio`, `ratatui`, `portable-pty`, and `crossterm`. Delivers sub-millisecond keystroke responsiveness and zero-polling async PTY multiplexing.
+- **Dual-Pane Vim Workspace** —
+  - **Left Pane**: Dedicated Primary Coordinator terminal (`agy1` .. `agy10`).
+  - **Right Pane**: Tabbed Worker Multiplexer with active tabs (`1..9`) and slot search modal (`agy1..200`).
+- **Namespace Sandboxing (`agys`)** — Unprivileged filesystem isolation per slot via `bwrap`. Independent `$HOME/.gemini`, separate shell history, and independent Google/Gemini token isolation with concurrency locks.
+- **Deterministic Domain Specialization** —
+  - `agy1` – `agy10`: Lead Orchestrators / Project Managers (`orchestrator`).
+  - `agy11` – `agy50`: Backend Logic & Systems Engineers (`backend`).
+  - `agy51` – `agy100`: Frontend & Interface Auditors (`frontend`).
+  - `agy101` – `agy150`: Quality Gatekeepers & Pragmatic Test Engineers (`test`).
+  - `agy151` – `agy200`: UX Finishing, Polish & Performance Specialists (`ux`).
+- **FastMCP & Non-Blocking Coordination** —
+  - `notify_coordinator_worker_idle`: Asynchronous completion alarms injected into the coordinator's event queue.
+  - `/btw`: Non-interruptive side-channel inquiries between peer workers.
+  - `/effort <level>`: Dynamic reasoning depth allocation before task dispatch.
+- **Collective Quota Monitoring** — Visual terminal dashboard inspecting hourly and weekly consumption fractions across all configured accounts (`agys --usage`).
 
 ---
 
-## Installation
+## Quickstart
 
-### Development Mode (Editable Install)
+### Prerequisites
 
-Install `mind` in editable mode using `pip`:
+- **Linux / POSIX** (Ubuntu 22.04+, Debian 12+, Fedora, Arch)
+- **Rust Toolchain**: 1.80+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- **Bubblewrap**: `sudo apt-get install -y bubblewrap`
+- **Build Essentials**: `sudo apt-get install -y build-essential pkg-config libssl-dev`
 
-```bash
-# Basic installation
-pip install -e .
-
-# Or including test dependencies (pytest, pytest-asyncio, anyio)
-pip install -e ".[test]"
-```
-
-Or using `uv`:
+### Compiling & Running `agi`
 
 ```bash
-uv pip install -e .
-```
+# Build optimized release binary from workspace root
+cargo build --release -p tui-core --bin agi
 
-After installation, the CLI entrypoint `mind` becomes available system-wide (defined via `project.scripts` in [`pyproject.toml`](file:///C:/Users/moham/Desktop/mind/pyproject.toml)).
+# Launch interactive TUI
+./target/release/agi
 
----
-
-## Usage
-
-```bash
-# Launch the session picker
-mind
-
-# Directly create and enter a new session
-mind new my_task
-
-# Run the MCP server over stdio (for stdio-based MCP clients)
-mind mcp
-
-# Automatically register the mind-mcp server with agy
-mind register-mcp --transport sse --port 8765
-
-# Inspect multi-account quota and consumption table
-mind usage
-mind -u
-
-# Export quota usage statistics as JSON
-mind usage --json
-
-# Run comprehensive system diagnostics
-mind doctor
-
-# Manage active and saved agent sessions
-mind sessions
-mind sessions --clean
+# Or run directly via Cargo
+cargo run --release -p tui-core --bin agi
 ```
 
 ---
 
-## Connecting the Primary Agent to `mind-mcp`
+## Vim Modal Navigation
 
-When `mind` launches a workspace, it boots the embedded MCP server in the background at:
-```
-http://127.0.0.1:8765/sse
-```
-
-To enable the primary coordinator agent running in `agy` to use `mind-mcp` tools, register it once:
-```bash
-agy mcp add mind-mcp http://127.0.0.1:8765/sse
-```
-Or run the built-in helper:
-```bash
-mind register-mcp
-```
-
----
-
-## Keyboard Shortcuts
-
-| Key | Action |
+| Mode / Key | Action |
 |---|---|
-| `q` | Quit the application |
-| `?` | Toggle keyboard shortcuts modal |
-| `Alt+1`..`Alt+5` | Fast tab switching to Worker N |
-| `Tab` / `Shift+Tab` | Cycle focus between panes |
-| `Click` inside terminal | Focus worker terminal and type directly |
-| `Ctrl+C` | Send interrupt signal to active terminal process |
-| `m` / `Ctrl+M` | Open Directive Injection Modal |
-| `o` / `Ctrl+O` | Open directive file in system default editor |
-| `d` / `Ctrl+D` | Open in-app directive editor modal (`DirectiveEditorModal`) |
-| `s` | Toggle split layout (side-by-side ↔ stacked) |
-| `n` | Add new worker agent tab dynamically |
-| `Escape` | Go back / dismiss modals |
+| **`NORMAL Mode`** | Default window navigation and slot management mode. |
+| `i`, `Enter`, `a` | Switch to **`PTY_INTERACT`** mode to pass raw scancodes to child terminal. |
+| `Tab` / `Shift+Tab` | Toggle focus between Primary Coordinator and active Worker pane. |
+| `1` .. `9` | Fast jump directly to Worker Tab #1 through Tab #9. |
+| `c` | Create a new worker tab. |
+| `x` | Close the currently focused worker tab. |
+| `w` | Open the **Worker Slot Selector Modal** (`agy1..200`) with live search. |
+| `?` | Toggle quick Help Modal. |
+| **`PTY_INTERACT Mode`** | Passes all keyboard inputs directly to the child pseudoterminal process. |
+| `Ctrl+B`, `F12`, `Esc Esc` | Exit `PTY_INTERACT` mode and return to `NORMAL` mode immediately. |
 
 ---
 
-## Architecture & Directory Structure
-
-`mind` is designed as a modular, cross-platform architecture supporting both Windows (ConPTY) and POSIX/Linux platforms:
+## Repository Structure
 
 ```
 mind/
-├── docs/                       # Technical architecture & specification documents
-├── pyproject.toml              # Build configuration, entrypoint scripts, and dependencies
-├── README.md                   # Project overview & documentation
-├── tasks.md                    # Roadmap & transformation plan
-├── scripts/                    # QA and integration scripts
-├── tests/                      # Automated test suite (pytest, anyio)
-├── tui-core/                   # High-performance compiled TUI core architecture (Rust, Tokio, Portable-PTY, Ratatui, MCP)
-└── src/
-    └── mind/                   # Root Python package
-        ├── app.py              # Root Textual App & screen lifecycle
-        ├── events.py           # Custom Textual messages
-        ├── cli/                # Command-line interface definitions
-        ├── core/               # PTY multiplexing, auth, buffer, and process orchestration
-        │   └── auth/           # Modular authentication, token validation & keyring backends
-        ├── mcp/                # Embedded Model Context Protocol server & runners
-        ├── state/              # Domain models, dataclasses, and mock state
-        └── ui/                 # Textual widgets, screens, styles, and modals
+├── docs/                               # Architecture and environment setup manuals
+│   ├── ENVIRONMENT_SETUP_AND_AGENT_FLEET.md  # Complete workstation setup & fleet guide
+│   ├── architecture_and_migration_guide.md   # Architectural specifications
+│   ├── auth_refactor_architecture.md         # Authentication engine specifications
+│   └── README.md                       # Documentation directory index
+├── tui-core/                           # Native compiled Rust engine
+│   ├── benches/                        # Performance and latency benchmark suites
+│   ├── src/                            # Tokio PTY loop, Ratatui UI, and SessionManager
+│   ├── tests/                          # Integration and E2E parity test suites
+│   ├── Cargo.toml                      # Crate manifest
+│   └── README.md                       # Detailed tui-core technical documentation
+├── Cargo.toml                          # Root Cargo workspace manifest
+├── Cargo.lock                          # Dependency lockfile
+├── agent_assignments.json              # Active fleet dispatch registry
+└── README.md                           # Main project overview
 ```
 
-### Primary Package Modules
-
-| Directory / File | Description & Purpose |
-|---|---|
-| [`pyproject.toml`](file:///C:/Users/moham/Desktop/mind/pyproject.toml) | Package metadata, build system configuration (Hatchling), CLI entrypoints (`mind = "mind.cli.main:main"`), cross-platform dependencies, and pytest configuration with `pythonpath = ["src"]`. |
-| [`tui-core/`](file:///home/pluto/projects/mind/tui-core/) | High-performance compiled TUI core engine in Rust with Tokio async event loop, cross-platform `portable-pty` process multiplexing, virtual screen buffer emulation (`ScreenBuffer` with ANSI parser and $O(1)$ version-tracked caching), and embedded MCP JSON-RPC 2.0 client/server bridge. |
-| [`src/mind/app.py`](file:///C:/Users/moham/Desktop/mind/src/mind/app.py) | Main application class (`MindApp`) managing screens and top-level lifecycle. |
-| [`src/mind/events.py`](file:///C:/Users/moham/Desktop/mind/src/mind/events.py) | Decoupled Textual event definitions for UI messaging. |
-| [`src/mind/cli/`](file:///C:/Users/moham/Desktop/mind/src/mind/cli/) | Click-based CLI entrypoints implementing `mind`, `mind new`, `mind mcp`, and `mind register-mcp`. |
-| [`src/mind/core/`](file:///C:/Users/moham/Desktop/mind/src/mind/core/) | Core infrastructure including pseudoterminal abstraction (`BasePtyProcess`), virtual terminal buffer (`TerminalBuffer`), dynamic agent discovery and slot isolation engine (`agent_discovery.py`), directives hot-reloading, account quota monitor (`usage_monitor.py`), and terminal manager orchestrator. |
-| [`src/mind/core/auth/`](file:///C:/Users/moham/Desktop/mind/src/mind/core/auth/) | Modular authentication system: BOM sanitization, token claim extraction, Windows Credential Manager & POSIX keyrings, mutex synchronization, and slot isolation. |
-| [`src/mind/mcp/`](file:///C:/Users/moham/Desktop/mind/src/mind/mcp/) | Embedded Model Context Protocol (MCP) server providing coordinator agent control tools via SSE and Stdio transports. |
-| [`src/mind/state/`](file:///C:/Users/moham/Desktop/mind/src/mind/state/) | Operational domain models, agent metadata, and state definitions. |
-| [`src/mind/ui/`](file:///C:/Users/moham/Desktop/mind/src/mind/ui/) | Complete Textual user interface: Tokyo Night styling (`styles.tcss`), Vim-mode workspace multiplexer, interactive PTY terminal widget, and modal dialogs. |
-| [`tests/`](file:///C:/Users/moham/Desktop/mind/tests/) | Full test suite covering auth isolation, directives, PTY multiplexing, MCP tools, and Vim navigation. |
-| [`docs/`](file:///C:/Users/moham/Desktop/mind/docs/) | In-depth technical specifications and architectural documentation. |
-
 ---
 
-## Cross-Platform PTY Abstraction
+## Branches
 
-`mind` supports seamless execution across Windows and Linux/POSIX environments:
-
-1. **Windows:**
-   - Employs Windows Pseudo Console (`ConPTY`) via `pywinpty`.
-   - Manages console handles, input scancodes, and UTF-8 escape sequences.
-2. **Linux & POSIX:**
-   - Employs native POSIX pseudo-terminals via `openpty`, `ptyprocess`, and the Python standard library `termios`.
-   - Full support for POSIX signals (`SIGINT`, `SIGTERM`, `SIGHUP`).
-3. **Process Safety:**
-   - Cross-platform process monitoring and zombie process prevention via `psutil`.
-
----
-
-## Testing
-
-The project uses `pytest` with `pytest-asyncio` and `anyio` for asynchronous testing in headless mode:
-
-```bash
-# Run the entire test suite
-pytest
-
-# Run tests with verbose output
-pytest -v
-
-# Run a specific test module
-pytest tests/test_vim_modal.py
-```
-
-The import path `pythonpath = ["src"]` configured in [`pyproject.toml`](file:///C:/Users/moham/Desktop/mind/pyproject.toml) ensures the package is resolved directly from source during testing.
-
----
-
-## License
-
-MIT
+- **`main`**: High-performance compiled native Rust architecture (`tui-core` / `agi`).
+- **[`python-version`](https://github.com/MohammedBoure/mind/tree/python-version)**: Full, standalone historical Python implementation (`src/mind`).
